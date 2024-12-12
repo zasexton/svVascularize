@@ -93,9 +93,12 @@ def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, 
 
     Examples
     --------
-    >>> import pyvista as pv
-    >>> boundary = pv.Circle()
-    >>> remeshed = remesh_surface_2d(boundary, hmax=0.1)
+    **Example 1: Using 2D Points**
+
+    .. code-block:: python
+        import pyvista as pv
+        boundary = pv.Circle()
+        remeshed = remesh_surface_2d(boundary, hmax=0.1)
     """
     #_mesh_ = pv.PolyData(pv_polydata_object.points, pv_polydata_object.faces)
     #pv.save_meshio("tmp.mesh", _mesh_)
@@ -388,11 +391,38 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
     This function utilizes the MMGS executable to perform remeshing. The MMG executables must be present in
     the appropriate directory for your operating system.
 
+    References
+    ----------
+    .. [1] Dapogny, C., Dobrzynski, C., & Frey, P. J. (2014). Three-dimensional adaptive domain
+           remeshing, implicit domain meshing, and applications to free and moving boundary
+           problems. *Journal of Computational Physics, 262*, 358-378. doi:10.1016/j.jcp.2014.01.005
+
     Examples
     --------
-    >>> import pyvista as pv
-    >>> sphere = pv.Sphere()
-    >>> remeshed_sphere = remesh_surface(sphere, hmax=0.05)
+    **Example 1: Remeshing a Circular Boundary**
+
+    .. code-block:: python
+
+        import pyvista as pv
+        boundary = pv.Circle()
+        remeshed = remesh_surface_2d(boundary, hmax=0.1)
+
+    **Example 2: Remeshing with Multiple Boundaries**
+
+    .. code-block:: python
+
+        import pyvista as pv
+        boundary1 = pv.Circle(radius=1.0)
+        boundary2 = pv.Circle(radius=0.5).translate([1, 1, 0])
+        remeshed = remesh_surface_2d([boundary1, boundary2], autofix=True)
+
+    **Example 3: Using Advanced MMG Parameters**
+
+    .. code-block:: python
+
+        import pyvista as pv
+        boundary = pv.Circle()
+        remeshed = remesh_surface_2d(boundary, hmax=0.2, hmin=0.05, hausd=0.01, verbosity=3)
     """
     _mesh_ = pv.PolyData(pv_polydata_object.points, pv_polydata_object.faces)
     pv.save_meshio("tmp.mesh", _mesh_)
