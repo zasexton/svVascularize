@@ -23,10 +23,25 @@ def test_m01_basic():
     points = np.array([[0, 0], [1, 0], [0, 1]])
     rbf_degree = 3
     result = m01(points, rbf_degree)
+
+    # Verify shape
     expected_shape = (3, 6)  # N x (D*N) matrix
     assert result.shape == expected_shape, f"Expected shape {expected_shape}, got {result.shape}"
-    # Verify elements related to self (should be zero due to derivative constraint)
-    assert np.allclose(result[:, :2], 0.0), "Self-related elements in m01 should be zero."
+
+    # Verify self-interaction elements are zero
+    n, d = points.shape
+    for i in range(n):
+        for k in range(d):
+            assert result[i, i * d + k] == 0.0, f"Element {i, i * d + k} (self-interaction) should be zero."
+
+    # Verify specific interactions between points
+    # For i=0, j=1 (point [0, 0] and [1, 0]), M[0, 1D + k] = -p * (x_i[k] - x_j[k]) * ||x_i - x_j||^{p-2}
+    dist_01 = np.linalg.norm(points[0] - points[1])  # ||x_i - x_j||
+    for k in range(d):
+        expected = -rbf_degree * (points[0, k] - points[1, k]) * (dist_01 ** (rbf_degree - 2))
+        assert np.isclose(result[0, 1 * d + k], expected), (
+            f"Element {0, 1 * d + k} should be {expected}, got {result[0, 1 * d + k]}"
+        )
 
 
 def test_m11_basic():
@@ -35,13 +50,45 @@ def test_m11_basic():
     """
     points = np.array([[0, 0], [1, 0], [0, 1]])
     rbf_degree = 3
-    result = m11(points, rbf_degree)
+    result = m11(points, rbf_degree)  # By default, m11 only returns the upper triangular part
+    result += result.T
+
+    # Verify shape
     expected_shape = (6, 6)  # (D*N) x (D*N) matrix
     assert result.shape == expected_shape, f"Expected shape {expected_shape}, got {result.shape}"
-    # Verify symmetry for indices
-    for i in range(result.shape[0]):
-        for j in range(result.shape[1]):
-            assert np.isclose(result[i, j], result[j, i]), "m11 matrix should be symmetric."
+
+    # Verify symmetry
+    assert np.allclose(result, result.T), "m11 matrix should be symmetric."
+
+    # Verify self-interaction elements
+    n, d = points.shape
+    for i in range(n):
+        for k in range(d):
+            idx = i * d + k
+            assert result[idx, idx] == 0.0, f"Self-interaction element {idx, idx} should be zero."
+
+    # Verify specific interactions between points
+    # For i=0, j=1 (points [0,0] and [1,0])
+    dist_01 = np.linalg.norm(points[0] - points[1])  # ||x_i - x_j||
+    for k in range(d):
+        for l in range(d):
+            idx_i = 0 * d + k
+            idx_j = 1 * d + l
+            if k == l:
+                expected = (
+                    -2 * (rbf_degree / 2 - 1) * rbf_degree * (points[0, k] - points[1, k]) ** 2 * (dist_01 **
+                                                                                                   (rbf_degree - 4))
+                    - rbf_degree * (dist_01 ** (rbf_degree - 2))
+                )
+            else:
+                expected = (
+                    -2 * (rbf_degree / 2 - 1) * rbf_degree * (points[0, k] - points[1, k]) * (points[0, l] -
+                                                                                              points[1, l]) *
+                    (dist_01 ** (rbf_degree - 4))
+                )
+            assert np.isclose(result[idx_i, idx_j], expected), (
+                f"Element {idx_i, idx_j} should be {expected}, got {result[idx_i, idx_j]}"
+            )
 
 
 def test_m_matrix_basic():
