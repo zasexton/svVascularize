@@ -7,6 +7,7 @@ from threading import Lock, Condition
 import hnswlib
 import os
 from usearch.index import Index, MetricKind
+MAX_THREADS = min(4, max(1, os.cpu_count() - 1))
 # TODO: Consider using the hnswlib library for approximate nearest neighbor for large datasets (n >= 1e5)
 # TODO: Consider Usearch library for approximate nearest neighbor
 
@@ -36,7 +37,7 @@ class USearchTree:
         labels = np.arange(data.shape[0])
         self.index.add(labels, data)
 
-    def query(self, points, k=1, threads=4):
+    def query(self, points, k=1, threads=MAX_THREADS):
         """
         Query the nearest neighbors for the given points.
 
