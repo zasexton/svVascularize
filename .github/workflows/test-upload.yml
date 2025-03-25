@@ -40,6 +40,8 @@ jobs:
         # cibuildwheel will handle building wheels for the current platform (Linux or macOS).
         # By default, it places them in the `wheelhouse/` directory.
         run: cibuildwheel --output-dir dist
+        env:
+          CIBW_SKIP: pp*
 
       - name: Upload built wheels as artifacts
         uses: actions/upload-artifact@v4
