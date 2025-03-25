@@ -3,22 +3,22 @@
 import pytest
 import numpy as np
 
-from svv.forest.connect.curve import Curve
+from svv.forest.connect.base import BaseCurve
 
 def test_cannot_instantiate_base_curve():
     """
-    Attempting to instantiate an ABC (Curve) directly should fail
+    Attempting to instantiate an ABC (BaseCurve) directly should fail
     because it has abstract methods and properties.
     """
     with pytest.raises(TypeError):
-        _ = Curve()
+        _ = BaseCurve()
 
 # ----------------------------------------------------------------------------
 # Mock subclass that provides minimal implementations of abstract methods.
 # ----------------------------------------------------------------------------
-class MockCurve(Curve):
+class MockCurve(BaseCurve):
     """
-    A minimal subclass of Curve that just implements the abstract methods
+    A minimal subclass of BaseCurve that just implements the abstract methods
     enough to allow instantiation and testing of base-class functionality.
     """
 
@@ -65,7 +65,7 @@ def test_mock_curve_instantiation():
     it implements all abstract methods.
     """
     curve = MockCurve()
-    assert isinstance(curve, Curve)
+    assert isinstance(curve, BaseCurve)
     assert curve.dimension == 2
 
 def test_mock_curve_evaluate():

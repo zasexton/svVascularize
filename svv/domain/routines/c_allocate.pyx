@@ -18,6 +18,7 @@ cnp.import_array()
 def norm(double[:,:] data):
     cdef Py_ssize_t i = data.shape[0]
     cdef Py_ssize_t j = data.shape[1]
+    cdef Py_ssize_t ii
     cdef cnp.ndarray[cnp.float64_t, ndim=2] magnitudes = np.zeros((i,1), dtype=np.float64)
     cdef double[:,:] mv = magnitudes
     cdef double mag
@@ -33,6 +34,7 @@ def norm(double[:,:] data):
 @cython.nonecheck(False)
 def argwhere_nonzeros(double[:] data):
     cdef Py_ssize_t i = data.shape[0]
+    cdef Py_ssize_t ii
     cdef vector[int] nonzeros
     for ii in range(i):
         if data[ii] != 0:
@@ -45,6 +47,7 @@ def argwhere_nonzeros(double[:] data):
 @cython.nonecheck(False)
 def argwhere_value_double(double[:] data, double value):
     cdef Py_ssize_t i = data.shape[0]
+    cdef Py_ssize_t ii
     cdef vector[int] zeros
     for ii in range(i):
         if data[ii] == value:
@@ -57,6 +60,7 @@ def argwhere_value_double(double[:] data, double value):
 @cython.nonecheck(False)
 def argwhere_value_int(long long[:] data, long long value):
     cdef Py_ssize_t i = data.shape[0]
+    cdef Py_ssize_t ii
     cdef vector[int] zeros
     for ii in range(i):
         if data[ii] == value:
@@ -70,6 +74,7 @@ def argwhere_value_int(long long[:] data, long long value):
 @cython.nonecheck(False)
 def any_value_double(double[:] data, double value):
     cdef Py_ssize_t i = data.shape[0]
+    cdef Py_ssize_t ii
     for ii in range(i):
         if data[ii] == value:
             return True
@@ -81,6 +86,7 @@ def any_value_double(double[:] data, double value):
 @cython.nonecheck(False)
 def any_value_int(int[:] data, int value):
     cdef Py_ssize_t i = data.shape[0]
+    cdef Py_ssize_t ii
     for ii in range(i):
         if data[ii] == value:
             return True
@@ -93,6 +99,7 @@ def any_value_int(int[:] data, int value):
 def c_dict(double[:,:] data):
     cdef Py_ssize_t i = data.shape[0]
     cdef Py_ssize_t j = data.shape[1]
+    cdef Py_ssize_t ii, jj
     cdef unordered_map[int, vector[double]] dictionary
     cdef int key
     cdef vector[double] value
@@ -111,6 +118,7 @@ def c_dict(double[:,:] data):
 def duplicate_map(long long[:] unique_inverse, long long[:] unique_counts):
     cdef Py_ssize_t i = unique_counts.shape[0]
     cdef Py_ssize_t j = unique_inverse.shape[0]
+    cdef Py_ssize_t ii, jj
     cdef unordered_map[int, vector[int]] duplicate_dict
     cdef unordered_set[int] duplicate_set
     cdef int key
@@ -139,7 +147,7 @@ def _allocate_patch(long long[:] indices, double overlap, unordered_set[int] poi
     and returns the set of points to be removed.
     """
     cdef Py_ssize_t i = indices.shape[0]
-    cdef int overlap_indicies = int(i * overlap)
+    cdef Py_ssize_t overlap_indicies = <Py_ssize_t>(i * overlap)
     for i in range(1, overlap_indicies):
         if point_set.count(indices[i]):
             if duplicates_set.size() > 0:
@@ -181,6 +189,7 @@ def closest_point(long long index, unordered_set[int] included, double[:,:] poin
 def get_angle(int index_1, int index_2, double[:,:] normals):
     cdef double angle = 0.0
     cdef Py_ssize_t j = normals.shape[1]
+    cdef Py_ssize_t jj
     for jj in range(j):
         angle = angle + normals[index_1, jj] * normals[index_2, jj]
     angle = acos(angle) * (180 / M_PI)

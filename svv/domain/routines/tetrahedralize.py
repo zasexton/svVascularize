@@ -1,6 +1,7 @@
 import tetgen
 import pymeshfix
-from svtoolkit.domain.remeshing import remesh
+from svv.utils.remeshing import remesh
+
 
 def triangulate(curve, verbose=False, **kwargs):
     """

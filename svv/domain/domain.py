@@ -1,19 +1,21 @@
 import numpy as np
 import pyvista as pv
 from scipy.spatial import cKDTree
-from .patch import Patch
-from .routines.allocate import allocate
-from .routines.discretize import contour
-from .io.read_pyvista import read_pyvista
-from svtoolkit.domain.routines.tetrahedralize import tetrahedralize, triangulate
-from svtoolkit.domain.routines.sample import pick_from_tetrahedron, pick_from_triangle, pick_from_line
+from svv.domain.patch import Patch
+from svv.domain.routines.allocate import allocate
+from svv.domain.routines.discretize import contour
+from svv.domain.io.read import read
+from svv.domain.routines.tetrahedralize import tetrahedralize, triangulate
+from svv.domain.routines.c_sample import pick_from_tetrahedron, pick_from_triangle, pick_from_line
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from svtoolkit.domain.routines.boolean import boolean
-from svtoolkit.tree.utils.KDTreeManager import KDTreeManager
+from svv.domain.routines.boolean import boolean
+# from svtoolkit.tree.utils.KDTreeManager import KDTreeManager
+from svv.tree.utils.TreeManager import KDTreeManager, HNSWTree, USearchTree
 from time import perf_counter
 from tqdm import trange, tqdm
 from sklearn.neighbors import BallTree
 import random
+
 
 class Domain(object):
     def __init__(self, *args, **kwargs):
@@ -53,6 +55,7 @@ class Domain(object):
         self.mesh_nodes = None
         self.mesh_vertices = None
         self.convexity = None
+        self.random_points = None
         if len(args) > 0:
             self.set_data(*args, **kwargs)
 
@@ -69,7 +72,7 @@ class Domain(object):
                 self.n = self.points.shape[0]
                 self.d = self.points.shape[1]
             elif 'pyvista' in str(args[0].__class__):
-                points, normals, n, d = read_pyvista(args[0], **kwargs)
+                points, normals, n, d = read(args[0], **kwargs)
                 self.original_boundary = args[0]
                 self.points = points
                 self.normals = normals
@@ -400,6 +403,7 @@ class Domain(object):
         Determine if a point or set of points is within the domain.
 
         """
+        level = kwargs.pop('layer', 0.0)
         values = self.__call__(points, **kwargs)
         return values <= level
 
@@ -517,6 +521,27 @@ class Domain(object):
                                                                                                  :self.points.shape[1]]
                 remaining_points -= added_points
             cells = np.ones((n,), dtype=np.int64)*-1
+        elif method == 'preallocate':
+            # random tree structure for selecting points
+            if isinstance(self.random_points,type(None)) or self.random_points.shape[0] < 2*n:
+                pts, _ = self.get_interior_points(10*n)
+                self.random_points = pts
+            points = np.ones((n, self.points.shape[1]), dtype=np.float64) * np.nan
+            remaining_points = n
+            while remaining_points > 0:
+                pt_dists, pt_ids = tree.query(self.random_points)
+                if not isinstance(threshold, type(None)) and not isinstance(volume_threshold, type(None)):
+                    mask = np.logical_and(pt_dists > threshold, pt_dists < volume_threshold)
+                else:
+                    mask = pt_dists > 0.0
+                tmp_points = self.random_points[mask.flatten(),:]
+                added_points = min(remaining_points, tmp_points.shape[0])
+                points[n - remaining_points:n - remaining_points + added_points, :] = tmp_points[:added_points, :]
+                remaining_points -= added_points
+                if remaining_points > 0:
+                    pts, _ = self.get_interior_points(10 * n)
+                    self.random_points = pts
+            cells = np.ones((n,), dtype=np.int64) * -1
         else:
             replace = kwargs.get('replace', True)
             points = np.ones((n, self.points.shape[1]), dtype=np.float64) * np.nan

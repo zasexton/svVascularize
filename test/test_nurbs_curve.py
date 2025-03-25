@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from svv.forest.connect.curve import Curve # the base curve class
+from svv.forest.connect.base import Curve # the base curve class
 from svv.forest.connect.nurbs import NURBSCurve # The nurbs curve class
 
 

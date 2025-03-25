@@ -11,8 +11,9 @@ def convert_to_trimesh(pyvista_object):
     :param pyvista_object:
     :return:
     """
-    faces = pyvista_object.faces.reshape((-1, 4))[:, 1:].astype(int)
-    vertices = pyvista_object.points.astype(float)
+    msh = pyvista_object.triangulate()
+    faces = msh.faces.reshape((-1, 4))[:, 1:].astype(int)
+    vertices = msh.points.astype(float)
     return trimesh.Trimesh(vertices=vertices, faces=faces)
 
 

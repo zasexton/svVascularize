@@ -1,10 +1,10 @@
 from abc import ABC
 
 import numpy as np
-from svv.forest.connect.curve import Curve
+from svv.forest.connect.base import BaseCurve
 
 
-class BezierCurve(Curve, ABC):
+class BezierCurve(BaseCurve, ABC):
     """
     A concrete implementation of Curve for Bézier curves in 2D or 3D space.
 

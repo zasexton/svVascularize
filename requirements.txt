@@ -1,0 +1,11 @@
+numpy~=2.2.4
+scipy~=1.10.1
+matplotlib~=3.10.1
+Cython~=3.0.7
+usearch
+scikit-image
+tetgen
+trimesh[all]
+hnswlib
+pyvista~=0.44.2
+scikit-learn

@@ -3,7 +3,8 @@ from scipy import optimize
 from functools import partial
 from ..kernel.coordinate_system import sph2cart
 
-class domain_solution:
+
+class DomainSolution:
     def __init__(self):
         self.x = None
         self.fun = None
@@ -53,7 +54,7 @@ class Solver:
             print('Solver not set.')
             return None
         if skip:
-            solution = domain_solution()
+            solution = DomainSolution()
             solution.fun = self.kernel.__cost__(self.kernel.x0[0])
             solution.x = self.kernel.x0[0]
             self.solution = solution

@@ -2,10 +2,10 @@ from abc import ABC
 
 import numpy as np
 
-from svv.forest.connect.curve import Curve
+from svv.forest.connect.base import BaseCurve
 
 
-class NURBSCurve(Curve, ABC):
+class NURBSCurve(BaseCurve, ABC):
     """
     A concrete implementation of a Non-Uniform Rational B-Spline (NURBS) curve.
 

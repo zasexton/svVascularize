@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from svv.forest.connect.curve import Curve  # The base Curve class
+from svv.forest.connect.base import Curve  # The base Curve class
 from svv.forest.connect.catmullrom import CatmullRomCurve  # CatmullRomCurve class
 
 def test_constructor_valid_2d():

@@ -1,10 +1,10 @@
 import numpy as np
 from abc import ABC
 
-from .curve import Curve  # Adjust to your actual import path of the base Curve
+from svv.forest.connect.base import BaseCurve
 
 
-class CatmullRomCurve(Curve, ABC):
+class CatmullRomCurve(BaseCurve, ABC):
     """
     A concrete implementation of a Catmull–Rom spline inheriting from the Curve base class.
 

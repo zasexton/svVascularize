@@ -4,8 +4,15 @@ from itertools import combinations
 from time import perf_counter
 import scipy.spatial as spatial
 import tqdm
-from .c_allocate import (norm, argwhere_nonzeros, argwhere_value_double, any_value_double, duplicate_map, _allocate_patch,
-                         _allocate_angle)
+from .c_allocate import (
+    norm, argwhere_nonzeros,
+    argwhere_value_double,
+    any_value_double,
+    duplicate_map,
+    _allocate_patch,
+    _allocate_angle
+)
+
 
 # [TODO] the allocator needs to be accelerated to handle large point clouds
 def allocate(*args: Tuple[np.ndarray, ...], min_patch_size: int = 10, max_patch_size: int = 20,
@@ -25,7 +32,8 @@ def allocate(*args: Tuple[np.ndarray, ...], min_patch_size: int = 10, max_patch_
             The maximum number of points in a patch.
         overlap : float
             The maximum percentage of overlap between patches as a value between 0 and 1.
-
+        feature_angle : float
+            The maximum angle allowed between point-wise normal vectors
     Returns
     -------
         patches : list
@@ -42,12 +50,12 @@ def allocate(*args: Tuple[np.ndarray, ...], min_patch_size: int = 10, max_patch_
         normals = args[1]
         magnitudes = norm(normals)
         if any_value_double(magnitudes.flatten(), 0.0):
-            e = argwhere_value_double(magnitudes, 0.0)
+            e = argwhere_value_double(magnitudes.flatten(), 0.0)
             print("Error: Normals with zero magnitude found at indices:\n{}.".format(e))
             print("Deleting points with zero magnitude normals...")
             print("Points:\n{}".format(points[e, :]))
             print("Normals:\n{}".format(normals[e, :]))
-            indices = argwhere_nonzeros(magnitudes)
+            indices = argwhere_nonzeros(magnitudes.flatten())
             points = points[indices, :]
             normals = normals[indices, :]
             magnitudes = norm(normals)
