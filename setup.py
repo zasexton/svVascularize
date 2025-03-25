@@ -2,13 +2,11 @@ from setuptools import setup, find_packages, Extension
 from Cython.Build import cythonize
 import numpy
 import sys
-import cpuinfo
 import os
 import subprocess
 from urllib.request import urlretrieve
 import shutil
 import tarfile
-import zipfile
 import multiprocessing
 
 num_cores = multiprocessing.cpu_count() // 2
@@ -17,6 +15,7 @@ from setuptools.command.build_ext import build_ext
 
 class DownloadAndBuildExt(build_ext):
     def run(self):
+        """
         # -----------------------------
         # 1. Download: handle errors
         # -----------------------------
@@ -155,13 +154,18 @@ class DownloadAndBuildExt(build_ext):
         # -----------------------------------
         # 7. Let the normal build_ext proceed
         # -----------------------------------
+        """
         super().run()
 
+    def finalize_options(self):
+        super().finalize_options()
+        self.inplace = True
 
 def get_extra_compile_args():
     extra_args = []
     if sys.platform == "win32":
         # For MSVC or clang-cl on Windows you have to choose one of the /arch options.
+        cpuinfo = None
         if cpuinfo is not None:
             info = cpuinfo.get_cpu_info()
             flags = info.get("flags", [])
@@ -190,7 +194,7 @@ def get_extra_compile_args():
         update_link_args = ['-fopenmp']
     return extra_args, update_compile_args, update_link_args
 
-extra_compile_args, update_compile_args, update_link_args = get_extra_compile_args()
+#extra_compile_args, update_compile_args, update_link_args = get_extra_compile_args()
 # extra_compile_args=update_compile_args, extra_link_args=update_link_args),
 extensions = [
     Extension('svv.domain.routines.c_allocate', ['svv/domain/routines/c_allocate.pyx'],
@@ -236,8 +240,20 @@ CLASSIFIERS = ['Intended Audience :: Science/Research',
 
 PACKAGES = find_packages(include=['svv', 'svv.*'])
 
-with open("requirements.txt") as f:
-    required_packages = f.read().splitlines()
+REQUIREMENTS = ["numpy<=1.24.0",
+                "scipy>=1.10.1",
+                "matplotlib>=3.7.5",
+                "Cython>=3.0.7",
+                "usearch>=2.0.0",
+                "scikit-image",
+                "tetgen",
+                "trimesh[all]",
+                "hnswlib",
+                "pyvista==0.44.2",
+                "scikit-learn",
+                "tqdm",
+                "pymeshfix",
+                "numexpr"]
 
 setup_info = dict(
     name='svv',
@@ -248,14 +264,14 @@ setup_info = dict(
     python_requires='>=3.7',
     classifiers=CLASSIFIERS,
     packages=PACKAGES,
-    ext_modules=cythonize(extensions, annotate=True),
+    ext_modules=cythonize(extensions),
     include_dirs=[numpy.get_include()],
     include_package_data=True,
     zip_safe=False,
-    install_requires=required_packages,
-    #cmdclass={
-    #    "build_ext": DownloadAndBuildExt
-    #},
+    install_requires=REQUIREMENTS,
+    cmdclass={
+        "build_ext": DownloadAndBuildExt
+    },
 )
 
 setup(**setup_info)
