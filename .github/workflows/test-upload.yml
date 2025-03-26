@@ -39,7 +39,7 @@ jobs:
         run: cibuildwheel --output-dir dist
 
       - name: Upload artifacts
-        uses: actions/upload-artifacts@v4
+        uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
           path: dist
