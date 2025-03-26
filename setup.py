@@ -223,7 +223,7 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.24'
+__version__ = '0.0.25'
 
 CLASSIFIERS = ['Intended Audience :: Science/Research',
                'License :: OSI Approved :: MIT License',
@@ -252,7 +252,7 @@ REQUIREMENTS = ["numpy<=1.24.0",
                 "pyvista==0.44.2",
                 "scikit-learn",
                 "tqdm",
-                "pymeshfix",
+                "pymeshfix==0.17.0",
                 "numexpr"]
 
 setup_info = dict(
