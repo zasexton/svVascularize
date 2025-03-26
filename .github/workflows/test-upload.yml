@@ -21,7 +21,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     env:
       CIBW_BUILD: "cp312-*"
-      CIBW_SDIST: ${{ matrix.os == 'ubuntu-latest' ? 'true' : 'false' }}
+      CIBW_SDIST: ${{ (matrix.os == 'ubuntu-latest') }}
       CIBW_ENVIRONMENT: "PIP_NO_CACHE_DIR=1"
 
     steps:
