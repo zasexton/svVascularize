@@ -223,7 +223,7 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.25'
+__version__ = '0.0.26'
 
 CLASSIFIERS = ['Intended Audience :: Science/Research',
                'License :: OSI Approved :: MIT License',
@@ -261,7 +261,7 @@ setup_info = dict(
     author='Zachary Sexton',
     author_email='zsexton@stanford.edu',
     license='MIT',
-    python_requires='>=3.7',
+    python_requires='>=3.9',
     classifiers=CLASSIFIERS,
     packages=PACKAGES,
     ext_modules=cythonize(extensions),
