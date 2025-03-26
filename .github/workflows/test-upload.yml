@@ -53,6 +53,11 @@ jobs:
         with:
           name: wheels-windows-latest
           path: dist
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip && pip install twine
+          
       - name: Upload to TestPyPI
         run: twine upload --repository testpypi dist/*
         env:
