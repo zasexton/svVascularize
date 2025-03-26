@@ -3,7 +3,7 @@ requires = [
   "setuptools>=70",
   "wheel>=0.36; python_version < '3.12' ",
   "cython>=3.0.7",
-  "numpy<1.25.0",
+  "numpy",
   "cmake>=3.15"
 ]
 
