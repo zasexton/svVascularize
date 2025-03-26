@@ -18,10 +18,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
     env:
       CIBW_BUILD: "cp312-*"
-      CIBW_SDIST: ${{ (matrix.os == 'ubuntu-latest') }}
+      CIBW_SDIST: ${{ (matrix.os == 'windows-latest') }}
       CIBW_ENVIRONMENT: "PIP_NO_CACHE_DIR=1"
 
     steps:
@@ -38,9 +38,23 @@ jobs:
       - name: Build wheels
         run: cibuildwheel --output-dir dist
 
-      - name: Upload to Test PyPI
-        run: |
-            twine upload --repository testpypi dist/*
+      - name: Upload artifacts
+        uses: actions/upload-artifacts@v3
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist
+
+  upload:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts (Windows)
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-windows-latest
+          path: dist
+      - name: Upload to TestPyPI
+        run: twine upload --repository testpypi dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TEST_PYPI_PASSWORD }}
