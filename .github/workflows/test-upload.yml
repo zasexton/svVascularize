@@ -21,7 +21,6 @@ jobs:
         os: [windows-latest]
     env:
       CIBW_BUILD: "cp312-*"
-      CIBW_SDIST: ${{ (matrix.os == 'windows-latest') }}
       CIBW_ENVIRONMENT: "PIP_NO_CACHE_DIR=1"
 
     steps:
@@ -41,18 +40,37 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: cibw-wheels-${{ matrix.os }}
           path: dist
 
-  upload:
+  build_sdist:
     needs: [build_wheels]
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts (Windows)
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip && pip install build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: wheels-windows-latest
+          name: cibw-sdist
+          path: dist/*.tar.gz
+          
+  upload_testpypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    steps:    
+      - uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
           path: dist
+          merge-multiple: true
 
       - name: Install build dependencies
         run: |
