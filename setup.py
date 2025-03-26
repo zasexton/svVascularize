@@ -223,7 +223,7 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.28'
+__version__ = '0.0.29'
 
 CLASSIFIERS = ['Intended Audience :: Science/Research',
                'License :: OSI Approved :: MIT License',
