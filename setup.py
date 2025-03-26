@@ -227,10 +227,10 @@ __version__ = '0.0.25'
 
 CLASSIFIERS = ['Intended Audience :: Science/Research',
                'License :: OSI Approved :: MIT License',
-               'Programming Language :: Python',
-               'Programming Language :: Python :: 3.7',
-               'Programming Language :: Python :: 3.8',
                'Programming Language :: Python :: 3.9',
+               'Programming Language :: Python :: 3.10',
+               'Programming Language :: Python :: 3.11',
+               'Programming Language :: Python :: 3.12',
                'Topic :: Scientific/Engineering',
                'Operating System :: Microsoft :: Windows',
                'Operating System :: POSIX :: Linux',
