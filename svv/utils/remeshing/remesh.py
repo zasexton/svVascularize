@@ -9,10 +9,11 @@ import pymeshfix
 import meshio
 import numpy
 from copy import deepcopy
+import svv
 
 filepath = os.path.abspath(__file__)
 dirpath = os.path.dirname(filepath)
-
+modulepath = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
 
 def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, verbosity=1,
                    hmax=None, hmin=None, hsiz=True, noinsert=None, nomove=None, nosurf=True,
@@ -232,11 +233,20 @@ def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, 
         meshio.write("tmp.mesh", mesh)
         boundary = [boundary]
     if platform.system() == 'Windows':
-        _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg2d_O3.exe"
+        if os.path.exists(modulepath + os.sep + "mmg2d_O3.exe"):
+            _EXE_ = modulepath + os.sep + "mmg2d_O3.exe"
+        else:
+            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg2d_O3.exe"
     elif platform.system() == "Linux":
-        _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg2d_O3"
+        if os.path.exists(modulepath + os.sep + "mmg2d_O3"):
+            _EXE_ = modulepath + os.sep + "mmg2d_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg2d_O3"
     elif platform.system() == "Darwin":
-        _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg2d_O3"
+        if os.path.exists(modulepath + os.sep + "mmg2d_O3"):
+            _EXE_ = modulepath + os.sep + "mmg2d_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg2d_O3"
     else:
         raise NotImplementedError("Operating system not supported.")
     devnull = open(os.devnull, 'w')
@@ -429,11 +439,20 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
     if not isinstance(required_triangles, type(None)):
         add_required("tmp.mesh", required_triangles)
     if platform.system() == 'Windows':
-        _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmgs_O3.exe"
+        if os.path.exists(modulepath + os.sep + "mmgs_O3.exe"):
+            _EXE_ = modulepath + os.sep + "mmgs_O3.exe"
+        else:
+            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmgs_O3.exe"
     elif platform.system() == "Linux":
-        _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmgs_O3"
+        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
+            _EXE_ = modulepath + os.sep + "mmgs_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmgs_O3"
     elif platform.system() == "Darwin":
-        _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmgs_O3"
+        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
+            _EXE_ = modulepath + os.sep + "mmgs_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmgs_O3"
     else:
         raise NotImplementedError("Operating system not supported.")
     devnull = open(os.devnull, 'w')
@@ -584,11 +603,20 @@ def remesh_volume(pv_unstructured_mesh, auto=True, ar=None, hausd=None, hgrad=No
     """
     pv.save_meshio("tmp.mesh", pv_unstructured_mesh)
     if platform.system() == 'Windows':
-        _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg3d_O3.exe"
+        if os.path.exists(modulepath + os.sep + "mmg3d_O3.exe"):
+            _EXE_ = modulepath + os.sep + "mmg3d_O3.exe"
+        else:
+            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg3d_O3.exe"
     elif platform.system() == "Linux":
-        _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg3d_O3"
+        if os.path.exists(modulepath + os.sep + "mmg3d_O3"):
+            _EXE_ = modulepath + os.sep + "mmg3d_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg3d_O3"
     elif platform.system() == "Darwin":
-        _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg3d_O3"
+        if os.path.exists(modulepath + os.sep + "mmg3d_O3"):
+            _EXE_ = modulepath + os.sep + "mmg3d_O3"
+        else:
+            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg3d_O3"
     else:
         raise NotImplementedError("Operating system not supported.")
     devnull = open(os.devnull, 'w')
