@@ -225,6 +225,9 @@ extensions = [
 
 __version__ = '0.0.29'
 
+with open("README.md", "r", encoding="utf-8") as file:
+    DESCRIPTION = file.read()
+
 CLASSIFIERS = ['Intended Audience :: Science/Research',
                'License :: OSI Approved :: MIT License',
                'Programming Language :: Python :: 3.9',
@@ -264,6 +267,9 @@ setup_info = dict(
     python_requires='>=3.9',
     classifiers=CLASSIFIERS,
     packages=PACKAGES,
+    description="Synthetic vascular generation, modeling, and simulation package",
+    long_description=DESCRIPTION,
+    long_description_content_type="text/markdown",
     ext_modules=cythonize(extensions),
     include_dirs=[numpy.get_include()],
     include_package_data=True,
