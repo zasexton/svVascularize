@@ -288,6 +288,7 @@ class DownloadAndBuildExt(build_ext):
         # 1. Download: handle errors
         # -----------------------------
         if not platform.system().lower().startswith("win"):
+            """
             download_url_0d = "https://github.com/SimVascular/svZeroDSolver/archive/refs/tags/v2.0.tar.gz"
             download_url_1d = "https://github.com/SimVascular/svOneDSolver/archive/refs/tags/c9caded.tar.gz"
             download_url_3d = "https://github.com/SimVascular/svMultiPhysics/archive/refs/tags/March_2025.tar.gz"
@@ -419,6 +420,8 @@ class DownloadAndBuildExt(build_ext):
             except Exception as e:
                 # Usually you might just print a warning. We'll raise to be explicit.
                 raise RuntimeError("Warning: Cleanup of archives/folders failed.") from e
+            """
+            super().run()
         else:
             # -----------------------------------
             # 7. Let the normal build_ext proceed
