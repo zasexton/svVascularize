@@ -15,7 +15,14 @@ import multiprocessing
 num_cores = multiprocessing.cpu_count() // 2
 
 from setuptools.command.build_ext import build_ext
+from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
+class BDistWheelCmd(_bdist_wheel):
+    def run(self):
+        # Ensure our build_ext (which calls build_mmg) runs first
+        self.run_command("build_ext")
+        super().run()
+        
 def get_filename_without_ext(abs_path):
     base_name = os.path.basename(abs_path)      # e.g. "file.txt"
     file_name_no_ext = os.path.splitext(base_name)[0]  # e.g. "file"
@@ -552,7 +559,8 @@ setup_info = dict(
     zip_safe=False,
     install_requires=REQUIREMENTS,
     cmdclass={
-        "build_ext": DownloadAndBuildExt
+        'build_ext': DownloadAndBuildExt,
+        'bdist_wheel': BDistWheelCmd,
     },
 )
 
