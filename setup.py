@@ -265,6 +265,8 @@ def build_mmg(num_cores=None):
     print("Copying executables and cleaning up")
     install_prefix = os.path.join("svv", "bin")
     os.makedirs(install_prefix, exist_ok=True)
+    file = open(os.path.join(install_prefix,"__init__.py"),"w+")
+    file.close()
     executables = find_executables(install_tmp_prefix)
     basenames = ["mmg2d_O3", "mmg3d_O3", "mmgs_O3"]
     executables = [exe for exe in executables if get_filename_without_ext(exe) in basenames]
