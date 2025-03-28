@@ -544,6 +544,7 @@ setup_info = dict(
     long_description=DESCRIPTION,
     long_description_content_type="text/markdown",
     ext_modules=cythonize(extensions),
+    package_data={'svv.bin': ['*']},
     include_dirs=[numpy.get_include()],
     include_package_data=True,
     zip_safe=False,
