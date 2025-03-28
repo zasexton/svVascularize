@@ -20,7 +20,7 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 class BDistWheelCmd(_bdist_wheel):
     def run(self):
         # Ensure our build_ext (which calls build_mmg) runs first
-        build_mmg()
+        #build_mmg()
         self.run_command("build_ext")
         super().run()
         
@@ -295,7 +295,7 @@ class DownloadAndBuildExt(build_ext):
         #------------------------------
         # Get MMG Remeshing Source Code
         #------------------------------
-        #build_mmg()
+        build_mmg()
         # -----------------------------
         # 1. Download: handle errors
         # -----------------------------
