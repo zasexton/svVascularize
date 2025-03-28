@@ -19,7 +19,7 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 class BDistWheelCmd(_bdist_wheel):
     def run(self):
-        # Ensure our build_ext (which calls build_mmg) runs first
+        # Ensure build_ext (which calls build_mmg) runs first
         #build_mmg()
         self.run_command("build_ext")
         super().run()
@@ -290,6 +290,51 @@ def build_mmg(num_cores=None):
     remove_directory_tree(build_dir_mmg)
     remove_directory_tree(source_extract_root)
 
+
+def build_0d(num_cores=None):
+    if num_cores is None:
+        num_cores = os.cpu_count() or 1
+
+    # Make sure cmake is on PATH
+    if shutil.which("cmake") is None:
+        raise RuntimeError("CMake is not installed or not on the PATH.")
+
+    download_url_0d = "https://github.com/SimVascular/svZeroDSolver/archive/refs/tags/v2.0.tar.gz"
+    tarball_path_0d = "svZeroDSolver.tar.gz"
+    source_path_0d = os.path.abspath("svZeroDSolver")
+
+    # Build up our cmake configure command
+    cmake_cmd = ["cmake"]
+
+    try:
+        if not os.path.exists(tarball_path_0d):
+            print(f"Downloading {download_url_0d}...")
+            urlretrieve(download_url_0d, tarball_path_0d)
+    except Exception as e:
+        raise RuntimeError("Error downloading solver archives.") from e
+
+    try:
+        if not os.path.exists(source_path_0d):
+            with tarfile.open(tarball_path_0d, "r:gz") as t:
+                t.extractall(source_path_0d)
+    except Exception as e:
+        raise RuntimeError("Error extracting solver archives.") from e
+
+    build_dir_0d = os.path.abspath("tmp/solver-0d")
+
+    # Add standard arguments
+    cmake_cmd += [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-B", build_dir_0d,
+        "-S", mmg_subdir
+    ]
+
+    # Run build step
+    build_cmd = [
+        "cmake",
+        "--build", build_dir_0d,
+        "--parallel", str(num_cores)
+    ]
 class DownloadAndBuildExt(build_ext):
     def run(self):
         #------------------------------
