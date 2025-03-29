@@ -1266,6 +1266,13 @@ def add_vessel(tree, **kwargs):
                         flows = numpy.array(results[7])
                         root_radius = results[8]
                         #new_vessels[0, 21] = root_radius
+                        change_i.append(0)
+                        change_j.append(21)
+                        new_data.append(root_radius)
+                        old_data.append(data[0, 21])
+                        tmp_28_copy = deepcopy(tmp_28)
+                        if len(bifurcation_ratios.shape) == 1:
+                            bifurcation_ratios = np.empty((1, 2), dtype=float)
                         res_test = update_alt(reduced_resistance, reduced_length,
                                               main_idx, main_scale, alt_idx,
                                               alt_scale, bifurcation_ratios,
