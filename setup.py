@@ -551,7 +551,7 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.30'
+__version__ = '0.0.31'
 
 with open("README.md", "r", encoding="utf-8") as file:
     DESCRIPTION = file.read()
