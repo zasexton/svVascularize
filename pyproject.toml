@@ -6,5 +6,8 @@ requires = [
   "numpy",
   "cmake>=3.15"
 ]
-
+authors = [
+  {name = "Zachary Sexton", email="zsexton@stanford.edu"},
+  {name = "SimVascular"},
+]
 build-backend = "setuptools.build_meta"
