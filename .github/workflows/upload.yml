@@ -77,8 +77,8 @@ jobs:
         run: |
           pip install --upgrade pip && pip install twine
 
-      - name: Upload to TestPyPI
-        run: twine upload --repository testpypi dist/*
+      - name: Upload to PyPI
+        run: twine upload --repository pypi dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
