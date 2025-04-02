@@ -587,7 +587,7 @@ REQUIREMENTS = ["numpy<=1.24.0",
                 "numexpr"]
 
 setup_info = dict(
-    name='svv',
+    name='SimVascular-svv',
     version=__version__,
     author='Zachary Sexton',
     author_email='zsexton@stanford.edu',
