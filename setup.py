@@ -551,7 +551,7 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.30'
+__version__ = '0.0.32'
 
 with open("README.md", "r", encoding="utf-8") as file:
     DESCRIPTION = file.read()
@@ -586,6 +586,12 @@ REQUIREMENTS = ["numpy<=1.24.0",
                 "pymeshfix==0.17.0",
                 "numexpr"]
 
+KEYWORDS = ["modeling",
+            "simulation",
+            "tissue-engineering",
+            "3d-printing",
+            "fluid-dynamics"]
+
 setup_info = dict(
     name='svv',
     version=__version__,
@@ -595,7 +601,8 @@ setup_info = dict(
     python_requires='>=3.9',
     classifiers=CLASSIFIERS,
     packages=PACKAGES,
-    description="Synthetic vascular generation, modeling, and simulation package",
+    keywords=KEYWORDS,
+    description="svVascularize (svv): A synthetic vascular generation, modeling, and simulation package",
     long_description=DESCRIPTION,
     long_description_content_type="text/markdown",
     ext_modules=cythonize(extensions),
