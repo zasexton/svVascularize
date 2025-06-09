@@ -571,20 +571,22 @@ CLASSIFIERS = ['Intended Audience :: Science/Research',
 
 PACKAGES = find_packages(include=['svv', 'svv.*'])
 
-REQUIREMENTS = ["numpy<=1.24.0",
-                "scipy>=1.10.1",
-                "matplotlib>=3.7.5",
-                "Cython>=3.0.7",
-                "usearch>=2.0.0",
-                "scikit-image",
-                "tetgen",
-                "trimesh[all]",
-                "hnswlib",
-                "pyvista==0.44.2",
-                "scikit-learn",
-                "tqdm",
-                "pymeshfix==0.17.0",
-                "numexpr"]
+
+def parse_requirements(path="requirements.txt"):
+    """Return a list of requirements from the given file."""
+    reqs = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as req_file:
+            for line in req_file:
+                # Strip comments and whitespace
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    reqs.append(line)
+    return reqs
+
+
+REQUIREMENTS = parse_requirements()
+
 
 KEYWORDS = ["modeling",
             "simulation",

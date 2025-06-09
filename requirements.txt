@@ -10,3 +10,5 @@ hnswlib
 pyvista~=0.44.2
 scikit-learn
 tqdm
+pymeshfix==0.17.0
+numexpr
