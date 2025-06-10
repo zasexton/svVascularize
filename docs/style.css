@@ -1,0 +1,276 @@
+/* =====================
+   GLOBAL THEME & TOKENS
+   ===================== */
+:root {
+  /*  SimVascular blues  */
+  --clr-primary-900: #002B4C;
+  --clr-primary-700: #003d6b;
+  --clr-primary-600: #00548b;
+  --clr-primary-400: #1aa3ff;
+  --clr-primary-200: #8dd6ff;
+
+  /* Greys / surfaces */
+  --clr-grey-700: #354652;
+  --clr-grey-500: #5f7485;
+  --clr-grey-300: #d9e4ec;
+  --clr-grey-100: #ecf2f8;
+
+  /* Accents */
+  --clr-warning: #ffb627;
+  --clr-danger:  #ff6b6b;
+  --clr-success: #2ecc71;
+
+  /* Backgrounds */
+  --clr-bg:      #f7fbff;
+  --clr-surface: #ffffff;
+
+  /* Typography & radius */
+  --font-sans: 'Montserrat','Helvetica Neue',Helvetica,Arial,sans-serif;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.08);
+  --shadow-md: 0 4px 14px rgba(0,0,0,.1);
+
+  /* Motion */
+  --ease-fast: .15s ease-in-out;
+}
+
+/* =======  GLOBAL  ======= */
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--clr-grey-700);
+  background-color: var(--clr-bg);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container { width: 92%; max-width: 1050px; margin-inline: auto; }
+
+a {
+  color: var(--clr-primary-400);
+  text-decoration: none;
+  transition: color var(--ease-fast);
+}
+a:hover, a:focus { color: var(--clr-primary-200); }
+
+/* =======  NAVIGATION  ======= */
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background-color: var(--clr-primary-700);
+  color: var(--clr-surface);
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--ease-fast), box-shadow var(--ease-fast);
+}
+.topnav .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0;
+}
+.topnav h1 { font-size: 1.5rem; margin: 0; letter-spacing: -.5px; }
+
+.topnav nav ul {
+  display: flex;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+.topnav nav a {
+  color: var(--clr-surface);
+  font-size: .9rem;
+  font-weight: 600;
+  position: relative;
+  padding: 0 .25rem;
+}
+.topnav nav a::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -4px;
+  height: 2px;
+  background: var(--clr-primary-200);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--ease-fast);
+}
+.topnav nav a:hover::after,
+.topnav nav a:focus::after,
+.topnav nav a.active::after {
+  transform: scaleX(1);
+}
+
+/* Shrink effect when scrolling */
+.topnav.scrolled { box-shadow: var(--shadow-md); background-color: var(--clr-primary-900); }
+
+/* =======  HERO  ======= */
+.hero {
+  background: linear-gradient(135deg,var(--clr-primary-700) 0%,var(--clr-primary-400) 100%);
+  color: var(--clr-surface);
+  text-align: center;
+  padding: 5rem 1rem 4rem;
+  box-shadow: var(--shadow-md);
+}
+.hero h2 { font-size: 2.25rem; margin-top: 0; letter-spacing: -.5px; }
+
+.cta {
+  display: inline-block;
+  margin-top: 1.25rem;
+  padding: .8rem 1.6rem;
+  background-color: var(--clr-primary-900);
+  color: var(--clr-surface);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  transition: transform var(--ease-fast), background-color var(--ease-fast);
+}
+.cta:hover, .cta:focus { transform: translateY(-2px); background-color: var(--clr-primary-600); }
+
+/* =======  CONTENT  ======= */
+.content { padding: 2rem 0; }
+main h2 {
+  color: var(--clr-primary-700);
+  border-bottom: 2px solid var(--clr-primary-400);
+  padding-bottom: .3rem;
+  margin-top: 3rem;
+}
+
+/* Full-width blocks */
+pre {
+  background: var(--clr-grey-100);               /* light grey fill   */
+  border: 1px solid var(--clr-grey-300);         /* subtle border     */
+  border-left: 4px solid var(--clr-primary-400); /* blue accent bar   */
+  border-radius: var(--radius-sm);
+  margin: 1.5rem 0;
+  padding: 1rem 1rem 1rem 1.25rem;               /* room after accent */
+  overflow-x: auto;
+  font-size: .9rem;
+  line-height: 1.45;
+  tab-size: 2;
+  position: relative;                            /* for “Copy” badge  */
+}
+
+/* Remove the grey fill inside <code> so we don’t double up */
+pre code { background: transparent; padding: 0; }
+
+/* Inline <code> bits still get a pill background */
+code {
+  background: var(--clr-grey-100);
+  padding: .18em .4em;
+  border-radius: var(--radius-sm);
+  font-size: .92em;
+}
+
+/* —— Copy-to-clipboard badge (appears on hover) —— */
+pre[data-copy]::after {
+  content: "Copy";                       /* ← plain quotes */
+  font-size: .73rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: var(--clr-primary-400);
+  color: #fff;
+  padding: .15rem .55rem;
+  border-radius: var(--radius-sm);
+  position: absolute;
+  top: .55rem;
+  right: .6rem;
+  opacity: 0;
+  transition: opacity var(--ease-fast);
+  cursor: pointer;
+}
+
+pre[data-copy]:hover::after {
+  opacity: 1;
+}
+
+/* Flash “Copied!” feedback */
+pre.copied::after { content: "Copied!"; background: var(--clr-success); }
+
+/* ─── Prism.js syntax colours (Python) ─────────────────────────── */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: var(--clr-grey-700);
+  background: var(--clr-grey-100);
+  text-shadow: none;
+  font-family: Consolas, monospace;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata { color: #6a737d; font-style: italic; }
+
+.token.keyword,
+.token.boolean,
+.token.selector,
+.token.attr-name { color: #d73a49; }
+
+.token.string,
+.token.char,
+.token.builtin { color: #032f62; }
+
+.token.number,
+.token.constant { color: #005cc5; }
+
+.token.operator,
+.token.punctuation { color: #24292e; }
+
+.token.function { color: #6f42c1; }
+
+.token.class-name { color: #e36209; }
+
+.token.variable { color: #e36209; }
+
+.token.deleted { background: #ffeef0; }
+.token.inserted { background: #e6ffed; }
+
+/* tables */
+table { border-collapse: collapse; margin: 1.2rem 0; width: 100%; }
+th, td { border: 1px solid var(--clr-grey-300); padding: .55rem; text-align: left; font-size: .95rem; }
+th { background: var(--clr-grey-100); color: var(--clr-grey-700); }
+
+/* callouts */
+.callout {
+  border-left: 4px solid var(--clr-warning);
+  background: rgba(255,182,39,.15);
+  padding: .75rem 1rem;
+  margin: 1.25rem 0;
+  border-radius: var(--radius-sm);
+}
+
+/* ─── TIP CALLOUT (blue variant of .callout) ─────────────────── */
+.callout.tip {
+  border-left-color: var(--clr-primary-400);          /* blue bar */
+  background: rgba(26,163,255,.15);                   /* faint blue fill */
+}
+.callout.tip::before {
+  content: "💡  ";                                    /* light-bulb icon */
+  font-weight: 700;
+}
+
+/* ─── WARNING CALLOUT ──────────────────────────────────────────── */
+.callout.warning {
+  border-left-color: var(--clr-danger);          /* red bar          */
+  background: rgba(255,107,107,.15);             /* faint red fill   */
+}
+
+/* =======  FOOTER  ======= */
+footer {
+  background-color: var(--clr-primary-900);
+  color: var(--clr-surface);
+  text-align: center;
+  padding: 1rem 0;
+  font-size: .85rem;
+  margin-top: 4rem;
+}
+
+/* =======  RESPONSIVE  ======= */
+@media (min-width: 800px) {
+  body { padding: 0 2rem; }
+  .hero h2 { font-size: 2.75rem; }
+}
