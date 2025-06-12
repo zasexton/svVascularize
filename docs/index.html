@@ -32,8 +32,16 @@
 
   <section id="about" class="content">
     <div class="container">
-      <h3>About</h3>
-      <p>The project helps tissue engineers and computational hemodynamics scientists generate synthetic vessel networks when experimental data is limited.</p>
+      <h3>About<code>svVascularize</code> </h3>
+      <p><code>svVascularize</code> (svv) is an <strong>open-source</strong>, <strong>user-friendly</strong> toolkit that algorithmically grows physiologically realistic vascular trees when imaging data are unavailable or incomplete.</p>
+          <p><strong>Why it matters:</strong></p>
+      <ul>
+        <li><em>Biofabrication &amp; 3D printing</em> — export watertight VTP/STL meshes ready for extrusion-based printing, FRESH/SWIFT bioprinting, or sacrificial templating. Radii, bifurcation angles, and tapering rules are tunable to match printer resolution and biomaterial rheology.</li>
+        <li><em>Patient-specific cardiovascular modelling</em> — fill in unresolved distal vasculature to close boundary conditions for 0D, 1D, or full 3D SimVascular flow simulations. Trees can be constrained to an anatomical mask or grown freely inside an organ ROI.</li>
+        <li><em>Design-space exploration</em> — generate thousands of candidate networks in minutes, enabling optimisation loops for perfusion homogeneity, wall shear stress, or material usage.</li>
+      </ul>
+
+      <p>The core engine is modern Python with <em>cython</em> acceleration, delivering <strong>&lt; 1 min</strong> generation times for networks exceeding 10 000 segments. Every release ships wheels for Windows, macOS, and Linux, so a quick <code>pip install svv</code> gets you started immediately.</p>
     </div>
   </section>
 
