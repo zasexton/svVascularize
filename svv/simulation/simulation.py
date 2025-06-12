@@ -550,7 +550,7 @@ class Simulation(object):
             raise ValueError("Too many arguments.")
         if isinstance(self.synthetic_object, svv.tree.tree.Tree):
             simulation_file = minidom.Document()
-            svfsi_file = simulation_file.createElement("svFSIFile")
+            svfsi_file = simulation_file.createElement("svMultiPhysicsFile")
             svfsi_file.setAttribute("version", "0.1")
             general_simulation_parameters = GeneralSimulationParameters()
             fluid_mesh = self.fluid_domain_meshes[0]
@@ -562,7 +562,7 @@ class Simulation(object):
             self.fluid_3d_simulations[0] = tuple([simulation_file, fluid_mesh])
         elif isinstance(self.synthetic_object, svv.forest.forest.Forest):
             simulation_file = minidom.Document()
-            svfsi_file = simulation_file.createElement("svFSIFile")
+            svfsi_file = simulation_file.createElement("svMultiPhysicsFile")
             svfsi_file.setAttribute("version", "0.1")
             general_simulation_parameters = GeneralSimulationParameters()
             fluid_mesh = self.fluid_domain_meshes[network_id][tree_id]
@@ -593,9 +593,9 @@ class Simulation(object):
         else:
             raise ValueError("Too many arguments.")
         if isinstance(self.synthetic_object, svv.tree.tree.Tree):
-            simulation_file, fluid_mesh = self.fluid_simulations[0]
+            simulation_file, fluid_mesh = self.fluid_3d_simulations[0]
         elif isinstance(self.synthetic_object, svv.forest.forest.Forest):
-            simulation_file, fluid_mesh = self.fluid_simulations[network_id][tree_id]
+            simulation_file, fluid_mesh = self.fluid_3d_simulations[network_id][tree_id]
         else:
             raise ValueError("Index out of range.")
         if not isinstance(simulation_file, type(None)) and not isinstance(fluid_mesh, type(None)):

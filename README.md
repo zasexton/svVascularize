@@ -5,7 +5,8 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20|%20linux%20|%20windows-blue)
 ![Latest Release](https://img.shields.io/github/v/release/SimVascular/svVascularize?label=latest)
 [![codecov](https://codecov.io/github/SimVascular/svVascularize/graph/badge.svg)](https://codecov.io/github/SimVascular/svVascularize)
-[![DOI](https://img.shields.io/badge/DOI-green)]()
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)]()
+[![Docs](https://img.shields.io/badge/docs-gh--pages-brightgreen)](https://simvascular.github.io/svVascularize/)
 
 <p align="left">
 The svVascularize (svv) is an open-source API for automated vascular generation and multi-fidelity hemodynamic simulation
@@ -15,6 +16,6 @@ engineers and computational hemodynamic scientists with de novo vasculature that
 biomanufacturing applications or computational fluid dynamic (CFD) analysis.
 </p>
 
-* **Website:** 
-* **PyPi:** 
-* **Source code:**
+* **Website:** https://simvascular.github.io/svVascularize/
+* **PyPi:** https://pypi.org/project/svv/
+* **Source code:** https://github.com/zasexton/svVascularize

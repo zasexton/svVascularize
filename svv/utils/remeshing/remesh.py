@@ -16,7 +16,7 @@ dirpath = os.path.dirname(filepath)
 modulepath = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
 
 def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, verbosity=1,
-                   hmax=None, hmin=None, hsiz=True, noinsert=None, nomove=None, nosurf=True,
+                   hmax=None, hmin=None, hsiz=None, noinsert=None, nomove=None, nosurf=True,
                    noswap=None, nr=None, optim=None, rn=None, nsd=None):
     """
     Remeshes a 2D surface boundary using MMG2D.
@@ -312,7 +312,7 @@ def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, 
     faces = numpy.hstack([numpy.full((faces.shape[0], 1), 3), faces])
     remeshed_surface = pv.PolyData(remeshed_points, faces.flatten())
     remeshed_surface = remeshed_surface.rotate_vector(rotation_axis.flatten(), -rotation_angle, point=boundary[0].center, inplace=False)
-    remeshed_surface.points[:full_pts.shape[0], :] = full_pts
+    #remeshed_surface.points[:full_pts.shape[0], :] = full_pts
     if autofix:
         if not remeshed_surface.is_manifold:
             fix = pymeshfix.MeshFix(remeshed_surface)
