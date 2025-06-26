@@ -10,6 +10,8 @@ import shutil
 import tarfile
 import json
 import stat
+import re
+from pathlib import Path
 import multiprocessing
 
 num_cores = multiprocessing.cpu_count() // 2
@@ -551,7 +553,15 @@ extensions = [
               include_dirs=[numpy.get_include()], language='c++'),
 ]
 
-__version__ = '0.0.32'
+def read_version():
+    init_path = Path(__file__).parent / "yourpackage" / "__init__.py"
+    src = init_path.read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]+)[\'"]', src, re.M)
+    if match:
+        return match.group(1)
+    raise RuntimeError("Cannot find __version__ in __init__.py")
+
+VERSION = read_version()
 
 with open("README.md", "r", encoding="utf-8") as file:
     DESCRIPTION = file.read()
@@ -596,7 +606,7 @@ KEYWORDS = ["modeling",
 
 setup_info = dict(
     name='svv',
-    version=__version__,
+    version=VERSION,
     author='Zachary Sexton',
     author_email='zsexton@stanford.edu',
     license='MIT',
