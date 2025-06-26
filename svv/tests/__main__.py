@@ -16,7 +16,7 @@ import pytest
 def main() -> None:
     # Locate the source package root wherever it is installed.
     root = pathlib.Path(__file__).resolve().parents[2]
-    tests_dir = root / "tests"
+    tests_dir = root / "test"
 
     if not tests_dir.is_dir():
         # This installation does not contain the tests suite

@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from svv.forest.connect.base import Curve
+#from svv.forest.connect.base import Curve
 from svv.forest.connect.bezier import BezierCurve
 
 
