@@ -328,7 +328,7 @@ def build_0d(num_cores=None):
     cmake_cmd += [
         "-DCMAKE_BUILD_TYPE=Release",
         "-B", build_dir_0d,
-        "-S", mmg_subdir
+        "-S", source_path_0d
     ]
 
     # Run build step
