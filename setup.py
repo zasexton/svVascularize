@@ -554,7 +554,7 @@ extensions = [
 ]
 
 def read_version():
-    init_path = Path(__file__).parent / "yourpackage" / "__init__.py"
+    init_path = Path(__file__).parent / "svv" / "__init__.py"
     src = init_path.read_text(encoding="utf-8")
     match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]+)[\'"]', src, re.M)
     if match:
