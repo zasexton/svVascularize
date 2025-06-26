@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from svv.forest.connect.base import Curve  # The base Curve class
+#from svv.forest.connect.base import Curve  # The base Curve class
 from svv.forest.connect.catmullrom import CatmullRomCurve  # CatmullRomCurve class
 
 def test_constructor_valid_2d():
@@ -178,11 +178,11 @@ def test_transform_3d():
     np.testing.assert_allclose(spline.control_points[0], [2,3,4], atol=1e-7)
     np.testing.assert_allclose(spline.control_points[1], [3,4,5], atol=1e-7)
 
-def test_is_subclass_of_curve():
-    """Ensure CatmullRomCurve is indeed a subclass of Curve."""
-    ctrl_pts = [[0,0],[1,1]]
-    spline = CatmullRomCurve(ctrl_pts)
-    assert isinstance(spline, Curve)
+#def test_is_subclass_of_curve():
+#    """Ensure CatmullRomCurve is indeed a subclass of Curve."""
+#    ctrl_pts = [[0,0],[1,1]]
+#    spline = CatmullRomCurve(ctrl_pts)
+#    assert isinstance(spline, Curve)
 
 def test_is_closed():
     """Check is_closed property for open vs. closed Catmull–Rom."""

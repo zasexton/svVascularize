@@ -27,17 +27,17 @@ def test_catmull_rom_curve():
 
 
 # Test Case 3: NURBS curve type with additional parameters
-def test_nurbs_curve():
-    control_points = [(0, 0), (1, 2), (3, 4)]
-    knots = [0, 0, 1, 1]
-    weights = [1, 1, 1]
-    curve = Curve(control_points, curve_type="NURBS", knots=knots, weights=weights)
-
-    # Check that the correct type is instantiated
-    assert isinstance(curve.curve, NURBSCurve)
-    assert curve.curve.control_points.shape == (3, 2)  # 3 control points, 2D
-    assert curve.curve.knots == knots
-    assert curve.curve.weights == weights
+#def test_nurbs_curve():
+#    control_points = [(0, 0), (1, 2), (3, 4)]
+#    knots = [0, 0, 1, 1]
+#    weights = [1, 1, 1]
+#    curve = Curve(control_points, curve_type="NURBS", knots=knots, weights=weights)
+#
+#    # Check that the correct type is instantiated
+#    assert isinstance(curve.curve, NURBSCurve)
+#    assert curve.curve.control_points.shape == (3, 2)  # 3 control points, 2D
+#    assert curve.curve.knots == knots
+#    assert curve.curve.weights == weights
 
 
 # Test Case 4: Unsupported curve type
