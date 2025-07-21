@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>svVascularize Quickstart</title>
+  <link href="https://fonts.googleapis.com/css?family=Montserrat:400,700" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topnav">
+    <div class="container">
+      <h1><a href="../index.html">svVascularize</a></h1>
+      <nav>
+        <a href="index.html#about">About</a>
+        <a href="install.html">Installation</a>
+        <a href="doc.html">Documentation</a>
+        <a href="index.html#simulation">Simulation</a>
+        <a href="https://pypi.org/project/svv/" target="_blank" rel="noopener">PyPI</a>
+        <a href="https://github.com/SimVascular/svVascularize" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container content">
+    <h2>Quickstart tutorial</h2>
+    <p>This short guide shows how to grow a small vascular tree and export 0‑D simulation files.</p>
+
+
+    <h3>Generate and visualise a tree</h3>
+    <pre data-copy><code class="language-python">import pyvista as pv
+from svv.domain import Domain
+from svv.tree.tree import Tree
+
+cube = Domain(pv.Cube())
+cube.create()
+cube.solve()
+cube.build()
+
+t = Tree()
+t.set_domain(cube)
+t.set_root()
+t.n_add(50)
+
+t.show(plot_domain=True)</code></pre>
+
+    <h3>Export 0‑D simulation files</h3>
+    <pre data-copy><code class="language-python">from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation
+
+export_0d_simulation(t, outdir="my_0d")
+</code></pre>
+    <p>This writes <code>solver_0d.in</code> and <code>geom.csv</code> in <code>my_0d/</code>. Run the solver with <code>svZeroDSolver</code>.</p>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2025 SimVascular, Stanford University, The Regents of the University of California, and others —
+      <a href="https://opensource.org/license/BSD-3-Clause">BSD 3-Clause License</a><br></p>
+    </div>
+  </footer>
+
+  <script defer src="script.js"></script>
+</body>
+</html>
