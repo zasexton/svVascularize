@@ -140,6 +140,23 @@ main h2 {
   margin-top: 3rem;
 }
 
+.figure-center {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.figure-center img {
+  max-width: 100%;
+  display: block;
+  margin: 0 auto;
+}
+
+.figure-center figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--clr-grey-500);
+}
+
 /* Full-width blocks */
 pre {
   background: var(--clr-grey-100);               /* light grey fill   */
