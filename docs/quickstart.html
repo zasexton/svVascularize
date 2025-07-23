@@ -24,7 +24,11 @@
 
   <main class="container content">
     <h2>Quickstart tutorial</h2>
-    <p>This short guide shows how to grow a small vascular tree and export 0‑D simulation files.</p>
+    <p>This guide shows how to grow a small synthetic vascular tree and export 0‑D simulation files for a simple
+      convex shape. For this example we will forgo including other build parameters such as starting points and
+      additional hemodynamic constraints in order to focus on only the essential API for a minimally viable tree
+      object. Here we create a simple domain, grow a vascular tree, visualising it in an interactive viewer, and
+      export 0‑D hemodynamic simulation files for further analysis using <code>svzerodsolver</code> .</p>
 
 
     <h3>Generate and visualise a tree</h3>
@@ -32,16 +36,19 @@
 from svv.domain.domain import Domain
 from svv.tree.tree import Tree
 
+# Creating the Tissue Domain
 cube = Domain(pv.Cube())
 cube.create()
 cube.solve()
 cube.build()
 
+# Creating the Vascular Tree Object
 t = Tree()
 t.set_domain(cube)
 t.set_root()
 t.n_add(50)
 
+# Visualizing the Tree and Domain
 t.show(plot_domain=True)</code></pre>
 
     <figure class="figure-center">
@@ -53,7 +60,11 @@ t.show(plot_domain=True)</code></pre>
 
 export_0d_simulation(t, outdir="my_0d")
 </code></pre>
-    <p>This writes <code>solver_0d.in</code> and <code>geom.csv</code> in <code>my_0d/</code>. Run the solver with <code>svZeroDSolver</code>.</p>
+    <p>This writes a 0-D solver input file, <code>solver_0d.in</code>, and geometric file, <code>geom.csv</code>, in
+      the folder <code>my_0d/</code>. The input file should contain all necessary parameters and inflow conditions to run
+      the simulation. By default, 0-D simulations exported via this routine will simulate steady state flow through the
+      vascular trees. Time-varying flows can be considered if additional arguments are applied to the
+      <code>export_0d_simulation</code> function. Run the solver with <a href="https://simvascular.github.io/documentation/rom_simulation.html#0d-solver-user-guide"><code>svZeroDSolver</code></a>.</p>
   </main>
 
   <footer>
