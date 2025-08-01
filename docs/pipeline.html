@@ -63,6 +63,12 @@
          <code>simulation.fluid_domain_boundary_layers</code>. Storing the meshes as python objects allows for more custom
          modification procedures that users may want to implement prior to creating the simulation files.
      </p>
+     <div class="callout"><strong>Mesh building: </strong> This step is potentially memory and compute intensive depending
+         on the size of the synthetic vascular object being discretized. Under the hood, <code>svVascularize</code> is
+         using a combination of <code>tetgen</code> and <code>mmg</code> meshing utilities via python subprocess calls.
+         These, as well as surface mesh unioning operations, are non-trivial and may take minutes-hours to complete.
+         Users can supply custom meshing parameters for their applications to override default values this may result
+         in more efficient meshing, but it is recommended that default parameters are attemped first.</div>
  </main>
   <footer>
     <div class="container">
