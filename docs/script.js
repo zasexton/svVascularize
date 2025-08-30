@@ -70,3 +70,68 @@ document.addEventListener('DOMContentLoaded', () => {
     document.head.appendChild(py);
   };
 })();
+
+
+// --- Appended by API reference integration ---
+
+/* =====================
+   API REFERENCE ENHANCEMENTS
+   ===================== */
+(function () {
+  // Build local TOC on the right if #local-toc exists
+  const localToc = document.getElementById('local-toc');
+  const content = document.querySelector('.content');
+  if (localToc && content) {
+    const heads = content.querySelectorAll('h2, h3');
+    const ol = document.createElement('ol');
+    heads.forEach(h => {
+      if (!h.id) h.id = h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      ol.appendChild(li);
+
+      // Add anchor permalink to headings
+      const anchor = document.createElement('a');
+      anchor.href = '#' + h.id;
+      anchor.className = 'anchor';
+      anchor.setAttribute('aria-label', 'Permalink');
+      anchor.textContent = '¶';
+      h.appendChild(anchor);
+    });
+    localToc.appendChild(ol);
+
+    // Scroll spy to highlight current heading in TOC
+    const tocLinks = localToc.querySelectorAll('a');
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const id = entry.target.getAttribute('id');
+        const link = localToc.querySelector(`a[href="#${id}"]`);
+        if (entry.isIntersecting) {
+          tocLinks.forEach(l => l.classList.remove('active'));
+          if (link) link.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px', threshold: [0, 1.0] });
+    heads.forEach(h => obs.observe(h));
+  }
+
+  // Auto-enable copy-to-clipboard on code blocks
+  document.querySelectorAll('pre').forEach(pre => pre.setAttribute('data-copy', ''));
+
+  // Smooth anchor scrolling with header offset
+  function scrollWithOffset(e) {
+    if (this.hash && this.pathname === location.pathname) {
+      const target = document.querySelector(this.hash);
+      if (target) {
+        e.preventDefault();
+        const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
+        window.scrollTo({ top, behavior: 'smooth' });
+        history.replaceState(null, '', this.hash);
+      }
+    }
+  }
+  document.querySelectorAll('a[href^="#"]').forEach(a => a.addEventListener('click', scrollWithOffset));
+})();
