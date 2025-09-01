@@ -210,7 +210,7 @@
    ===================== */
 .api-grid {
   display: grid;
-  grid-template-columns: var(--api-sidebar-width) 1fr var(--api-toc-width);
+  grid-template-columns: var(--api-sidebar-width) minmax(0, 1fr) var(--api-toc-width);
   gap: var(--api-grid-gap);
   margin-top: 2rem;
 }
@@ -331,6 +331,8 @@
   border-collapse: collapse;
   margin: 1rem 0;
   font-size: 0.9rem;
+  table-layout: fixed;
+  word-wrap: break-word;
 }
 
 .api-table th {
@@ -346,6 +348,7 @@
   padding: 0.75rem;
   border: 1px solid var(--clr-grey-300);
   vertical-align: top;
+  overflow-wrap: break-word;
 }
 
 .api-table tbody tr:nth-child(even) {
@@ -361,6 +364,28 @@
   padding: 0.15rem 0.3rem;
   border-radius: 3px;
   font-size: 0.85rem;
+  word-break: break-word;
+}
+
+/* Responsive table wrapper */
+.api-table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+  .api-table {
+    table-layout: auto;
+  }
+
+  .api-submodules,
+  .api-parameters {
+    overflow-x: auto;
+  }
+
+  .api-table {
+    min-width: 500px;
+  }
 }
 
 /* =====================
@@ -553,7 +578,7 @@
    ===================== */
 @media (max-width: 1200px) {
   .api-grid {
-    grid-template-columns: var(--api-sidebar-width) 1fr;
+    grid-template-columns: var(--api-sidebar-width) minmax(0, 1fr);
   }
 
   .api-toc-sidebar {
@@ -563,12 +588,16 @@
 
 @media (max-width: 900px) {
   .api-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .api-sidebar {
     position: static;
     margin-bottom: 2rem;
+  }
+
+  .api-toc-sidebar {
+    display: none;
   }
 
   .api-quick-nav {
@@ -595,6 +624,58 @@
   .api-table th,
   .api-table td {
     padding: 0.5rem;
+  }
+
+  /* Ensure main content takes full width */
+  .api-main-content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Make tables scrollable on mobile */
+  .api-table-wrapper,
+  .api-submodules {
+    overflow-x: auto;
+  }
+
+  .api-table {
+    min-width: 500px;
+  }
+}
+
+/* Ensure smooth transitions */
+.api-grid,
+.api-sidebar,
+.api-main-content,
+.api-toc-sidebar {
+  transition: all 0.3s ease;
+}
+
+/* Prevent content overflow */
+.api-main-content {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* Fix for sticky sidebars on resize */
+@media (min-width: 901px) {
+  .api-sidebar {
+    position: sticky;
+    top: 5rem;
+    align-self: start;
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+  }
+}
+
+@media (min-width: 1201px) {
+  .api-toc-sidebar {
+    display: block;
+    position: sticky;
+    top: 5rem;
+    align-self: start;
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
   }
 }
 
@@ -712,4 +793,52 @@ code {
 
 .api-submodules li {
   margin: 0.25rem 0;
+}
+
+/* Mobile sidebar toggle button */
+.api-sidebar-toggle {
+  display: none;
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 999;
+  padding: 0.75rem 1rem;
+  background-color: var(--clr-primary-600);
+  color: white;
+  border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all var(--ease-fast);
+}
+
+.api-sidebar-toggle:hover {
+  background-color: var(--clr-primary-400);
+  transform: scale(1.05);
+}
+
+@media (max-width: 900px) {
+  .api-sidebar-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+}
+
+/* Prevent horizontal scroll */
+.api-container {
+  overflow-x: hidden;
+}
+
+/* Fix pre code blocks overflow */
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Ensure images don't break layout */
+img {
+  max-width: 100%;
+  height: auto;
 }
