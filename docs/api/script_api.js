@@ -297,13 +297,35 @@
       sidebar.parentElement.insertBefore(toggleBtn, sidebar);
 
       // Handle responsive behavior
+      let resizeTimer;
       const checkResponsive = () => {
-        if (window.innerWidth <= 900) {
+        const width = window.innerWidth;
+
+        if (width <= 900) {
           toggleBtn.style.display = 'block';
           sidebar.style.display = 'none';
+          sidebar.style.position = 'static';
         } else {
           toggleBtn.style.display = 'none';
           sidebar.style.display = 'block';
+          sidebar.style.position = 'sticky';
+          // Remove any mobile-specific inline styles
+          sidebar.style.top = '';
+          sidebar.style.left = '';
+          sidebar.style.right = '';
+          sidebar.style.bottom = '';
+          sidebar.style.background = '';
+          sidebar.style.zIndex = '';
+          sidebar.style.padding = '';
+          sidebar.style.overflowY = '';
+        }
+
+        // Force layout recalculation
+        const grid = document.querySelector('.api-grid');
+        if (grid) {
+          grid.style.display = 'none';
+          grid.offsetHeight; // Force reflow
+          grid.style.display = '';
         }
       };
 
@@ -342,9 +364,22 @@
         }
       });
 
-      // Check on load and resize
+      // Handle window resize with debouncing
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          checkResponsive();
+
+          // Remove mobile overlay if present
+          const closeBtn = sidebar.querySelector('.api-sidebar-close');
+          if (closeBtn && window.innerWidth > 900) {
+            closeBtn.remove();
+          }
+        }, 250);
+      });
+
+      // Check on load
       checkResponsive();
-      window.addEventListener('resize', checkResponsive);
 
       // Close sidebar when clicking a link on mobile
       sidebar.addEventListener('click', (e) => {

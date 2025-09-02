@@ -71,7 +71,7 @@ from svv.domain import Domain
 import pyvista as pv
 
 # Create domain from mesh
-mesh = pv.read('vessel_region.stl')
+mesh = pv.read('tissue_region.stl')
 domain = Domain(mesh)
 domain.create()
 domain.solve()
