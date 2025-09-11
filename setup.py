@@ -301,7 +301,7 @@ def build_0d(num_cores=None):
     if shutil.which("cmake") is None:
         raise RuntimeError("CMake is not installed or not on the PATH.")
 
-    download_url_0d = "https://github.com/SimVascular/svZeroDSolver/archive/refs/tags/v2.0.tar.gz"
+    download_url_0d = "https://github.com/SimVascular/svZeroDSolver/archive/refs/tags/v3.0.tar.gz"
     tarball_path_0d = "svZeroDSolver.tar.gz"
     source_path_0d = os.path.abspath("svZeroDSolver")
 
@@ -323,13 +323,29 @@ def build_0d(num_cores=None):
         raise RuntimeError("Error extracting solver archives.") from e
 
     build_dir_0d = os.path.abspath("tmp/solver-0d")
+    os.makedirs(build_dir_0d, exist_ok=True)
 
+    # On Windows, pick a Visual Studio generator if possible
+    if platform.system().lower().startswith("win"):
+        vs_generator = pick_visual_studio_generator()
+        if vs_generator:
+            cmake_cmd += ["-G", vs_generator]
+        else:
+            print("No suitable Visual Studio found, falling back to default generator or NMake.")
+            # cmake_cmd += ["-G", "NMake Makefiles"]  # optional fallback
     # Add standard arguments
     cmake_cmd += [
         "-DCMAKE_BUILD_TYPE=Release",
         "-B", build_dir_0d,
-        "-S", source_path_0d
+        "-S", source_path_0d+os.sep+"svZeroDSolver-3.0"
     ]
+
+    # Run configure step
+    print("Configuring mmg with CMake:", " ".join(cmake_cmd))
+    try:
+        subprocess.check_call(cmake_cmd)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("CMake configure failed for mmg.") from e
 
     # Run build step
     build_cmd = [
@@ -337,12 +353,41 @@ def build_0d(num_cores=None):
         "--build", build_dir_0d,
         "--parallel", str(num_cores)
     ]
+
+    if platform.system().lower().startswith("win"):
+        # or detect if vs_generator is set if you want to be more precise
+        build_cmd += ["--config", "Release"]
+
+    try:
+        subprocess.check_call(build_cmd)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("CMake build failed for svZeroDSolver.") from e
+
+    install_tmp_prefix = os.path.join("svv", "tmp")
+    os.makedirs(install_tmp_prefix, exist_ok=True)
+    install_cmd = [
+        "cmake",
+        "--install", build_dir_0d,
+        "--prefix", os.path.abspath(install_tmp_prefix),
+    ]
+
+    # For multi-configuration generators on Windows (like Visual Studio),
+    # specify `--config Release` explicitly if you built in Release mode.
+    if platform.system().lower().startswith("win"):
+        install_cmd += ["--config", "Release"]
+
+    print("Installing svZeroDSolver with CMake:", " ".join(install_cmd))
+    subprocess.check_call(install_cmd)
+    print(f"svZeroDSolver executables have been installed into: {install_tmp_prefix}")
+
+
 class DownloadAndBuildExt(build_ext):
     def run(self):
         #------------------------------
         # Get MMG Remeshing Source Code
         #------------------------------
         build_mmg()
+        build_0d()
         # -----------------------------
         # 1. Download: handle errors
         # -----------------------------
