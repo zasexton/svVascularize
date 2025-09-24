@@ -100,11 +100,11 @@ forest.set_roots(start_points)
 # Grow networks
 forest.add(100)  # Add 100 vessels to each tree
 
-# Connect trees within networks
-forest.connect(degree=3)  # Bezier connections
+# Connect trees within networks (start with cubic curves)
+forest.connect(3)
 
 # Visualize
-forest.show()</code></pre>
+forest.show(plot_domain=True)</code></pre>
         </div>
 
         <!-- Main Documentation Grid -->
@@ -333,18 +333,20 @@ forest.show()</code></pre>
 
                     <div class="api-method">
                         <div class="api-method-signature">
-                            <code>connect(degree=3, **kwargs)</code>
+                            <code>connect(*args, **kwargs)</code>
                         </div>
-                        <p>Create connections between trees within networks.</p>
+                        <p>Create connections between trees within each network.</p>
                         <div class="api-method-params">
-                            <h4>Parameters</h4>
+                            <h4>Usage</h4>
                             <ul>
-                                <li><code>degree</code> (int, optional): Polynomial degree for Bezier connections</li>
-                                <li><code>**kwargs</code>: Additional parameters for connection algorithm</li>
+                                <li><code>forest.connect()</code>: start with linear connections</li>
+                                <li><code>forest.connect(3)</code>: start optimization with cubic curves</li>
+                                <li><code>forest.connect(curve_type='NURBS')</code>: switch curve family</li>
                             </ul>
                             <h4>Notes</h4>
-                            <p>Creates a ForestConnection object that manages inter-tree connections using various
-                            algorithms (Bezier, NURBS, geodesic, etc.).</p>
+                            <p>The method instantiates a <code>ForestConnection</code> that orchestrates
+                            <code>TreeConnection</code> and <code>VesselConnection</code> objects to build
+                            collision-free connecting vessels.</p>
                         </div>
                     </div>
                 </section>
@@ -373,11 +375,14 @@ forest.show()</code></pre>
                         <div class="api-method-signature">
                             <code>show(**kwargs)</code>
                         </div>
-                        <p>Visualize the entire forest with different networks colored separately.</p>
+                        <p>Visualize the entire forest with PyVista.</p>
                         <div class="api-method-params">
                             <h4>Parameters</h4>
                             <ul>
-                                <li><code>**kwargs</code>: PyVista plotting parameters</li>
+                                <li><code>colors</code> (list[str], optional): Cycle of colors for each tree</li>
+                                <li><code>plot_domain</code> (bool): Overlay the domain boundary (default: False)</li>
+                                <li><code>return_plotter</code> (bool): Return the PyVista plotter instead of showing</li>
+                                <li><code>**kwargs</code>: Additional PyVista plotting parameters</li>
                             </ul>
                         </div>
                     </div>
@@ -425,10 +430,10 @@ for i in range(200):
               f"Venous terminals: {forest.networks[1][0].n_terminals}")
 
 # Connect within networks if multiple trees
-forest.connect(degree=3)
+forest.connect(3)
 
 # Visualize with different colors
-forest.show(arterial_color='red', venous_color='blue')</code></pre>
+forest.show(colors=['red', 'blue'], plot_domain=True)</code></pre>
                     </div>
 
                     <div class="api-example">
@@ -457,11 +462,11 @@ forest.set_roots(start_points=[corners])
 forest.add(50)
 
 # Create inter-tree connections
-forest.connect(degree=5)  # Higher degree for smoother connections
+forest.connect(5)  # Higher degree for smoother connections
 
 # Access connection data
 if forest.connections:
-    print(f"Number of connections: {len(forest.connections.paths)}")
+    print(f"Tree connections solved: {len(forest.connections.tree_connections)}")
 
 # Export connected network
 forest.export_solid(outdir='connected_network')</code></pre>
@@ -470,44 +475,37 @@ forest.export_solid(outdir='connected_network')</code></pre>
                     <div class="api-example">
                         <h3>Competitive Growth Pattern</h3>
                         <pre data-copy><code class="language-python"># Enable competition between networks
+import numpy as np
 forest = Forest(
     domain=domain,
     n_networks=3,  # Three competing networks
     n_trees_per_network=[1, 1, 1],
-    physical_clearance=0.3,
+    physical_clearance=0.1,
     compete=True  # Enable competition
 )
 
 # Set starting points
 starts = [
-    [np.array([0, -20, 0])],   # Network 1
+    [np.array([0, -20, 0])],    # Network 1
     [np.array([17, 10, 0])],    # Network 2
     [np.array([-17, 10, 0])]    # Network 3
 ]
 
 forest.set_roots(start_points=starts)
 
-# Track growth statistics
-stats = {'network_0': [], 'network_1': [], 'network_2': []}
-
-# Competitive growth
-for step in range(150):
-    forest.add(1, decay_probability=0.85)  # Stronger decay
-
-    # Record statistics
-    for i in range(3):
-        stats[f'network_{i}'].append(forest.networks[i][0].n_terminals)
-
-    # Check dominance
-    if step % 30 == 0:
-        volumes = [forest.networks[i][0].tree_scale for i in range(3)]
-        dominant = np.argmax(volumes)
-        print(f"Step {step}: Network {dominant} dominates with volume {volumes[dominant]:.2f}")
+forest.add(50)
 
 # Analyze competition results
 import matplotlib.pyplot as plt
-for i in range(3):
-    plt.plot(stats[f'network_{i}'], label=f'Network {i}')
+# Track terminal counts over time
+terminal_history = []
+for _ in range(50):
+    forest.add(1)
+    terminal_history.append([forest.networks[i][0].n_terminals for i in range(3)])
+
+terminal_history = np.array(terminal_history)
+for i in range(terminal_history.shape[1]):
+    plt.plot(terminal_history[:, i], label=f'Network {i}')
 plt.xlabel('Growth Step')
 plt.ylabel('Number of Terminals')
 plt.legend()
@@ -527,9 +525,9 @@ plt.show()</code></pre>
                     </div>
 
                     <div class="admonition note">
-                        <p><strong>Space Competition:</strong> When <code>compete=True</code>, trees compete for space through
-                        probability decay. Regions occupied by one network become less likely to be selected by others,
-                        creating natural territorial boundaries.</p>
+                        <p><strong>Space Sampling:</strong> When sampling space for new terminal selection the probability
+                        that a region which has been previously sampled is drawn again for another terminal decays by the
+                        indicated value to encourage the vascular growth into unvisited territories.</p>
                     </div>
 
                     <div class="admonition warning">

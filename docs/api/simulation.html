@@ -325,27 +325,34 @@ sim.construct_1d_fluid_simulation(
 
                     <div class="api-method">
                         <div class="api-method-signature">
-                            <code>construct_3d_fluid_simulation(network_id=0, tree_id=0)</code>
+                            <code>construct_3d_fluid_simulation(*args)</code>
                         </div>
                         <p>Construct a 3D CFD simulation configuration.</p>
                         <div class="api-method-params">
-                            <h4>Parameters</h4>
+                            <h4>Usage</h4>
                             <ul>
-                                <li><code>network_id</code> (int): Network index for Forest objects</li>
-                                <li><code>tree_id</code> (int): Tree index within network</li>
+                                <li><code>sim.construct_3d_fluid_simulation()</code> for single-tree cases</li>
+                                <li><code>sim.construct_3d_fluid_simulation(network_id)</code> for a specific network</li>
+                                <li><code>sim.construct_3d_fluid_simulation(network_id, tree_id)</code> for a specific tree</li>
                             </ul>
                             <h4>Creates</h4>
-                            <p>XML configuration file compatible with svFSI solver including mesh definitions,
+                            <p>XML configuration file compatible with the svFSI solver, including mesh definitions,
                             boundary conditions, and solver parameters.</p>
                         </div>
                     </div>
 
                     <div class="api-method">
                         <div class="api-method-signature">
-                            <code>write_3d_fluid_simulation(network_id=0, tree_id=0)</code>
+                            <code>write_3d_fluid_simulation(*args)</code>
                         </div>
                         <p>Write 3D simulation files to disk.</p>
                         <div class="api-method-params">
+                            <h4>Usage</h4>
+                            <ul>
+                                <li><code>sim.write_3d_fluid_simulation()</code> for single-tree cases</li>
+                                <li><code>sim.write_3d_fluid_simulation(network_id)</code> for a specific network</li>
+                                <li><code>sim.write_3d_fluid_simulation(network_id, tree_id)</code> for a specific tree</li>
+                            </ul>
                             <h4>Output Structure</h4>
                             <pre><code>simulation_name/
 ├── mesh/
@@ -367,13 +374,18 @@ sim.construct_1d_fluid_simulation(
 
                     <div class="api-method">
                         <div class="api-method-signature">
-                            <code>construct_1d_fluid_simulation(network_id=0, tree_id=0, viscosity=None,
+                            <code>construct_1d_fluid_simulation(*args, viscosity=None,
                                                     density=None, time_step_size=0.01,
                                                     number_time_steps=100,
                                                     olufsen_material_exponent=2)</code>
                         </div>
                         <p>Construct a 1D reduced-order model simulation.</p>
                         <div class="api-method-params">
+                            <h4>Usage</h4>
+                            <ul>
+                                <li><code>sim.construct_1d_fluid_simulation()</code> for a single tree</li>
+                                <li><code>sim.construct_1d_fluid_simulation(network_id, tree_id)</code> for forests</li>
+                            </ul>
                             <h4>Parameters</h4>
                             <ul>
                                 <li><code>viscosity</code> (float): Dynamic viscosity (Pa·s)</li>
