@@ -152,22 +152,22 @@ results = sim.run()</code></pre>
                                     <tr>
                                         <td><code>domain.core</code></td>
                                         <td>Core matrix operations</td>
-                                        <td>AMatrix, HMatrix, MMatrix, NMatrix</td>
+                                        <td>a_matrix(), h_matrix(), m_matrix(), n_matrix()</td>
                                     </tr>
                                     <tr>
                                         <td><code>domain.io</code></td>
                                         <td>Input/output operations</td>
-                                        <td>read(), write(), export()</td>
+                                        <td>read()</td>
                                     </tr>
                                     <tr>
                                         <td><code>domain.kernel</code></td>
-                                        <td>Kernel functions and coordinate systems</td>
-                                        <td>CoordinateSystem, Cost, Kernel</td>
+                                        <td>Kernel functions and coordinate transforms</td>
+                                        <td>Kernel, cost(), cart2sph(), sph2cart()</td>
                                     </tr>
                                     <tr>
                                         <td><code>domain.routines</code></td>
                                         <td>Computational routines</td>
-                                        <td>allocate(), discretize(), tetrahedralize()</td>
+                                        <td>allocate(), contour(), tetrahedralize(), boolean()</td>
                                     </tr>
                                     <tr>
                                         <td><code>domain.solver</code></td>
@@ -235,24 +235,24 @@ boundary, _ = domain.get_boundary(resolution=30)</code></pre>
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td><code>BezierConnection</code></td>
-                                        <td>Bezier curve connections</td>
-                                        <td>Smooth, controllable curves</td>
+                                        <td><code>ForestConnection</code></td>
+                                        <td>High-level connection manager</td>
+                                        <td>Builds connections for each network</td>
                                     </tr>
                                     <tr>
-                                        <td><code>CatmullRomConnection</code></td>
-                                        <td>Catmull-Rom spline connections</td>
-                                        <td>Interpolating through points</td>
+                                        <td><code>TreeConnection</code></td>
+                                        <td>Per-network connection solver</td>
+                                        <td>Assigns and optimizes tree-to-tree links</td>
                                     </tr>
                                     <tr>
-                                        <td><code>GeodesicConnection</code></td>
-                                        <td>Geodesic path connections</td>
-                                        <td>Shortest path on surfaces</td>
+                                        <td><code>VesselConnection</code></td>
+                                        <td>Single connection optimizer</td>
+                                        <td>Generates connecting vessel segments</td>
                                     </tr>
                                     <tr>
-                                        <td><code>NURBSConnection</code></td>
-                                        <td>NURBS curve connections</td>
-                                        <td>Precise geometric control</td>
+                                        <td><code>Curve</code></td>
+                                        <td>Curve factory</td>
+                                        <td>Supports Bezier, Catmull-Rom, and NURBS shapes</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -267,21 +267,28 @@ boundary, _ = domain.get_boundary(resolution=30)</code></pre>
                         </div>
                         <div class="api-example">
                             <h4>Example Usage</h4>
-                            <pre data-copy><code class="language-python">from svv.forest import Forest
-from svv.forest.connect import BezierConnection
+                            <pre data-copy><code class="language-python">import pyvista as pv
+from svv.domain import Domain
+from svv.forest import Forest
 
-# Create a forest and add trees
-forest = Forest()
-forest.add_tree(tree1)
-forest.add_tree(tree2)
+# Prepare a domain and build its implicit representation
+domain = Domain(pv.Cube())
+domain.create()
+domain.solve()
+domain.build()
 
-# Connect trees using Bezier curves
-connection = BezierConnection(control_points=4)
-forest.connect_trees(tree1, tree2, method=connection)
+# Initialize a forest with two trees in one network
+trees_per_network = [2]
+forest = Forest(domain=domain, n_networks=1, n_trees_per_network=trees_per_network)
+forest.set_domain(domain)
+forest.set_roots()  # Randomize root placement
+forest.add(50)      # Grow 50 vessels per tree
 
-# Export the forest
-from svv.forest.export import export_solid
-export_solid(forest, 'forest_model.stl')</code></pre>
+# Connect the trees (starting with cubic curves)
+forest.connect(3)
+
+# Export watertight solids for downstream simulation or fabrication
+forest.export_solid(outdir='forest_model')</code></pre>
                         </div>
                     </article>
 
@@ -384,28 +391,21 @@ export_solid(forest, 'forest_model.stl')</code></pre>
                         <div class="api-example">
                             <h4>Example Usage</h4>
                             <pre data-copy><code class="language-python">from svv.simulation import Simulation
-from svv.simulation.boundary_conditions import FlowBC, PressureBC
-from svv.simulation.fluid.rom.zero_d import zerod_tree
+from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation
 
-# Set up simulation
-sim = Simulation(tree, dimension='0D')
+# Wrap a generated tree in a Simulation container
+sim = Simulation(tree, name='example_sim')
 
-# Configure boundary conditions
-sim.add_boundary_condition('inlet', FlowBC(flow_rate=5.0))
-sim.add_boundary_condition('outlet', PressureBC(pressure=80.0))
+# Build CFD-ready meshes and identify boundary faces
+sim.build_meshes(fluid=True, tissue=False, boundary_layer=True)
+sim.extract_faces(crease_angle=60.0)
 
-# Set fluid properties
-sim.set_parameters(
-    viscosity=0.004,  # Pa·s
-    density=1060      # kg/m³
-)
+# Construct and write an svFSI configuration
+sim.construct_3d_fluid_simulation()
+sim.write_3d_fluid_simulation()
 
-# Run simulation
-results = sim.run(time_steps=1000, dt=0.001)
-
-# Analyze results
-print(f"Mean pressure: {results.pressure.mean():.2f} mmHg")
-print(f"Mean flow: {results.flow.mean():.2f} mL/s")</code></pre>
+# Export a matching 0D model for fast hemodynamic studies
+export_0d_simulation(tree, outdir='tree_0d')</code></pre>
                         </div>
                     </article>
 
@@ -427,8 +427,10 @@ print(f"Mean flow: {results.flow.mean():.2f} mL/s")</code></pre>
                         <div class="api-submodules">
                             <h4>Available Utilities</h4>
                             <ul>
-                                <li><code>remeshing.remesh()</code> - Adaptive mesh refinement using MMG</li>
-                                <li><code>spatial.c_distance()</code> - Optimized distance calculations</li>
+                                <li><code>remeshing.remesh_surface()</code> - Remesh surface meshes with MMG</li>
+                                <li><code>remeshing.remesh_volume()</code> - Volume remeshing helpers</li>
+                                <li><code>spatial.minimum_segment_distance()</code> - Pairwise vessel distance checks</li>
+                                <li><code>spatial.minimum_self_segment_distance()</code> - Self-collision distance utility</li>
                             </ul>
                         </div>
                     </article>
@@ -446,22 +448,15 @@ print(f"Mean flow: {results.flow.mean():.2f} mL/s")</code></pre>
 
                         <div class="api-example">
                             <h4>Example Usage</h4>
-                            <pre data-copy><code class="language-python">from svv.visualize.tree import show, points
-from svv.visualize.forest import show as show_forest
+                            <pre data-copy><code class="language-python">from svv.visualize.tree.show import show as show_tree
+from svv.visualize.forest.show import show as show_forest
 
-# Visualize a single tree
-show(tree,
-     color_by='radius',
-     show_points=True,
-     backend='matplotlib')
+# Visualize a single tree with the enclosing domain
+show_tree(tree, color='crimson', plot_domain=True)
 
-# Export point cloud
-points.export_points(tree, 'tree_points.vtk')
-
-# Visualize entire forest
-show_forest(forest,
-           highlight_connections=True,
-           save_to='forest_viz.png')</code></pre>
+# Visualize an entire forest and save a screenshot
+plotter = show_forest(forest, colors=['red', 'royalblue'], plot_domain=True, return_plotter=True)
+plotter.screenshot('forest_viz.png')</code></pre>
                         </div>
                     </article>
                 </main>
@@ -485,23 +480,29 @@ show_forest(forest,
             <div class="api-example-grid">
                 <div class="api-example-card">
                     <h3>Generate a Vascular Tree</h3>
-                    <pre data-copy><code class="language-python">from svv.tree import Tree
+                    <pre data-copy><code class="language-python">import pyvista as pv
 from svv.domain import Domain
+from svv.tree import Tree
 
-domain = Domain(size=(10, 10, 10))
-tree = Tree(domain, n_terminals=100)
-tree.generate(method='CCO')
-tree.export('vascular_tree.vtk')</code></pre>
+domain = Domain(pv.Cube())
+domain.create()
+domain.solve()
+domain.build()
+
+tree = Tree()
+tree.set_domain(domain)
+tree.set_root()
+tree.n_add(100)
+
+# Export watertight geometry for printing or meshing
+tree.export_solid(outdir='vascular_tree')</code></pre>
                 </div>
 
                 <div class="api-example-card">
                     <h3>Run 0D Simulation</h3>
-                    <pre data-copy><code class="language-python">from svv.simulation.fluid.rom.zero_d import zerod_tree
+                    <pre data-copy><code class="language-python">from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation
 
-model = zerod_tree(tree)
-model.set_cardiac_output(5.0)  # L/min
-results = model.solve()
-model.plot_results()</code></pre>
+export_0d_simulation(tree, outdir='tree_0d', steady=True)</code></pre>
                 </div>
             </div>
         </section>
