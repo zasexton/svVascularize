@@ -474,35 +474,20 @@ forest = Forest(
     domain=domain,
     n_networks=3,  # Three competing networks
     n_trees_per_network=[1, 1, 1],
-    physical_clearance=0.3,
+    physical_clearance=0.1,
     compete=True  # Enable competition
 )
 
 # Set starting points
 starts = [
-    [np.array([0, -20, 0])],   # Network 1
+    [np.array([0, -20, 0])],    # Network 1
     [np.array([17, 10, 0])],    # Network 2
     [np.array([-17, 10, 0])]    # Network 3
 ]
 
 forest.set_roots(start_points=starts)
 
-# Track growth statistics
-stats = {'network_0': [], 'network_1': [], 'network_2': []}
-
-# Competitive growth
-for step in range(150):
-    forest.add(1, decay_probability=0.85)  # Stronger decay
-
-    # Record statistics
-    for i in range(3):
-        stats[f'network_{i}'].append(forest.networks[i][0].n_terminals)
-
-    # Check dominance
-    if step % 30 == 0:
-        volumes = [forest.networks[i][0].tree_scale for i in range(3)]
-        dominant = np.argmax(volumes)
-        print(f"Step {step}: Network {dominant} dominates with volume {volumes[dominant]:.2f}")
+forest.add(50)
 
 # Analyze competition results
 import matplotlib.pyplot as plt
@@ -527,9 +512,9 @@ plt.show()</code></pre>
                     </div>
 
                     <div class="admonition note">
-                        <p><strong>Space Competition:</strong> When <code>compete=True</code>, trees compete for space through
-                        probability decay. Regions occupied by one network become less likely to be selected by others,
-                        creating natural territorial boundaries.</p>
+                        <p><strong>Space Sampling:</strong> When sampling space for new terminal selection the probability
+                        that a region which has been previously sampled is drawn again for another terminal decays by the
+                        indicated value to encourage the vascular growth into unvisited territories.</p>
                     </div>
 
                     <div class="admonition warning">
