@@ -554,7 +554,7 @@ class Domain(object):
             self.area = _mesh.area
             self.volume = 0.0
         elif self.points.shape[1] == 3:
-            _mesh, nodes, vertices = tetrahedralize(self.boundary, verbose=verbose, **kwargs)
+            _mesh, nodes, vertices = tetrahedralize(self.boundary, order=1, nobisect=True, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
             _mesh.cell_data['Normalized_Volume'] = (_mesh.cell_data['Volume'] / sum(_mesh.cell_data['Volume']))
             self.all_mesh_cells = list(range(_mesh.n_cells))
