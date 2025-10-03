@@ -14,9 +14,19 @@ def _format_indices(index):
 
 
 class TreeMap(dict):
-    """
-    The TreeMap class defines a mapping between vessels
-    in the tree and their upstream and downstream vessels.
+    """Adjacency map used by :class:`~svv.tree.tree.Tree`.
+
+    Keys are integer vessel indices.  Each value is a dictionary with two
+    well-known entries:
+
+    - ``"upstream"``: list of immediate parent vessel indices (empty for the
+      root segment).
+    - ``"downstream"``: list of child vessel indices created during
+      bifurcation.
+
+    The growth and connectivity routines populate this mapping so callers can
+    traverse the generated vasculature without re-deriving relationships from
+    :class:`TreeData` each time.
     """
     def __new__(cls, *args, **kwargs):
         data = super().__new__(cls, *args, **kwargs)
@@ -24,12 +34,41 @@ class TreeMap(dict):
 
 
 class TreeParameters(object):
+    """Physical and algorithmic settings that steer tree generation.
+
+    Instances are attached to :class:`~svv.tree.tree.Tree` objects and read
+    throughout the growth, optimisation, and solver-export pipelines.  The
+    attributes represent typical hemodynamic inputs (pressures, viscosity) as
+    well as tuning knobs that limit search depth or collision retries.  All
+    values use consistent units (e.g. cgs for pressures) so they can be passed
+    directly into downstream solvers.
+
+    Attributes
+    ----------
+    kinematic_viscosity : float
+        Blood kinematic viscosity in cm²/s (default 3.6e-2).
+    fluid_density : float
+        Blood density in g/cm³.
+    murray_exponent : float
+        Exponent used in Murray's law for radius ratios at bifurcations.
+    radius_exponent : float
+        Exponent applied to vessel radii when determining volume scaling.
+    length_exponent : float
+        Exponent applied to vessel lengths for cost and scaling metrics.
+    terminal_pressure : float
+        Pressure boundary condition assigned to terminal segments (dyne/cm²).
+    root_pressure : float
+        Inlet pressure assigned to the root (dyne/cm²).
+    terminal_flow : float or callable
+        Baseline flow per terminal (cm³/s) or a callable returning flow given
+        terminal coordinates.
+    root_flow : float or None
+        Optional root flow override computed during growth when ``None``.
+    max_nonconvex_count : int
+        Guard limit for attempts to place vessels in non-convex subregions.
+    """
+
     def __init__(self):
-        """
-        The TreeParameters class defines the parameters
-        that are used to generate a synthetic vascular
-        tree.
-        """
         self.kinematic_viscosity = 3.6e-2
         self.fluid_density = 1.06
         self.murray_exponent = 3.0
@@ -70,8 +109,16 @@ class TreeParameters(object):
         return output
 
     def set(self, parameter, value):
-        """
-        Set a parameter of the tree.
+        """Update a named parameter.
+
+        Parameters
+        ----------
+        parameter : str
+            One of ``{'kinematic_viscosity', 'fluid_density', 'murray_exponent',
+            'radius_exponent', 'length_exponent', 'terminal_pressure',
+            'root_pressure', 'terminal_flow', 'root_flow', 'max_nonconvex_count'}``.
+        value : Any
+            New value assigned to the corresponding attribute.
         """
         if parameter == 'kinematic_viscosity':
             self.kinematic_viscosity = value
@@ -91,6 +138,8 @@ class TreeParameters(object):
             self.terminal_flow = value
         elif parameter == 'root_flow':
             self.root_flow = value
+        elif parameter == 'max_nonconvex_count':
+            self.max_nonconvex_count = value
         else:
             raise ValueError("Invalid parameter: {}.".format(parameter))
         return None
