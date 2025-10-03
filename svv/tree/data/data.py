@@ -1,4 +1,16 @@
 import numpy
+from textwrap import fill
+
+
+def _format_indices(index):
+    if isinstance(index, slice):
+        start = '' if index.start is None else index.start
+        stop = '' if index.stop is None else index.stop
+        step = '' if index.step in (None, 1) else f":{index.step}"
+        return f"{start}:{stop}{step}"
+    if isinstance(index, tuple):
+        return ', '.join(str(i) for i in index)
+    return str(index)
 
 
 class TreeMap(dict):
@@ -85,10 +97,178 @@ class TreeParameters(object):
 
 
 class TreeData(numpy.ndarray):
+    """Vessel attribute table used by the tree growth pipeline.
+
+    The array is laid out per segment with one row per vessel and 31
+    floating-point columns.  Use :meth:`TreeData.describe` at runtime to get a
+    human-readable summary of the column layout.
     """
-    TreeData is a subclass of the numpy.ndarray class
-    that is used to store synthetic vascular data.
-    """
+
+    COLUMN_METADATA = (
+        {
+            'label': 'proximal point',
+            'index': slice(0, 3),
+            'shape': (3,),
+            'units': 'length',
+            'description': 'Proximal endpoint coordinates [x, y, z] in domain units.',
+            'usage': 'Seed geometry, collision checks, and surface export.'
+        },
+        {
+            'label': 'distal point',
+            'index': slice(3, 6),
+            'shape': (3,),
+            'units': 'length',
+            'description': 'Distal endpoint coordinates [x, y, z].',
+            'usage': 'Defines vessel extent with the proximal point.'
+        },
+        {
+            'label': 'u_basis',
+            'index': slice(6, 9),
+            'shape': (3,),
+            'units': 'unit vector',
+            'description': 'First orthonormal basis vector orthogonal to the vessel axis.',
+            'usage': 'Used to orient cross-sectional sampling and bifurcation placement.'
+        },
+        {
+            'label': 'v_basis',
+            'index': slice(9, 12),
+            'shape': (3,),
+            'units': 'unit vector',
+            'description': 'Second orthonormal basis vector orthogonal to the vessel axis.',
+            'usage': 'Paired with u_basis to span the vessel cross-section.'
+        },
+        {
+            'label': 'w_basis',
+            'index': slice(12, 15),
+            'shape': (3,),
+            'units': 'unit vector',
+            'description': 'Unit tangent along the vessel from proximal to distal.',
+            'usage': 'Drives growth direction, remeshing, and centerline export.'
+        },
+        {
+            'label': 'children',
+            'index': slice(15, 17),
+            'shape': (2,),
+            'units': 'index',
+            'description': 'Integer indices of left and right child vessels (NaN for leaves).',
+            'usage': 'Traversal, resistance updates, and serialization of the branching structure.'
+        },
+        {
+            'label': 'parent',
+            'index': 17,
+            'shape': (),
+            'units': 'index',
+            'description': 'Index of the upstream parent vessel (NaN for the root).',
+            'usage': 'Allows upward traversal during optimization and when exporting connectivity.'
+        },
+        {
+            'label': 'proximal_node',
+            'index': 18,
+            'shape': (),
+            'units': 'node id',
+            'description': 'Global node identifier for the proximal endpoint.',
+            'usage': 'Shared by adjacent segments so centerline graphs remain watertight.'
+        },
+        {
+            'label': 'distal_node',
+            'index': 19,
+            'shape': (),
+            'units': 'node id',
+            'description': 'Global node identifier for the distal endpoint.',
+            'usage': 'Supports junction detection and solver mesh connectivity.'
+        },
+        {
+            'label': 'length',
+            'index': 20,
+            'shape': (),
+            'units': 'length',
+            'description': 'Segment length cached for resistance and scaling calculations.',
+            'usage': 'Computed from endpoints; reused by hydrodynamic updates and export utilities.'
+        },
+        {
+            'label': 'radius',
+            'index': 21,
+            'shape': (),
+            'units': 'length',
+            'description': 'Current vessel radius derived from pressure and flow balance.',
+            'usage': 'Consumed by surface generation, resistance updates, and simulation writers.'
+        },
+        {
+            'label': 'flow',
+            'index': 22,
+            'shape': (),
+            'units': 'volume/time',
+            'description': 'Volumetric flow assigned to the vessel.',
+            'usage': 'Aggregated during growth; used by reduced-order models and FSI coupling.'
+        },
+        {
+            'label': 'left_bifurcation',
+            'index': 23,
+            'shape': (),
+            'units': 'dimensionless',
+            'description': 'Left daughter radius/flow scaling coefficient at a bifurcation.',
+            'usage': 'Propagates Murray’s law ratios through :mod:`svv.tree.utils.c_update`.'
+        },
+        {
+            'label': 'right_bifurcation',
+            'index': 24,
+            'shape': (),
+            'units': 'dimensionless',
+            'description': 'Right daughter scaling coefficient complementing left_bifurcation.',
+            'usage': 'Ensures branch radii stay consistent during updates and exports.'
+        },
+        {
+            'label': 'reduced_resistance',
+            'index': 25,
+            'shape': (),
+            'units': 'pressure/flow',
+            'description': 'Hydraulic resistance from this vessel to its downstream terminals.',
+            'usage': 'Updated in C extensions; used by radius updates and ROM exports.'
+        },
+        {
+            'label': 'depth',
+            'index': 26,
+            'shape': (),
+            'units': 'generation',
+            'description': 'Integer depth (generation) measured from the root (root = 0).',
+            'usage': 'Controls breadth-first updates in :mod:`svv.tree.utils.c_update`.'
+        },
+        {
+            'label': 'reduced_length',
+            'index': 27,
+            'shape': (),
+            'units': 'length',
+            'description': 'Weighted downstream path length used for hemodynamic scaling.',
+            'usage': 'Maintained with reduced_resistance to avoid repeated recursion.'
+        },
+        {
+            'label': 'radius_scaling',
+            'index': 28,
+            'shape': (),
+            'units': 'dimensionless',
+            'description': 'Product of bifurcation ratios from the root to this vessel.',
+            'usage': 'Used when reconnecting forests and validating growth heuristics.'
+        },
+        {
+            'label': 'reserved_0',
+            'index': 29,
+            'shape': (),
+            'units': 'n/a',
+            'description': 'Reserved padding column kept for binary compatibility.',
+            'usage': 'Currently unused; may be repurposed in future releases.'
+        },
+        {
+            'label': 'reserved_1',
+            'index': 30,
+            'shape': (),
+            'units': 'n/a',
+            'description': 'Reserved padding column kept for binary compatibility.',
+            'usage': 'Currently unused; may be repurposed in future releases.'
+        },
+    )
+
+    _COLUMN_LOOKUP = {meta['label']: meta for meta in COLUMN_METADATA}
+
     def __new__(cls, *args, **kwargs):
         if len(args) == 0:
             shape = (1, 31)
@@ -108,6 +288,92 @@ class TreeData(numpy.ndarray):
             return arr.view(cls)
         else:
             return None
+
+    @classmethod
+    def _resolve_metadata(cls, key):
+        if key is None:
+            return list(cls.COLUMN_METADATA)
+        if isinstance(key, str):
+            meta = cls._COLUMN_LOOKUP.get(key)
+            if meta is None:
+                raise KeyError(f"Unknown TreeData label: {key}")
+            return [meta]
+        if isinstance(key, int):
+            for meta in cls.COLUMN_METADATA:
+                idx = meta['index']
+                if isinstance(idx, int) and idx == key:
+                    return [meta]
+                if isinstance(idx, slice):
+                    start = 0 if idx.start is None else idx.start
+                    stop = idx.stop
+                    if stop is None:
+                        continue
+                    step = 1 if idx.step in (None, 0) else idx.step
+                    if start <= key < stop and (key - start) % step == 0:
+                        return [meta]
+            raise KeyError(f"No TreeData column covering index {key}")
+        if isinstance(key, slice):
+            for meta in cls.COLUMN_METADATA:
+                if meta['index'] == key:
+                    return [meta]
+            raise KeyError(f"Slice {key} does not match a TreeData column definition")
+        raise TypeError("label must be a column label, integer index, or slice")
+
+    @classmethod
+    def describe(cls, label=None, *, as_dict=False, width=88, return_text=False):
+        """Summarise TreeData columns.
+
+        Parameters
+        ----------
+        label : str or int or slice, optional
+            Column label (``'radius'``), integer column index (``21``), or exact
+            slice specification.  Omit to list the entire table.
+        as_dict : bool, default False
+            Return dictionaries suitable for programmatic inspection instead of
+            formatted text.  When ``label`` is provided a single dictionary is
+            returned, otherwise a list.
+        width : int, default 88
+            Target line width for wrapped text output.
+        return_text : bool, default False
+            When True, return the formatted string instead of printing it.
+        """
+
+        def normalize(meta):
+            return {
+                'label': meta['label'],
+                'index': meta['index'],
+                'index_repr': _format_indices(meta['index']),
+                'shape': meta['shape'],
+                'units': meta['units'],
+                'description': meta['description'],
+                'usage': meta['usage'],
+            }
+
+        meta_list = cls._resolve_metadata(label)
+
+        if as_dict:
+            entries = [normalize(meta) for meta in meta_list]
+            return entries[0] if label is not None else entries
+
+        blocks = []
+        for meta in meta_list:
+            info = normalize(meta)
+            block = [
+                f"{info['label']} (columns {info['index_repr']}, shape {info['shape']}, units {info['units']})",
+                fill(info['description'], width=width, initial_indent='    ', subsequent_indent='    '),
+            ]
+            if info['usage']:
+                usage_text = f"Usage: {info['usage']}"
+                block.append(
+                    fill(usage_text, width=width, initial_indent='    ', subsequent_indent='        ')
+                )
+            blocks.append('\n'.join(block))
+
+        text = '\n\n'.join(blocks)
+        if return_text:
+            return text
+        print(text)
+        return None
 
     def __array_finalize__(self, obj):
         if obj is None:
