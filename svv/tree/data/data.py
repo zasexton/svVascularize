@@ -1,5 +1,8 @@
 import numpy
 from textwrap import fill
+from typing import Optional
+
+from svv.tree.data.units import UnitSystem, UnitError
 
 
 def _format_indices(index):
@@ -36,79 +39,107 @@ class TreeMap(dict):
 class TreeParameters(object):
     """Physical and algorithmic settings that steer tree generation.
 
-    Instances are attached to :class:`~svv.tree.tree.Tree` objects and read
-    throughout the growth, optimisation, and solver-export pipelines.  The
-    attributes represent typical hemodynamic inputs (pressures, viscosity) as
-    well as tuning knobs that limit search depth or collision retries.  All
-    values use consistent units (e.g. cgs for pressures) so they can be passed
-    directly into downstream solvers.
+    Parameters are stored in the unit system referenced by
+    :attr:`unit_system`.  By default the centimetre–gram–second convention is
+    used; callers can supply an alternate :class:`~svv.tree.data.units.UnitSystem`
+    to work in SI or any custom system supported by the unit registry.
 
     Attributes
     ----------
+    unit_system : :class:`~svv.tree.data.units.UnitSystem`
+        Active unit system governing the numerical values stored on the class.
     kinematic_viscosity : float
-        Blood kinematic viscosity in cm²/s (default 3.6e-2).
+        Blood kinematic viscosity expressed in ``unit_system`` units.
     fluid_density : float
-        Blood density in g/cm³.
-    murray_exponent : float
-        Exponent used in Murray's law for radius ratios at bifurcations.
-    radius_exponent : float
-        Exponent applied to vessel radii when determining volume scaling.
-    length_exponent : float
-        Exponent applied to vessel lengths for cost and scaling metrics.
-    terminal_pressure : float
-        Pressure boundary condition assigned to terminal segments (dyne/cm²).
-    root_pressure : float
-        Inlet pressure assigned to the root (dyne/cm²).
-    terminal_flow : float or callable
-        Baseline flow per terminal (cm³/s) or a callable returning flow given
-        terminal coordinates.
-    root_flow : float or None
-        Optional root flow override computed during growth when ``None``.
+        Mass density expressed in ``unit_system`` units.
+    murray_exponent, radius_exponent, length_exponent : float
+        Dimensionless growth parameters.
+    terminal_pressure, root_pressure : float
+        Pressure boundary conditions in ``unit_system`` units.
+    terminal_flow, root_flow : float or None
+        Volumetric flows in ``unit_system`` units. ``root_flow`` may be ``None``
+        and recomputed during growth.
     max_nonconvex_count : int
         Guard limit for attempts to place vessels in non-convex subregions.
     """
 
-    def __init__(self):
-        self.kinematic_viscosity = 3.6e-2
-        self.fluid_density = 1.06
+    _CGS_SYSTEM = UnitSystem()  # centimetre–gram–second defaults
+    _MMHG_SYSTEM = UnitSystem(pressure='mmHg')
+
+    def __init__(self, *, unit_system: Optional[UnitSystem] = None):
+        self.unit_system = unit_system or UnitSystem()
+
+        # Dimensional parameters converted into the target unit system
+        self.kinematic_viscosity = self.unit_system.convert_value(
+            3.6e-2, 'kinematic_viscosity', from_system=self._CGS_SYSTEM
+        )
+        self.fluid_density = self.unit_system.convert_value(
+            1.06, 'density', from_system=self._CGS_SYSTEM
+        )
+        self.terminal_flow = self.unit_system.convert_value(
+            0.125 / 2000.0, 'volumetric_flow', from_system=self._CGS_SYSTEM
+        )
+        self.root_flow = None
+        self.terminal_pressure = self.unit_system.convert_value(
+            60.0, 'pressure', from_system=self._MMHG_SYSTEM
+        )
+        self.root_pressure = self.unit_system.convert_value(
+            100.0, 'pressure', from_system=self._MMHG_SYSTEM
+        )
+
+        # Dimensionless defaults
         self.murray_exponent = 3.0
         self.radius_exponent = 2.0
         self.length_exponent = 1.0
-        self.terminal_pressure = 60.0 * 1333.22
-        self.root_pressure = 100.0 * 1333.22
-        self.terminal_flow = 0.125/2000
-        self.root_flow = None
         self.max_nonconvex_count = 100
 
+
     def __str__(self):
-        output = "Tree Parameters:\n"
-        output += "----------------\n"
-        output += "Kinematic Viscosity: {}\n".format(self.kinematic_viscosity)
-        output += "Fluid Density: {}\n".format(self.fluid_density)
-        output += "Murray Exponent: {}\n".format(self.murray_exponent)
-        output += "Radius Exponent: {}\n".format(self.radius_exponent)
-        output += "Length Exponent: {}\n".format(self.length_exponent)
-        output += "Terminal Pressure: {}\n".format(self.terminal_pressure)
-        output += "Root Pressure: {}\n".format(self.root_pressure)
-        output += "Terminal Flow: {}\n".format(self.terminal_flow)
-        output += "Root Flow: {}".format(self.root_flow)
-        return output
+        root_flow_line = f"Root Flow: {self.root_flow}"
+        if self.root_flow is not None:
+            root_flow_line += f" {self.unit_system.volumetric_flow.symbol}"
+        return (
+            "Tree Parameters:\n"
+            "----------------\n"
+            f"Kinematic Viscosity: {self.kinematic_viscosity} {self.unit_system.kinematic_viscosity.symbol}\n"
+            f"Fluid Density: {self.fluid_density} {self.unit_system.density.symbol}\n"
+            f"Murray Exponent: {self.murray_exponent}\n"
+            f"Radius Exponent: {self.radius_exponent}\n"
+            f"Length Exponent: {self.length_exponent}\n"
+            f"Terminal Pressure: {self.terminal_pressure} {self.unit_system.pressure.symbol}\n"
+            f"Root Pressure: {self.root_pressure} {self.unit_system.pressure.symbol}\n"
+            f"Terminal Flow: {self.terminal_flow} {self.unit_system.volumetric_flow.symbol}\n"
+            f"{root_flow_line}"
+        )
 
     def __repr__(self):
-        output = "Tree Parameters:\n"
-        output += "----------------\n"
-        output += "Kinematic Viscosity: {}\n".format(self.kinematic_viscosity)
-        output += "Fluid Density: {}\n".format(self.fluid_density)
-        output += "Murray Exponent: {}\n".format(self.murray_exponent)
-        output += "Radius Exponent: {}\n".format(self.radius_exponent)
-        output += "Length Exponent: {}\n".format(self.length_exponent)
-        output += "Terminal Pressure: {}\n".format(self.terminal_pressure)
-        output += "Root Pressure: {}\n".format(self.root_pressure)
-        output += "Terminal Flow: {}\n".format(self.terminal_flow)
-        output += "Root Flow: {}".format(self.root_flow)
-        return output
+        return self.__str__()
 
-    def set(self, parameter, value):
+    def _coerce_value(self, value, quantity: str, unit=None):
+        if unit is None:
+            return value
+        if isinstance(unit, UnitSystem):
+            return self.unit_system.convert_value(value, quantity, from_system=unit)
+        if isinstance(unit, tuple):
+            symbol, factor = unit
+            source = UnitSystem(
+                length=self.unit_system.base.length.symbol,
+                mass=self.unit_system.base.mass.symbol,
+                time=self.unit_system.base.time.symbol,
+                **{quantity: (symbol, factor)},
+            )
+            return self.unit_system.convert_value(value, quantity, from_system=source)
+        if isinstance(unit, str):
+            source = UnitSystem(
+                length=self.unit_system.base.length.symbol,
+                mass=self.unit_system.base.mass.symbol,
+                time=self.unit_system.base.time.symbol,
+                **{quantity: unit},
+            )
+            return self.unit_system.convert_value(value, quantity, from_system=source)
+        raise UnitError(f"Unsupported unit specification '{unit}'.")
+
+    def set(self, parameter, value, *, unit=None):
         """Update a named parameter.
 
         Parameters
@@ -118,12 +149,15 @@ class TreeParameters(object):
             'radius_exponent', 'length_exponent', 'terminal_pressure',
             'root_pressure', 'terminal_flow', 'root_flow', 'max_nonconvex_count'}``.
         value : Any
-            New value assigned to the corresponding attribute.
+            New value assigned to the corresponding attribute.  Supply ``unit``
+            to convert from alternative units.
+        unit : str or tuple or :class:`UnitSystem`, optional
+            Source unit definition for dimensional parameters.
         """
         if parameter == 'kinematic_viscosity':
-            self.kinematic_viscosity = value
+            self.kinematic_viscosity = self._coerce_value(value, 'kinematic_viscosity', unit)
         elif parameter == 'fluid_density':
-            self.fluid_density = value
+            self.fluid_density = self._coerce_value(value, 'density', unit)
         elif parameter == 'murray_exponent':
             self.murray_exponent = value
         elif parameter == 'radius_exponent':
@@ -131,18 +165,50 @@ class TreeParameters(object):
         elif parameter == 'length_exponent':
             self.length_exponent = value
         elif parameter == 'terminal_pressure':
-            self.terminal_pressure = value
+            self.terminal_pressure = self._coerce_value(value, 'pressure', unit)
         elif parameter == 'root_pressure':
-            self.root_pressure = value
+            self.root_pressure = self._coerce_value(value, 'pressure', unit)
         elif parameter == 'terminal_flow':
-            self.terminal_flow = value
+            self.terminal_flow = self._coerce_value(value, 'volumetric_flow', unit)
         elif parameter == 'root_flow':
-            self.root_flow = value
+            self.root_flow = self._coerce_value(value, 'volumetric_flow', unit)
         elif parameter == 'max_nonconvex_count':
             self.max_nonconvex_count = value
         else:
             raise ValueError("Invalid parameter: {}.".format(parameter))
         return None
+
+    def set_unit_system(self, unit_system: UnitSystem, *, convert_existing: bool = True):
+        """Switch to a new unit system.
+
+        Parameters
+        ----------
+        unit_system : :class:`UnitSystem`
+            Target unit system.
+        convert_existing : bool, default True
+            Convert stored dimensional values into the new system.  When False,
+            values are left untouched and interpreted in the caller-provided
+            units.
+        """
+
+        if convert_existing:
+            mapping = [
+                ('kinematic_viscosity', 'kinematic_viscosity'),
+                ('fluid_density', 'density'),
+                ('terminal_pressure', 'pressure'),
+                ('root_pressure', 'pressure'),
+                ('terminal_flow', 'volumetric_flow'),
+                ('root_flow', 'volumetric_flow'),
+            ]
+            for attr, quantity in mapping:
+                value = getattr(self, attr)
+                if value is None:
+                    continue
+                converted = unit_system.convert_value(
+                    value, quantity, from_system=self.unit_system
+                )
+                setattr(self, attr, converted)
+        self.unit_system = unit_system
 
 
 class TreeData(numpy.ndarray):
