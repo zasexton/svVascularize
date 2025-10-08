@@ -7,7 +7,9 @@ from tqdm import trange
 from copy import deepcopy
 from types import MappingProxyType
 import itertools
+from typing import Optional
 from svv.tree.data.data import TreeData, TreeParameters, TreeMap
+from svv.tree.data.units import UnitSystem
 from svv.tree.branch.root import set_root
 from svv.visualize.tree.show import show
 from svv.tree.branch.bifurcation import add_vessel, check_tree
@@ -19,14 +21,19 @@ from collections import ChainMap
 
 
 class Tree(object):
-    def __init__(self):
+    def __init__(self, *, parameters: Optional[TreeParameters] = None, unit_system: Optional[UnitSystem] = None):
         """
         The Tree class defines a branching tree structure
         that is used to abstract the physical representation
         of the generated vascular network.
         """
         self.data = TreeData()
-        self.parameters = TreeParameters()
+        if parameters is None:
+            self.parameters = TreeParameters(unit_system=unit_system)
+        else:
+            self.parameters = parameters
+            if unit_system is not None:
+                self.parameters.set_unit_system(unit_system)
         self.vessel_map = TreeMap()
         #self.c_vessel_map = None
         self.physical_clearance = 0.0
@@ -300,4 +307,3 @@ class Tree(object):
 
     def export_centerline(self):
         pass
-
