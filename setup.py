@@ -1,6 +1,16 @@
 from setuptools import setup, find_packages, Extension
-from Cython.Build import cythonize
-import numpy
+try:
+    from Cython.Build import cythonize  # Optional: only needed when building extensions
+    HAS_CYTHON = True
+except Exception:
+    cythonize = None
+    HAS_CYTHON = False
+try:
+    import numpy as _np  # Optional: only needed when building extensions
+    HAS_NUMPY = True
+except Exception:
+    _np = None
+    HAS_NUMPY = False
 import sys
 import os
 import platform
@@ -448,34 +458,38 @@ def get_extra_compile_args():
         update_link_args = ['-fopenmp']
     return extra_args, update_compile_args, update_link_args
 
-#extra_compile_args, update_compile_args, update_link_args = get_extra_compile_args()
-# extra_compile_args=update_compile_args, extra_link_args=update_link_args),
-extensions = [
-    Extension('svv.domain.routines.c_allocate', ['svv/domain/routines/c_allocate.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.domain.routines.c_sample', ['svv/domain/routines/c_sample.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.utils.spatial.c_distance', ['svv/utils/spatial/c_distance.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_angle', ['svv/tree/utils/c_angle.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_basis', ['svv/tree/utils/c_basis.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_close', ['svv/tree/utils/c_close.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_local_optimize', ['svv/tree/utils/c_local_optimize.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_obb', ['svv/tree/utils/c_obb.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_update', ['svv/tree/utils/c_update.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.tree.utils.c_extend', ['svv/tree/utils/c_extend.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.simulation.utils.close_segments', ['svv/simulation/utils/close_segments.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-    Extension('svv.simulation.utils.extract', ['svv/simulation/utils/extract.pyx'],
-              include_dirs=[numpy.get_include()], language='c++'),
-]
+def _build_extensions():
+    """Return list of Extension objects if we are building with accelerators, else []."""
+    build_accel = env_flag("SVV_BUILD_EXTENSIONS", False) or env_flag("SVV_WITH_CYTHON", False)
+    if not (build_accel and HAS_CYTHON and HAS_NUMPY):
+        return []
+    include_dirs = [_np.get_include()] if HAS_NUMPY else []
+    return [
+        Extension('svv.domain.routines.c_allocate', ['svv/domain/routines/c_allocate.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.domain.routines.c_sample', ['svv/domain/routines/c_sample.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.utils.spatial.c_distance', ['svv/utils/spatial/c_distance.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_angle', ['svv/tree/utils/c_angle.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_basis', ['svv/tree/utils/c_basis.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_close', ['svv/tree/utils/c_close.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_local_optimize', ['svv/tree/utils/c_local_optimize.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_obb', ['svv/tree/utils/c_obb.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_update', ['svv/tree/utils/c_update.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.tree.utils.c_extend', ['svv/tree/utils/c_extend.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.simulation.utils.close_segments', ['svv/simulation/utils/close_segments.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+        Extension('svv.simulation.utils.extract', ['svv/simulation/utils/extract.pyx'],
+                  include_dirs=include_dirs, language='c++'),
+    ]
 
 def read_version():
     init_path = Path(__file__).parent / "svv" / "__init__.py"
@@ -520,6 +534,10 @@ def parse_requirements(path="requirements.txt"):
 
 
 REQUIREMENTS = parse_requirements()
+_build_accel_flag = env_flag("SVV_BUILD_EXTENSIONS", False) or env_flag("SVV_WITH_CYTHON", False)
+# Filter out Cython from runtime requirements unless explicitly building extensions
+if not _build_accel_flag:
+    REQUIREMENTS = [r for r in REQUIREMENTS if not r.strip().lower().startswith('cython')]
 
 
 KEYWORDS = ["modeling",
@@ -527,6 +545,8 @@ KEYWORDS = ["modeling",
             "tissue-engineering",
             "3d-printing",
             "fluid-dynamics"]
+
+extensions = _build_extensions()
 
 setup_info = dict(
     name='svv',
@@ -541,12 +561,18 @@ setup_info = dict(
     description="svVascularize (svv): A synthetic vascular generation, modeling, and simulation package",
     long_description=DESCRIPTION,
     long_description_content_type="text/markdown",
-    ext_modules=cythonize(extensions),
+    ext_modules=cythonize(extensions) if (extensions and HAS_CYTHON) else [],
     package_data={'svv.bin': ['*']},
-    include_dirs=[numpy.get_include()],
     include_package_data=True,
     zip_safe=False,
     install_requires=REQUIREMENTS,
+    extras_require={
+        'all': [
+            'Cython>=3.0.7',
+            'numpy',
+            'cmake>=3.15'
+        ]
+    },
     cmdclass={
         'build_ext': DownloadAndBuildExt,
         'bdist_wheel': BDistWheelCmd,
