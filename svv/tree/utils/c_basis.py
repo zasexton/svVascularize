@@ -5,8 +5,8 @@ def basis(point_0: np.ndarray, point_1: np.ndarray):
     p1 = np.asarray(point_1, dtype=float)
     direction = p1 - p0
     mag = np.linalg.norm(direction, axis=1).reshape(-1, 1)
-    # avoid divide-by-zero
-    mag = np.where(mag == 0, 1.0, mag)
+    # Match Cython behavior: no zero-magnitude check
+    # (will produce NaN/Inf for identical points, same as Cython)
     w = direction / mag
     u = np.zeros_like(w)
     v = np.zeros_like(w)
