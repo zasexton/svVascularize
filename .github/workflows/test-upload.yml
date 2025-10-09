@@ -92,8 +92,29 @@ jobs:
           merge-multiple: true
       - name: Install twine
         run: pip install --upgrade pip && pip install twine
-      - name: Upload both wheels to TestPyPI
-        run: twine upload --repository testpypi dist/*
+      - name: Validate TestPyPI token (svv)
+        if: ${{ hashFiles('dist/svv-*-py3-none-any.whl') != '' || hashFiles('dist/svv-*.tar.gz') != '' }}
+        run: |
+          if [ -z "${{ secrets.TEST_PYPI_PASSWORD_SVV }}" ]; then
+            echo "::error title=Missing secret::The repository secret 'TEST_PYPI_PASSWORD_SVV' is not configured. Set it to a TestPyPI API token with access to the 'svv' project.";
+            exit 1;
+          fi
+      - name: Upload base package (svv) to TestPyPI
+        if: ${{ hashFiles('dist/svv-*-py3-none-any.whl') != '' || hashFiles('dist/svv-*.tar.gz') != '' }}
+        run: twine upload --non-interactive --skip-existing --verbose --repository testpypi dist/svv-*-py3-none-any.whl dist/svv-*.tar.gz
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_PASSWORD }}
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_PASSWORD_SVV }}
+      - name: Validate TestPyPI token (svv-accelerated)
+        if: ${{ hashFiles('dist/svv-accelerated-*.whl') != '' }}
+        run: |
+          if [ -z "${{ secrets.TEST_PYPI_PASSWORD_ACCEL }}" ]; then
+            echo "::error title=Missing secret::The repository secret 'TEST_PYPI_PASSWORD_ACCEL' is not configured. Set it to a TestPyPI API token with access to the 'svv-accelerated' project.";
+            exit 1;
+          fi
+      - name: Upload accelerated wheels (svv-accelerated) to TestPyPI
+        if: ${{ hashFiles('dist/svv-accelerated-*.whl') != '' }}
+        run: twine upload --non-interactive --skip-existing --verbose --repository testpypi dist/svv-accelerated-*.whl
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_PASSWORD_ACCEL }}
