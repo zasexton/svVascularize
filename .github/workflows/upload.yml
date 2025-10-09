@@ -151,10 +151,10 @@ jobs:
       - name: Create GitHub Release and upload artifacts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.extract_version.outputs.version }}
-          name: svv v${{ steps.extract_version.outputs.version }}
+          tag_name: ${{ steps.extract_version.outputs.version }}
+          name: svv ${{ steps.extract_version.outputs.version }}
           body: |
-            Automated release for svv v${{ steps.extract_version.outputs.version }} published to PyPI.
+            Automated release for svv ${{ steps.extract_version.outputs.version }} published to PyPI.
 
             Artifacts include the base svv wheel/sdist and svv-accelerated wheels.
           draft: false
