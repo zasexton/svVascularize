@@ -83,6 +83,8 @@ jobs:
   upload_pypi:
     needs: [build_base_wheel, build_wheels_accelerated, build_sdist]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -128,3 +130,36 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD_ACCEL }}
+
+      - name: Extract version from artifacts
+        id: extract_version
+        run: |
+          set -euo pipefail
+          file=$(ls dist/svv-*-py3-none-any.whl 2>/dev/null || true)
+          if [ -z "$file" ]; then
+            file=$(ls dist/svv-*.tar.gz 2>/dev/null | head -n1 || true)
+          fi
+          if [ -z "$file" ]; then
+            echo "::error title=Version detection failed::No base svv artifact found to determine version."; exit 1
+          fi
+          base=$(basename "$file")
+          # Extract version after 'svv-' up to next '-'
+          version=$(echo "$base" | sed -E 's/^svv-([^\-]+).*/\1/')
+          echo "Detected version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release and upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.extract_version.outputs.version }}
+          name: svv v${{ steps.extract_version.outputs.version }}
+          body: |
+            Automated release for svv v${{ steps.extract_version.outputs.version }} published to PyPI.
+
+            Artifacts include the base svv wheel/sdist and svv-accelerated wheels.
+          draft: false
+          prerelease: false
+          files: |
+            dist/svv-*.whl
+            dist/svv-*.tar.gz
+            dist/svv-accelerated-*.whl
