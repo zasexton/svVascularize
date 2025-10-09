@@ -1,7 +1,10 @@
 [build-system]
 requires = [
   "setuptools>=45.0",
-  "wheel>=0.36; python_version < '3.12' "
+  "wheel>=0.36; python_version < '3.12' ",
+  # Ensure PEP 517 build environments have the headers/tools needed to compile extensions
+  "Cython>=3.0.7",
+  "numpy>=1.22"
 ]
 
 build-backend = "setuptools.build_meta"
