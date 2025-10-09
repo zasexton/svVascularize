@@ -153,10 +153,7 @@ jobs:
         with:
           tag_name: ${{ steps.extract_version.outputs.version }}
           name: svv ${{ steps.extract_version.outputs.version }}
-          body: |
-            Automated release for svv ${{ steps.extract_version.outputs.version }} published to PyPI.
-
-            Artifacts include the base svv wheel/sdist and svv-accelerated wheels.
+          generate_release_notes: true
           draft: false
           prerelease: false
           files: |
