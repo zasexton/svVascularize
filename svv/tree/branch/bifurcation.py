@@ -36,7 +36,7 @@ ne.set_num_threads(16)
 def add_vessel(tree, **kwargs):
     if not _LOCAL_OPT_AVAILABLE:
         raise ImportError(
-            "Local optimization requires accelerators. Install with 'pip install svv[all]' "
+            "Local optimization requires accelerators. Install with 'pip install svv[accel]' "
             "or build with SVV_BUILD_EXTENSIONS=1."
         )
     """
