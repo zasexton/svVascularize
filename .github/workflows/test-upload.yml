@@ -60,8 +60,8 @@ jobs:
     env:
       CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-*"
       CIBW_BUILD_VERBOSITY: 3
-      # Install build deps before building each wheel
-      CIBW_BEFORE_BUILD: "pip install -U pip setuptools wheel cython numpy cmake"
+      # Install build deps before building each wheel (use python -m pip for Windows compatibility)
+      CIBW_BEFORE_BUILD: "python -m pip install -U pip setuptools wheel cython numpy cmake"
       # Tell setup.py to build the companion 'svv-accelerated' distribution
       CIBW_ENVIRONMENT: "PIP_NO_CACHE_DIR=1 SVV_ACCEL_COMPANION=1"
     steps:
