@@ -13,36 +13,25 @@ on:
           - "false"
 
 jobs:
-  build_wheels:
-    # We'll build on a matrix of OSes and Python versions.
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macOS-latest, ubuntu-latest, windows-latest]
-    env:
-      CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-*"
-      CIBW_ENVIRONMENT: "PIP_NO_CACHE_DIR=1"
-      CIBW_BUILD_VERBOSITY: 3
-
+  build_base_wheel:
+    # Build the pure-Python wheel once (no platform matrix needed)
+    runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
       - name: Install build dependencies
         run: |
-          pip install --upgrade pip && pip install cibuildwheel twine
+          pip install --upgrade pip && pip install build
 
-      - name: Upgrade pip, setuptools, wheel
-        run: python -m pip install --upgrade setuptools wheel
+      - name: Build base wheel (pure-Python svv)
+        run: python -m build --wheel --outdir dist
 
-      - name: Build wheels
-        run: cibuildwheel --output-dir dist
-
-      - name: Upload artifacts
+      - name: Upload base wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}
-          path: dist
+          name: base-wheel
+          path: dist/*.whl
 
   build_wheels_accelerated:
     runs-on: ${{ matrix.os }}
@@ -74,7 +63,7 @@ jobs:
           path: dist
 
   build_sdist:
-    needs: [build_wheels]
+    needs: [build_base_wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +81,7 @@ jobs:
           path: dist/*.tar.gz
 
   upload_pypi:
-    needs: [build_wheels, build_wheels_accelerated, build_sdist]
+    needs: [build_base_wheel, build_wheels_accelerated, build_sdist]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
