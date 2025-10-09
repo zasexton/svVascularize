@@ -425,7 +425,10 @@ class DownloadAndBuildExt(build_ext):
 
     def finalize_options(self):
         super().finalize_options()
-        self.inplace = True
+        # Don't build extensions in-place for the companion binary wheel,
+        # since its package subdirectories (svv_accel/...) do not exist in
+        # the source tree. Use the default build/lib placement instead.
+        self.inplace = (not ACCEL_COMPANION)
 
 def get_extra_compile_args():
     extra_args = []
