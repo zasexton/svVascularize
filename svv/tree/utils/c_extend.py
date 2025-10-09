@@ -55,7 +55,7 @@ def update_alt(
     for i, idx in enumerate(alt_idx):
         if idx <= -1:
             continue
-        scale_factor = float(alt_scale[i]) / float(data[idx, 28]) if data[idx, 28] != 0 else 1.0
+        scale_factor = float(alt_scale[i]) / float(data[idx, 28])
         downstream_list = vessel_map[idx]['downstream']
         for d_idx in downstream_list:
             tmp_28[d_idx] *= scale_factor
