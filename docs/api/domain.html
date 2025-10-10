@@ -68,7 +68,7 @@
             <h2>Quick Example</h2>
             <pre data-copy><code class="language-python">import numpy as np
 import pyvista as pv
-from svv.domain import Domain
+from svv.domain.domain import Domain
 
 # Create domain from PyVista mesh
 mesh = pv.read('vessel_geometry.stl')
@@ -460,7 +460,7 @@ difference_domain = domain1 - domain2</code></pre>
                     <div class="api-example">
                         <h3>Creating a Domain from STL File</h3>
                         <pre data-copy><code class="language-python">import pyvista as pv
-from svv.domain import Domain
+from svv.domain.domain import Domain
 
 # Load STL file
 mesh = pv.read('vessel.stl')
@@ -559,8 +559,8 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                     <h2>See Also</h2>
                     <ul>
                         <li><a href="patch.html"><code>svv.domain.Patch</code></a> - Individual patch for RBF interpolation</li>
-                        <li><a href="../tree/tree.html"><code>svv.tree.Tree</code></a> - Vascular tree generation using domains</li>
-                        <li><a href="../forest/forest.html"><code>svv.forest.Forest</code></a> - Collection of trees within a domain</li>
+                        <li><a href="tree.html"><code>svv.tree.Tree</code></a> - Vascular tree generation using domains</li>
+                        <li><a href="forest.html"><code>svv.forest.Forest</code></a> - Collection of trees within a domain</li>
                     </ul>
                 </section>
             </main>
