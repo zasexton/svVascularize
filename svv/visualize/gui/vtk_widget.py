@@ -104,9 +104,33 @@ class VTKWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
-        # Create PyVista plotter
-        self.plotter = self._QtInteractor(self)
-        layout.addWidget(self.plotter.interactor)
+        # Configure VTK for better software rendering support
+        try:
+            import vtk
+            # Set VTK to use software rendering if OpenGL fails
+            vtk.vtkObject.GlobalWarningDisplayOff()  # Suppress warnings
+        except:
+            pass
+
+        # Create PyVista plotter with error handling
+        try:
+            self.plotter = self._QtInteractor(self)
+            layout.addWidget(self.plotter.interactor)
+        except Exception as e:
+            # If plotter creation fails, create a fallback widget
+            from PySide6.QtWidgets import QLabel
+            error_label = QLabel(
+                f"3D Visualization unavailable:\n{str(e)}\n\n"
+                "This may be due to missing OpenGL libraries.\n"
+                "The GUI will function with limited 3D visualization.\n\n"
+                "To fix, install Mesa libraries:\n"
+                "conda install -c conda-forge mesalib"
+            )
+            error_label.setWordWrap(True)
+            error_label.setStyleSheet("padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;")
+            layout.addWidget(error_label)
+            self.plotter = None
+            return
 
         # Enable point picking
         self.plotter.enable_point_picking(
@@ -132,6 +156,9 @@ class VTKWidget(QWidget):
             Domain object to visualize
         """
         self.domain = domain
+        if not self.plotter:
+            return
+
         self.clear()
 
         # Add domain boundary if available
@@ -167,6 +194,9 @@ class VTKWidget(QWidget):
         actor
             PyVista actor for the point
         """
+        if not self.plotter:
+            return None
+
         point = np.asarray(point).flatten()
 
         # Create sphere marker
@@ -290,6 +320,8 @@ class VTKWidget(QWidget):
 
     def clear_points(self):
         """Clear all start point markers."""
+        if not self.plotter:
+            return
         for actor in self.points_actors:
             self.plotter.remove_actor(actor)
         self.points_actors.clear()
@@ -297,6 +329,8 @@ class VTKWidget(QWidget):
 
     def clear_directions(self):
         """Clear all direction arrows."""
+        if not self.plotter:
+            return
         for actor_tuple in self.direction_actors:
             for actor in actor_tuple:
                 self.plotter.remove_actor(actor)
@@ -305,6 +339,8 @@ class VTKWidget(QWidget):
 
     def clear_trees(self):
         """Clear all tree visualizations."""
+        if not self.plotter:
+            return
         for actor in self.tree_actors:
             self.plotter.remove_actor(actor)
         self.tree_actors.clear()
@@ -318,14 +354,17 @@ class VTKWidget(QWidget):
 
     def reset_camera(self):
         """Reset the camera to show the full domain."""
+        if not self.plotter:
+            return
         self.plotter.reset_camera()
         self.plotter.render()
 
     def toggle_domain_visibility(self):
         """Toggle the visibility of the domain mesh."""
-        if self.domain_actor is not None:
-            self.domain_actor.SetVisibility(not self.domain_actor.GetVisibility())
-            self.plotter.render()
+        if not self.plotter or self.domain_actor is None:
+            return
+        self.domain_actor.SetVisibility(not self.domain_actor.GetVisibility())
+        self.plotter.render()
 
     def _on_point_picked(self, point):
         """

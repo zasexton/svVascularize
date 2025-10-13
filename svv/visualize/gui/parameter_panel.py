@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressDialog
 )
 from PySide6.QtCore import Signal, Qt
+from svv.visualize.gui.styles import ModernTheme, Icons
 
 
 class ParameterPanel(QWidget):
@@ -35,6 +36,8 @@ class ParameterPanel(QWidget):
     def _init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         self.setLayout(layout)
 
         # Create scroll area for parameters
@@ -42,52 +45,71 @@ class ParameterPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(12)
 
         # Mode selection
-        mode_group = QGroupBox("Generation Mode")
+        mode_group = QGroupBox(f"{Icons.SETTINGS} Generation Mode")
         mode_layout = QVBoxLayout()
         mode_group.setLayout(mode_layout)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Single Tree")
-        self.mode_combo.addItem("Forest (Multiple Trees)")
+        self.mode_combo.addItem(f"{Icons.TREE} Single Tree")
+        self.mode_combo.addItem(f"{Icons.FOREST} Forest (Multiple Trees)")
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.mode_combo.setToolTip("Select whether to generate a single tree or a forest with multiple trees")
         mode_layout.addWidget(self.mode_combo)
 
         scroll_layout.addWidget(mode_group)
 
         # Tree parameters
-        tree_params_group = QGroupBox("Tree Parameters")
+        tree_params_group = QGroupBox(f"{Icons.SETTINGS} Tree Parameters")
         tree_form = QFormLayout()
+        tree_form.setSpacing(10)
+        tree_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         tree_params_group.setLayout(tree_form)
 
+        # Number of vessels
         self.n_vessels_spin = QSpinBox()
         self.n_vessels_spin.setRange(1, 100000)
         self.n_vessels_spin.setValue(100)
-        tree_form.addRow("Number of Vessels:", self.n_vessels_spin)
+        self.n_vessels_spin.setToolTip("Total number of vessel segments to generate")
+        vessels_label = QLabel("Number of Vessels:")
+        vessels_label.setToolTip("Total number of vessel segments to generate")
+        tree_form.addRow(vessels_label, self.n_vessels_spin)
 
+        # Physical clearance
         self.physical_clearance_spin = QDoubleSpinBox()
         self.physical_clearance_spin.setRange(0.0, 10.0)
         self.physical_clearance_spin.setSingleStep(0.01)
         self.physical_clearance_spin.setDecimals(4)
         self.physical_clearance_spin.setValue(0.0)
-        tree_form.addRow("Physical Clearance:", self.physical_clearance_spin)
+        self.physical_clearance_spin.setToolTip("Minimum distance between vessel walls (0 = allow touching)")
+        clearance_label = QLabel("Physical Clearance:")
+        clearance_label.setToolTip("Minimum distance between vessel walls")
+        tree_form.addRow(clearance_label, self.physical_clearance_spin)
 
+        # Convexity tolerance
         self.convexity_tolerance_spin = QDoubleSpinBox()
         self.convexity_tolerance_spin.setRange(0.0, 1.0)
         self.convexity_tolerance_spin.setSingleStep(0.01)
         self.convexity_tolerance_spin.setDecimals(3)
         self.convexity_tolerance_spin.setValue(0.01)
-        tree_form.addRow("Convexity Tolerance:", self.convexity_tolerance_spin)
+        self.convexity_tolerance_spin.setToolTip("Tolerance for domain convexity checking (smaller = stricter)")
+        convexity_label = QLabel("Convexity Tolerance:")
+        convexity_label.setToolTip("Tolerance for domain convexity checking")
+        tree_form.addRow(convexity_label, self.convexity_tolerance_spin)
 
         scroll_layout.addWidget(tree_params_group)
 
         # Forest parameters (initially hidden)
-        self.forest_params_group = QGroupBox("Forest Parameters")
+        self.forest_params_group = QGroupBox(f"{Icons.FOREST} Forest Parameters")
         forest_form = QFormLayout()
+        forest_form.setSpacing(10)
+        forest_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.forest_params_group.setLayout(forest_form)
 
         self.compete_cb = QCheckBox("Enable Competition")
+        self.compete_cb.setToolTip("Enable competition between trees for territory")
         forest_form.addRow("Competition:", self.compete_cb)
 
         self.decay_probability_spin = QDoubleSpinBox()
@@ -95,21 +117,29 @@ class ParameterPanel(QWidget):
         self.decay_probability_spin.setSingleStep(0.05)
         self.decay_probability_spin.setDecimals(2)
         self.decay_probability_spin.setValue(0.9)
-        forest_form.addRow("Decay Probability:", self.decay_probability_spin)
+        self.decay_probability_spin.setToolTip("Probability of decay for competitive growth (0-1)")
+        decay_label = QLabel("Decay Probability:")
+        decay_label.setToolTip("Probability of decay for competitive growth")
+        forest_form.addRow(decay_label, self.decay_probability_spin)
 
         scroll_layout.addWidget(self.forest_params_group)
         self.forest_params_group.hide()
 
         # Advanced parameters
-        advanced_group = QGroupBox("Advanced Parameters")
+        advanced_group = QGroupBox(f"{Icons.SETTINGS} Advanced Parameters")
         advanced_form = QFormLayout()
+        advanced_form.setSpacing(10)
+        advanced_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         advanced_group.setLayout(advanced_form)
 
         self.random_seed_spin = QSpinBox()
         self.random_seed_spin.setRange(-1, 999999)
         self.random_seed_spin.setValue(-1)
         self.random_seed_spin.setSpecialValueText("Random")
-        advanced_form.addRow("Random Seed:", self.random_seed_spin)
+        self.random_seed_spin.setToolTip("Set random seed for reproducible results (-1 = random)")
+        seed_label = QLabel("Random Seed:")
+        seed_label.setToolTip("Set random seed for reproducible results")
+        advanced_form.addRow(seed_label, self.random_seed_spin)
 
         scroll_layout.addWidget(advanced_group)
 
@@ -121,14 +151,18 @@ class ParameterPanel(QWidget):
 
         # Action buttons
         button_layout = QVBoxLayout()
+        button_layout.setSpacing(8)
 
-        self.generate_btn = QPushButton("Generate Tree/Forest")
+        self.generate_btn = QPushButton(f"{Icons.PLAY} Generate Tree/Forest")
         self.generate_btn.clicked.connect(self._generate)
-        self.generate_btn.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.generate_btn.setObjectName("primaryButton")
+        self.generate_btn.setToolTip("Generate vascular tree or forest with current parameters")
         button_layout.addWidget(self.generate_btn)
 
-        self.export_btn = QPushButton("Export Configuration")
+        self.export_btn = QPushButton(f"{Icons.SAVE} Export Configuration")
         self.export_btn.clicked.connect(self._export_config)
+        self.export_btn.setObjectName("secondaryButton")
+        self.export_btn.setToolTip("Export current configuration to JSON file")
         button_layout.addWidget(self.export_btn)
 
         layout.addLayout(button_layout)
@@ -145,8 +179,9 @@ class ParameterPanel(QWidget):
         if not self.parent_gui or not self.parent_gui.domain:
             QMessageBox.warning(
                 self,
-                "No Domain",
-                "Please load a domain before generating trees."
+                f"{Icons.WARNING} No Domain",
+                "Please load a domain file before generating trees.\n\n"
+                "Use File > Load Domain to get started."
             )
             return
 
@@ -183,20 +218,34 @@ class ParameterPanel(QWidget):
                 )
 
         except Exception as e:
+            if self.parent_gui:
+                self.parent_gui.update_status(f"{Icons.ERROR} Generation failed")
             QMessageBox.critical(
                 self,
-                "Generation Error",
-                f"Failed to generate tree/forest:\n{str(e)}"
+                f"{Icons.ERROR} Generation Error",
+                f"Failed to generate tree/forest:\n\n{str(e)}\n\n"
+                "Please check your parameters and try again."
             )
 
     def _generate_tree(self, n_vessels, physical_clearance, convexity_tolerance, random_seed, config):
         """Generate a single tree."""
         from svv.tree.tree import Tree
 
+        # Update status
+        if self.parent_gui:
+            self.parent_gui.update_status(f"{Icons.PLAY} Generating tree with {n_vessels} vessels...")
+
         # Create progress dialog
-        progress = QProgressDialog("Generating tree...", "Cancel", 0, n_vessels, self)
+        progress = QProgressDialog(
+            f"{Icons.TREE} Generating tree...\nThis may take a few moments.",
+            f"{Icons.CROSS} Cancel",
+            0,
+            n_vessels,
+            self
+        )
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
+        progress.setAutoClose(True)
 
         # Create tree
         tree = Tree()
@@ -242,10 +291,17 @@ class ParameterPanel(QWidget):
         # Store tree
         self.parent_gui.trees = [tree]
 
+        # Update status
+        if self.parent_gui:
+            self.parent_gui.update_status(f"{Icons.CHECK} Tree generated successfully with {tree.n_terminals} vessels")
+
         QMessageBox.information(
             self,
-            "Success",
-            f"Tree generated with {tree.n_terminals} vessels."
+            f"{Icons.CHECK} Success",
+            f"Tree generated successfully!\n\n"
+            f"Total vessels: {tree.n_terminals}\n"
+            f"Physical clearance: {physical_clearance}\n"
+            f"Convexity tolerance: {convexity_tolerance}"
         )
 
     def _generate_forest(self, n_vessels, physical_clearance, convexity_tolerance,
@@ -253,10 +309,21 @@ class ParameterPanel(QWidget):
         """Generate a forest."""
         from svv.forest.forest import Forest
 
+        # Update status
+        if self.parent_gui:
+            self.parent_gui.update_status(f"{Icons.PLAY} Generating forest with {n_vessels} total vessels...")
+
         # Create progress dialog
-        progress = QProgressDialog("Generating forest...", "Cancel", 0, n_vessels, self)
+        progress = QProgressDialog(
+            f"{Icons.FOREST} Generating forest...\nThis may take a few moments.",
+            f"{Icons.CROSS} Cancel",
+            0,
+            n_vessels,
+            self
+        )
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
+        progress.setAutoClose(True)
 
         # Extract forest configuration
         n_networks = config['n_networks']
@@ -305,10 +372,21 @@ class ParameterPanel(QWidget):
         self.parent_gui.forest = forest
 
         total_vessels = sum(tree.n_terminals for network in forest.networks for tree in network)
+
+        # Update status
+        if self.parent_gui:
+            self.parent_gui.update_status(
+                f"{Icons.CHECK} Forest generated successfully with {total_vessels} vessels across {n_networks} networks"
+            )
+
         QMessageBox.information(
             self,
-            "Success",
-            f"Forest generated with {total_vessels} total vessels across {n_networks} networks."
+            f"{Icons.CHECK} Success",
+            f"Forest generated successfully!\n\n"
+            f"Total vessels: {total_vessels}\n"
+            f"Networks: {n_networks}\n"
+            f"Competition: {'Enabled' if compete else 'Disabled'}\n"
+            f"Physical clearance: {physical_clearance}"
         )
 
     def _export_config(self):
