@@ -33,7 +33,19 @@ The module contains utilities used to read files, calculate centers, etc.
 """
 
 import os.path
-import vtk
+import numpy as np
+from vtkmodules.vtkCommonCore import vtkIdList
+from vtkmodules.vtkIOGeometry import vtkSTLReader
+from vtkmodules.vtkIOLegacy import vtkPolyDataReader
+from vtkmodules.vtkIOXML import (
+    vtkXMLPolyDataReader,
+    vtkXMLStructuredGridReader,
+    vtkXMLRectilinearGridReader,
+    vtkXMLUnstructuredGridReader,
+    vtkXMLImageDataReader,
+    vtkXMLPolyDataWriter,
+    vtkXMLUnstructuredGridWriter,
+)
 
 import logging
 from .manage import get_logger_name
@@ -63,23 +75,24 @@ def read_surface(file_name, file_format="vtp", datatype=None):
 
     # Get reader
     if file_format == 'stl':
-        reader = vtk.vtkSTLReader()
+        reader = vtkSTLReader()
         reader.MergingOn()
     elif file_format == 'vtk':
-        reader = vtk.vtkPolyDataReader()
+        reader = vtkPolyDataReader()
     elif file_format == 'vtp':
-        reader = vtk.vtkXMLPolyDataReader()
+        reader = vtkXMLPolyDataReader()
     elif file_format == 'vts':
-        reader = vtk.vtkXMinkorporereLStructuredGridReader()
+        # Structured Grid reader
+        reader = vtkXMLStructuredGridReader()
     elif file_format == 'vtr':
-        reader = vtk.vtkXMLRectilinearGridReader()
+        reader = vtkXMLRectilinearGridReader()
     elif file_format == 'vtu':
-        reader = vtk.vtkXMLUnstructuredGridReader()
+        reader = vtkXMLUnstructuredGridReader()
     elif file_format == "vti":
-        reader = vtk.vtkXMLImageDataReader()
+        reader = vtkXMLImageDataReader()
     elif file_format == "np" and datatype == "vtkIdList":
         result = np.load(filename).astype(np.int)
-        id_list = vtk.vtkIdList()
+        id_list = vtkIdList()
         id_list.SetNumberOfIds(result.shape[0])
         for i in range(result.shape[0]):
             id_list.SetId(i, result[i])
@@ -113,9 +126,9 @@ def write_polydata(file_name, data, datatype=None):
 
     # Get writer.
     if file_ext == 'vtp':
-        writer = vtk.vtkXMLPolyDataWriter()
+        writer = vtkXMLPolyDataWriter()
     elif file_ext == 'vtu':
-        writer = vtk.vtkXMLUnstructuredGridWriter()
+        writer = vtkXMLUnstructuredGridWriter()
     else:
         raise RuntimeError('Unknown file type %s' % file_ext)
 
@@ -150,7 +163,7 @@ def read_polydata(file_name, datatype=None):
         raise RuntimeError('The file does not have an extension')
 
     if file_ext == 'vtp':
-        reader = vtk.vtkXMLPolyDataReader()
+        reader = vtkXMLPolyDataReader()
     else:
         raise RuntimeError('Unknown file type %s' % file_ext)
 
@@ -160,4 +173,3 @@ def read_polydata(file_name, datatype=None):
     polydata = reader.GetOutput()
 
     return polydata
-

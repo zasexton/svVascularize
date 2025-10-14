@@ -39,8 +39,9 @@ import numpy as np
 import logging
 from .manage import get_logger_name
 
-import vtk
-from vtk.util.numpy_support import vtk_to_numpy as v2n
+from vtkmodules.vtkCommonDataModel import vtkPolyData, vtkPointLocator
+from vtkmodules.vtkIOXML import vtkXMLPolyDataWriter
+from vtkmodules.util.numpy_support import vtk_to_numpy as v2n
 
 from .utils import SurfaceFileFormats, read_surface, read_polydata
 
@@ -175,7 +176,7 @@ def sv_centerlines(p):
     centerlines_polydata = sv.vmtk.centerlines(model_polydata, [p['caps'][0]], p['caps'][1:], use_face_ids=False)
 
     # write centerline to file
-    writer = vtk.vtkXMLPolyDataWriter()
+    writer = vtkXMLPolyDataWriter()
     writer.SetFileName(p['cent_out'])
     writer.SetInputData(centerlines_polydata)
     writer.Update()
@@ -187,10 +188,10 @@ class ClosestPoints:
     Find closest points within a geometry
     """
     def __init__(self, inp):
-        dataset = vtk.vtkPolyData()
+        dataset = vtkPolyData()
         dataset.SetPoints(inp.GetPoints())
 
-        locator = vtk.vtkPointLocator()
+        locator = vtkPointLocator()
         locator.Initialize()
         locator.SetDataSet(dataset)
         locator.BuildLocator()
