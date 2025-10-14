@@ -9,7 +9,9 @@ import svv
 import tqdm
 import numpy
 import pymeshfix
-import vtk
+# Avoid importing the top-level vtk package here to prevent optional IO
+# backends (e.g., NetCDF) from being loaded at import time. PyVista will
+# import the specific VTK modules it needs internally.
 
 import svv.tree.tree
 from svv.simulation.utils.extract_faces import extract_faces
@@ -21,10 +23,8 @@ from svv.simulation.fluid.fluid_equation import FluidEquation
 from svv.simulation.utils.boundary_layer import BoundaryLayer
 
 
-from svv.simulation.fluid.rom import one_d
-from svv.simulation.fluid.rom import zero_d
-from svv.simulation.fluid.rom.zero_d.zerod_forest import export_0d_simulation
-from svv.simulation.fluid.rom.zero_d import project_solution
+# Defer 1D/0D ROM imports to their respective methods to avoid importing
+# vtk-heavy modules during Simulation class import.
 
 
 class Simulation(object):
@@ -108,28 +108,35 @@ class Simulation(object):
                 else:
                     hsize = fluid_surface_mesh.hsize
                     fluid_surface_mesh = fluid_volume_mesh.extract_surface()
+                    # faces, wall_surfaces, cap_surfaces, lumen_surfaces, _
                     fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
                     if boundary_layer:
-                        #fluid_surface_mesh = fluid_volume_mesh.extract_surface()
-                        #fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
-                        wall = fluid_surface_faces[1][0]
-                        for i in range(boundary_layer_attempts):
-                            try:
-                                fluid_boundary_layers = BoundaryLayer(wall, layer_thickness=layer_thickness_ratio*hsize,
-                                                                      remesh_vol=remesh_vol)
-                                fluid_volume_mesh, fluid_interior, fluid_boundary = fluid_boundary_layers.generate()
-                                success = True
-                                print("Generated boundary layers on attempt {}/{}.".format(i+1, boundary_layer_attempts))
-                            except:
-                                print("Failed to generate boundary layers {}/{}.\n".format(i+1, boundary_layer_attempts))
-                                fluid_boundary = None
-                                fluid_interior = None
-                                success = False
-                                layer_thickness_ratio *= layer_thickness_ratio_adjustment
-                            if success:
-                                break
-                        self.fluid_domain_boundary_layers.append(fluid_boundary)
-                        self.fluid_domain_interiors.append(fluid_interior)
+                        # Prefer lumen (vessel wall) surfaces; fallback to walls if needed
+                        lumens = fluid_surface_faces[3]
+                        walls = fluid_surface_faces[1]
+                        wall = lumens[0] if len(lumens) > 0 else (walls[0] if len(walls) > 0 else None)
+                        if wall is None:
+                            print("No suitable wall surface found for boundary layer generation.")
+                            self.fluid_domain_boundary_layers.append(None)
+                            self.fluid_domain_interiors.append(None)
+                        else:
+                            for i in range(boundary_layer_attempts):
+                                try:
+                                    fluid_boundary_layers = BoundaryLayer(wall, layer_thickness=layer_thickness_ratio*hsize,
+                                                                          remesh_vol=remesh_vol)
+                                    fluid_volume_mesh, fluid_interior, fluid_boundary = fluid_boundary_layers.generate()
+                                    success = True
+                                    print("Generated boundary layers on attempt {}/{}.".format(i+1, boundary_layer_attempts))
+                                except:
+                                    print("Failed to generate boundary layers {}/{}.\n".format(i+1, boundary_layer_attempts))
+                                    fluid_boundary = None
+                                    fluid_interior = None
+                                    success = False
+                                    layer_thickness_ratio *= layer_thickness_ratio_adjustment
+                                if success:
+                                    break
+                            self.fluid_domain_boundary_layers.append(fluid_boundary)
+                            self.fluid_domain_interiors.append(fluid_interior)
                     else:
                         if remesh_vol:
                             fluid_volume_mesh = remesh_volume(fluid_volume_mesh, hsiz=fluid_surface_mesh.hsize)
@@ -138,16 +145,21 @@ class Simulation(object):
                     if wall_layers:
                         if isinstance(wall_thickness, type(None)):
                             wall_thickness = 2*layer_thickness_ratio*hsize
-                        wall = fluid_surface_faces[1][0]
-                        fluid_boundary_layers = BoundaryLayer(wall, negate_warp_vectors=False,
-                                                              layer_thickness=wall_thickness,
-                                                              remesh_vol=False, combine=False)
-                        _, _, fluid_wall = fluid_boundary_layers.generate()
-                        # Perform tetrahedron re-orientation to ensure positive Jacobian
-                        fluid_wall = remesh_volume(fluid_wall, nomove=True, noinsert=True, nosurf=True, verbosity=4)
-                        if remesh_vol:
-                            fluid_wall = remesh_volume(fluid_wall, hausd=hausd, nosurf=True, verbosity=4)
-                        self.fluid_domain_wall_layers.append(fluid_wall)
+                        lumens = fluid_surface_faces[3]
+                        walls = fluid_surface_faces[1]
+                        wall = lumens[0] if len(lumens) > 0 else (walls[0] if len(walls) > 0 else None)
+                        if wall is None:
+                            print("No suitable wall surface found for wall layer generation.")
+                        else:
+                            fluid_boundary_layers = BoundaryLayer(wall, negate_warp_vectors=False,
+                                                                  layer_thickness=wall_thickness,
+                                                                  remesh_vol=False, combine=False)
+                            _, _, fluid_wall = fluid_boundary_layers.generate()
+                            # Perform tetrahedron re-orientation to ensure positive Jacobian
+                            fluid_wall = remesh_volume(fluid_wall, nomove=True, noinsert=True, nosurf=True, verbosity=4)
+                            if remesh_vol:
+                                fluid_wall = remesh_volume(fluid_wall, hausd=hausd, nosurf=True, verbosity=4)
+                            self.fluid_domain_wall_layers.append(fluid_wall)
                     fluid_surface_mesh = fluid_volume_mesh.extract_surface()
                     fluid_surface_mesh.hsize = hsize
                     self.fluid_domain_surface_meshes.append(fluid_surface_mesh)
@@ -215,12 +227,13 @@ class Simulation(object):
                         tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                         try:
                             tet_fluid.make_manifold(verbose=False)
-                            tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                            # Tetrahedralize the fluid domain (correct target object)
+                            tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                             fluid_volume_mesh = tet_fluid.grid
                         except:
                             try:
                                 tet_fluid.make_manifold(verbose=True)
-                                tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                                tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                                 fluid_volume_mesh = tet_fluid.grid
                             except:
                                 fluid_volume_mesh = None
@@ -295,14 +308,17 @@ class Simulation(object):
                             hsize = fluid_surface.hsize
                             if (boundary_layer or wall_layers) and fluid:
                                 fluid_surface = fluid_volume.extract_surface()
+                                # faces, wall_surfaces, cap_surfaces, lumen_surfaces, _
                                 fluid_surface_faces = extract_faces(fluid_surface, fluid_volume)
                             if boundary_layer and fluid:
-                                if len(fluid_surface_faces[1]) > 1:
+                                # Use lumen (vessel wall) surfaces for boundary-layer generation
+                                lumens = fluid_surface_faces[3]
+                                if len(lumens) > 1:
                                     print("Boundary layer generation with more than one wall mesh is ambiguous.")
                                     print("Only the first wall mesh will be used.")
-                                elif len(fluid_surface_faces[1]) == 0:
+                                elif len(lumens) == 0:
                                     print("No wall mesh found for boundary layer generation.")
-                                wall = fluid_surface_faces[1][0]
+                                wall = lumens[0]
                                 for j in range(boundary_layer_attempts):
                                     try:
                                         fluid_boundary_layers = BoundaryLayer(wall,
@@ -402,29 +418,35 @@ class Simulation(object):
         self.tissue_domain_meshes = []
         if isinstance(self.synthetic_object, svv.tree.tree.Tree):
             if len(self.fluid_domain_surface_meshes) > 0 and len(self.fluid_domain_volume_meshes) > 0:
-                nodes, walls, caps, shared_boundaries = extract_faces(self.fluid_domain_surface_meshes[0],
-                                                                      self.fluid_domain_volume_meshes[0],
-                                                                      crease_angle=crease_angle, verbose=verbose)
-                self.fluid_domain_faces.append({'walls': walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
+                faces, walls, caps, lumens, shared_boundaries = extract_faces(
+                    self.fluid_domain_surface_meshes[0], self.fluid_domain_volume_meshes[0],
+                    crease_angle=crease_angle, verbose=verbose)
+                # For fluid, use lumen surfaces as primary vessel walls, but include any remaining walls
+                all_walls = lumens + walls
+                self.fluid_domain_faces.append({'walls': all_walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
                 fluid_mesh = GeneralMesh()
                 fluid_mesh.add_mesh(self.fluid_domain_volume_meshes[0], name='fluid_msh_0')
                 for i, wall in enumerate(walls):
                     fluid_mesh.add_face(wall, name='wall_{}'.format(i))
                 for i, cap in enumerate(caps):
                     fluid_mesh.add_face(cap, name='cap_{}'.format(i))
+                for i, lumen in enumerate(lumens):
+                    fluid_mesh.add_face(lumen, name='lumen_{}'.format(i))
                 fluid_mesh.check_mesh()
                 self.fluid_domain_meshes.append(fluid_mesh)
             if len(self.tissue_domain_surface_meshes) > 0 and len(self.tissue_domain_volume_meshes) > 0:
-                nodes, walls, caps, shared_boundaries = extract_faces(self.tissue_domain_surface_meshes[0],
-                                                                      self.tissue_domain_volume_meshes[0],
-                                                                      crease_angle=crease_angle, verbose=verbose)
+                faces, walls, caps, lumens, shared_boundaries = extract_faces(
+                    self.tissue_domain_surface_meshes[0], self.tissue_domain_volume_meshes[0],
+                    crease_angle=crease_angle, verbose=verbose)
                 self.tissue_domain_faces.append({'walls': walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
                 tissue_mesh = GeneralMesh()
                 tissue_mesh.add_mesh(self.tissue_domain_volume_meshes[0], name='tissue_msh_0')
                 for i, wall in enumerate(walls):
-                    tissue_mesh.add_face(wall, name='lumen_{}'.format(i))
+                    tissue_mesh.add_face(wall, name='wall_{}'.format(i))
                 for i, cap in enumerate(caps):
-                    tissue_mesh.add_face(cap, name='wall_{}'.format(i))
+                    tissue_mesh.add_face(cap, name='cap_{}'.format(i))
+                for i, lumen in enumerate(lumens):
+                    tissue_mesh.add_face(lumen, name='lumen_{}'.format(i))
                 tissue_mesh.check_mesh()
                 self.tissue_domain_meshes.append(tissue_mesh)
         elif isinstance(self.synthetic_object, svv.forest.forest.Forest):
@@ -440,15 +462,19 @@ class Simulation(object):
                         network_fluid_faces.append(None)
                         network_fluid_domains.append(None)
                         continue
-                    nodes, walls, caps, shared_boundaries = extract_faces(surface, mesh, crease_angle=crease_angle,
-                                                                          verbose=verbose)
-                    network_fluid_faces.append({'walls': walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
+                    faces, walls, caps, lumens, shared_boundaries = extract_faces(
+                        surface, mesh, crease_angle=crease_angle, verbose=verbose)
+                    # For fluid, use lumen surfaces as primary vessel walls, but include any remaining walls
+                    all_walls = lumens + walls
+                    network_fluid_faces.append({'walls': all_walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
                     fluid_mesh = GeneralMesh()
                     fluid_mesh.add_mesh(mesh, name='fluid_msh_{}'.format(len(self.fluid_domain_meshes)))
                     for k, wall in enumerate(walls):
                         fluid_mesh.add_face(wall, name='wall_{}'.format(k))
                     for k, cap in enumerate(caps):
                         fluid_mesh.add_face(cap, name='cap_{}'.format(k))
+                    for k, lumen in enumerate(lumens):
+                        fluid_mesh.add_face(lumen, name='lumen_{}'.format(k))
                     fluid_mesh.check_mesh()
                     network_fluid_domains.append(fluid_mesh)
                 self.fluid_domain_faces.append(network_fluid_faces)
@@ -457,8 +483,8 @@ class Simulation(object):
                 for j in range(len(self.tissue_domain_surface_meshes[i])):
                     surface = self.tissue_domain_surface_meshes[i][j]
                     mesh = self.tissue_domain_volume_meshes[i][j]
-                    nodes, walls, caps, shared_boundaries = extract_faces(surface, mesh, crease_angle=crease_angle,
-                                                                          verbose=False)
+                    faces, walls, caps, lumens, shared_boundaries = extract_faces(
+                        surface, mesh, crease_angle=crease_angle, verbose=False)
                     network_tissue_faces.append({'walls': walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
                     tissue_mesh = GeneralMesh()
                     tissue_mesh.add_mesh(mesh, name='tissue_msh_{}'.format(len(self.tissue_domain_meshes)))
@@ -466,6 +492,8 @@ class Simulation(object):
                         tissue_mesh.add_face(wall, name='lumen_{}'.format(k))
                     for k, cap in enumerate(caps):
                         tissue_mesh.add_face(cap, name='wall_{}'.format(k))
+                    for k, lumen in enumerate(lumens):
+                        tissue_mesh.add_face(lumen, name='lumen_{}'.format(i))
                     tissue_mesh.check_mesh()
                     network_tissue_domains.append(tissue_mesh)
                 self.tissue_domain_faces.append(network_tissue_faces)
@@ -473,8 +501,29 @@ class Simulation(object):
 
     def construct_3d_fluid_equation(self, *args):
         """
-        Construct the equations for the simulation.
-        :return:
+        Build the 3D fluid equation object and its boundary conditions.
+
+        This configures a FluidEquation for svMultiPhysics using the
+        already extracted GeneralMesh, identifies an inlet cap by
+        proximity to the tree root, assigns outlets and walls, and sets
+        linear-solver data so the generated XML matches svMultiPhysics
+        expectations.
+
+        Behavior
+        - Inlet selection: the cap face closest (by centroid distance)
+          to the root location `synthetic_object.data[0, 0:3]`.
+        - Boundary conditions: inlet is Dirichlet (velocity) with flux
+          imposition and parabolic profile; other caps are zero-pressure
+          Neumann; wall faces are no-slip Dirichlet.
+        - Sign + units: inlet magnitude uses the stored inflow value and
+          is negated to follow the solver inflow direction convention.
+          Viscosity uses `parameters.kinematic_viscosity`; ensure units
+          are consistent with solver configuration.
+        - Linear solver: sets GMRES with FSILS linear algebra backend
+          and preconditioner to emit the required <Linear_algebra> block.
+
+        Returns
+        - FluidEquation
         """
         if isinstance(self.synthetic_object, svv.tree.tree.Tree):
             fluid_mesh = self.fluid_domain_meshes[0]
@@ -485,8 +534,9 @@ class Simulation(object):
             inlet_center = self.synthetic_object.data[0, 0:3]
             for name, face in fluid_mesh.faces.items():
                 if 'cap' in name:
-                    if numpy.linalg.norm(face.center - inlet_center) < best:
-                        best = numpy.linalg.norm(face.center)
+                    dist = numpy.linalg.norm(face.center - inlet_center)
+                    if dist < best:
+                        best = dist
                         inlet = name
             if isinstance(inlet, type(None)):
                 raise ValueError("Inlet not found.")
@@ -507,14 +557,15 @@ class Simulation(object):
             fluid_mesh = self.fluid_domain_meshes[network_id][tree_id]
             fluid_equation = FluidEquation()
             fluid_equation.add_mesh(fluid_mesh)
-            # Verify cap inlet
+            # Verify cap inlet: choose cap closest to this tree's root
             inlet = None
+            best = numpy.inf
             for name, face in fluid_mesh.faces.items():
-                best = numpy.inf
                 inlet_center = self.synthetic_object.networks[network_id][tree_id].data[0, 0:3]
                 if 'cap' in name:
-                    if numpy.linalg.norm(face.center - inlet_center) < best:
-                        best = numpy.linalg.norm(face.center)
+                    dist = numpy.linalg.norm(face.center - inlet_center)
+                    if dist < best:
+                        best = dist
                         inlet = name
             if isinstance(inlet, type(None)):
                 raise ValueError("Inlet not found.")
@@ -522,6 +573,7 @@ class Simulation(object):
             fluid_equation.set_viscosity('Constant', self.synthetic_object.networks[network_id][tree_id].parameters.kinematic_viscosity)
         else:
             raise ValueError("Unsupported synthetic object type.")
+        # Assign outlets and walls for remaining faces
         for face in fluid_mesh.faces:
             if face == inlet:
                 continue
@@ -529,7 +581,23 @@ class Simulation(object):
                 fluid_equation.add_outlet(face, value=0.0)
             if 'wall' in face:
                 fluid_equation.add_wall(face)
+        # Sanity check that all faces received a BC
         fluid_equation.check_bcs()
+
+        # Configure linear solver and linear algebra backend so the
+        # <LS> section includes the required <Linear_algebra> block
+        # for svMultiPhysics. Default to GMRES + FSILS.
+        try:
+            fluid_equation.linear_solver.set_type("GMRES")
+        except Exception:
+            fluid_equation.linear_solver.set_type("NS")
+        # Ensure Linear_algebra is emitted even if defaults are used.
+        if hasattr(fluid_equation.linear_solver, "set_linear_algebra"):
+            fluid_equation.linear_solver.set_linear_algebra(linalg_type="fsils", preconditioner="fsils")
+        elif hasattr(fluid_equation.linear_solver, "set_linear_algebra_type"):
+            fluid_equation.linear_solver.set_linear_algebra_type("fsils")
+            if hasattr(fluid_equation.linear_solver, "set_preconditioner"):
+                fluid_equation.linear_solver.set_preconditioner("fsils")
         return fluid_equation
 
     def construct_3d_fluid_simulation(self, *args):
@@ -566,7 +634,8 @@ class Simulation(object):
             svfsi_file.setAttribute("version", "0.1")
             general_simulation_parameters = GeneralSimulationParameters()
             fluid_mesh = self.fluid_domain_meshes[network_id][tree_id]
-            fluid_equation = self.construct_3d_fluid_equation(args)
+            # Forward variadic args to equation builder
+            fluid_equation = self.construct_3d_fluid_equation(*args)
             svfsi_file.appendChild(general_simulation_parameters.toxml())
             svfsi_file.appendChild(fluid_mesh.toxml())
             svfsi_file.appendChild(fluid_equation.toxml())
@@ -626,6 +695,9 @@ class Simulation(object):
 
     def construct_1d_fluid_simulation(self, *args, viscosity=None, density=None, time_step_size=0.01,
                                       number_time_steps=100, olufsen_material_exponent=2):
+        # Lazy import 1D ROM modules to avoid importing vtk unless needed.
+        from svv.simulation.fluid.rom.one_d import parameters as one_d_parameters
+        from svv.simulation.fluid.rom.one_d import mesh as one_d_mesh
         if len(args) == 0:
             network_id = 0
             tree_id = 0
@@ -639,8 +711,8 @@ class Simulation(object):
             raise ValueError("Too many positional input arguments")
         if isinstance(self.synthetic_object, svv.tree.tree.Tree):
             centerlines, _ = self.synthetic_object.export_centerlines()
-            material = one_d.parameters.MaterialModel()
-            params = one_d.parameters.Parameters()
+            material = one_d_parameters.MaterialModel()
+            params = one_d_parameters.Parameters()
             params.output_directory = self.file_path + os.sep + "fluid" + os.sep + "1d"
             params.solver_output_file = self.file_path + os.sep + "fluid" + os.sep + "1d" + os.sep + "1d_simulation_input.json"
             params.centerlines_input_file = self.file_path + os.sep + "fluid" + os.sep + "1d" + os.sep + "centerlines.vtp"
@@ -659,7 +731,7 @@ class Simulation(object):
             params.material_model = material.OLUFSEN
             params.viscosity = viscosity
             params.density = density
-            mesh = one_d.mesh.Mesh()
+            mesh = one_d_mesh.Mesh()
             self.fluid_1d_simulations[0] = tuple([centerlines, mesh, params])
         else:
             raise ValueError("Index out of range.")
