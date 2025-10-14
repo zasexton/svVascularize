@@ -346,50 +346,9 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             wall_boundary_trees.append(tmp_wall_boundary_trees)
             iscap.append(0)
             wall_faces.append(faces[i])
-    # ADDITIONAL CLASSIFICATION: Check if cap boundaries overlap with other boundaries
-    # If a cap's boundary loop shares edges/vertices with another boundary loop, it's actually a wall
-    def check_boundary_overlap(boundary_trees_a, all_other_boundary_trees, tolerance=1e-9):
-        """
-        Check if any boundary in boundary_trees_a shares vertices with boundaries in all_other_boundary_trees.
-        Returns True if there is overlap (shared vertices/edges).
-        """
-        for tree_a in boundary_trees_a:
-            for other_trees in all_other_boundary_trees:
-                for tree_b in other_trees:
-                    # Check if boundaries share vertices by querying distances
-                    dists, _ = tree_a.query(tree_b.data)
-                    if numpy.any(numpy.isclose(dists, 0.0, atol=tolerance)):
-                        return True
-        return False
-
-    # Collect all boundary trees for cross-checking
-    all_boundary_trees = wall_boundary_trees + cap_boundary_trees + lumen_boundary_trees
-
-    # Re-check caps: if their boundaries overlap with other boundaries, reclassify as walls
-    caps_to_reclassify = []
-    for i in range(len(cap_faces)):
-        cap_boundary_tree = cap_boundary_trees[i]
-
-        # Check against all OTHER boundaries (exclude self)
-        other_boundaries = (
-            wall_boundary_trees +
-            [cap_boundary_trees[j] for j in range(len(cap_boundary_trees)) if j != i] +
-            lumen_boundary_trees
-        )
-
-        if check_boundary_overlap(cap_boundary_tree, other_boundaries):
-            caps_to_reclassify.append(i)
-            if verbose:
-                print(f"Cap {i} reclassified as wall: boundary overlaps with another boundary")
-
-    # Move overlapping caps to walls
-    for i in reversed(caps_to_reclassify):  # Reverse to preserve indices during removal
-        wall_faces.append(cap_faces[i])
-        wall_boundaries.append(cap_boundaries[i])
-        wall_boundary_trees.append(cap_boundary_trees[i])
-        del cap_faces[i]
-        del cap_boundaries[i]
-        del cap_boundary_trees[i]
+    # Do not reclassify single-loop planar faces: these are caps by definition.
+    # A cap’s boundary loop will naturally coincide with a wall boundary; this is expected
+    # and should not trigger reclassification.
 
     # IMPORTANT: Caps and lumens should NEVER be merged with walls or each other
     # Only walls can be combined if they share boundaries
