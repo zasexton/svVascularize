@@ -25,6 +25,8 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         wall_surfaces: list of PolyData
         cap_surfaces: list of PolyData
     """
+    if not surface.is_manifold:
+        raise ValueError("Surface must be a righteous manifold for face extraction.")
     face_vertices = surface.faces.reshape(-1, 4)[:, 1:]
     unallocated_elements = set(range(face_vertices.shape[0]))
     vertex_map = build_vertex_map(face_vertices)
@@ -38,7 +40,7 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         point_normals=False,
         auto_orient_normals=True,
         flip_normals=False,
-        non_manifold_traversal=True
+        non_manifold_traversal=False
     ).cell_data["Normals"]
     collapsed_elements = numpy.isclose(element_quality.cell_data["CellQuality"], 0.0, atol=1e-3)
     faces = partition(unallocated_elements, face_vertices, element_normals, crease_angle, vertex_map, edge_neighbors,
@@ -448,6 +450,13 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             # Assign Global Node IDs
             _, indices = global_node_tree.query(cap_surface.points)
             cap_surface.point_data["GlobalNodeID"] = indices.astype(int)
+            # Assign Global Element IDs
+            cap_faces = cap_surface.point_data["GlobalNodeID"][wall_surface.faces]
+            cap_faces = cap_faces.reshape(-1, 4)[:, 1:]
+            cap_faces = numpy.sort(cap_faces, axis=1)
+            _, indices = tet_face_tree.query(cap_faces)
+            wall_surface.cell_data["GlobalElementID"] = indices // 4
+            wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(int)
             # Assign Global Element IDs
         boundaries = cap_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                            feature_edges=False, non_manifold_edges=False)

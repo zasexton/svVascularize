@@ -47,7 +47,10 @@ class LinearSolver(LinearSolverBase):
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def set_type(self, solver_type):
         """
@@ -127,10 +130,10 @@ class LinearSolver(LinearSolverBase):
             max_iterations.appendChild(self.file.createTextNode(str(self.max_iterations)))
             ls.appendChild(max_iterations)
 
-        if not isinstance(self.preconditioner, type(None)):
-            preconditioner = self.file.createElement("Preconditioner")
-            preconditioner.appendChild(self.file.createTextNode(self.preconditioner))
-            ls.appendChild(preconditioner)
+        #if not isinstance(self.preconditioner, type(None)):
+        #    preconditioner = self.file.createElement("Preconditioner")
+        #    preconditioner.appendChild(self.file.createTextNode(self.preconditioner))
+        #    ls.appendChild(preconditioner)
 
         if not isinstance(self.ns_cg_max_iterations, type(None)):
             ns_cg_max_iterations = self.file.createElement("NS_CG_max_iterations")

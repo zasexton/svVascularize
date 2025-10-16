@@ -51,7 +51,10 @@ class Equation(EquationBase):
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def set_type(self, equation_type):
         if equation_type not in ["fluid", "scalarTransport"]:

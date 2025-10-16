@@ -34,7 +34,10 @@ class GeneralSimulationParameters:
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def toxml(self):
         general_simulation_parameters = self.file.createElement("GeneralSimulationParameters")

@@ -64,10 +64,12 @@ class FluidEquation(Equation):
 
     def check_bcs(self):
         """
-        Check that all boundary conditions are set.
+        Check that all boundary conditions are set for caps.
         """
         for face in self.faces:
             found = False
+            if not 'cap' in face:
+                continue
             for bc in self.boundary_conditions:
                 if bc.name == face:
                     found = True

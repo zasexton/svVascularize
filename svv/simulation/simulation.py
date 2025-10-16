@@ -95,6 +95,7 @@ class Simulation(object):
                 fluid_surface_mesh = self.synthetic_object.export_solid(watertight=True)
                 tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                 try:
+                    tet_fluid.make_manifold(verbose=True)
                     #tet_fluid.tetrahedralize(minratio=minratio, mindihedral=10.0, steinerleft=-1, order=order, nobisect=True, verbose=2, switches='M')
                     tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                     fluid_volume_mesh = tet_fluid.grid
@@ -109,9 +110,10 @@ class Simulation(object):
                     hsize = fluid_surface_mesh.hsize
                     fluid_surface_mesh = fluid_volume_mesh.extract_surface()
                     # faces, wall_surfaces, cap_surfaces, lumen_surfaces, _
-                    fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
+                    # fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
                     if boundary_layer:
                         # Prefer lumen (vessel wall) surfaces; fallback to walls if needed
+                        fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
                         lumens = fluid_surface_faces[3]
                         walls = fluid_surface_faces[1]
                         wall = lumens[0] if len(lumens) > 0 else (walls[0] if len(walls) > 0 else None)
@@ -309,8 +311,8 @@ class Simulation(object):
                             if (boundary_layer or wall_layers) and fluid:
                                 fluid_surface = fluid_volume.extract_surface()
                                 # faces, wall_surfaces, cap_surfaces, lumen_surfaces, _
-                                fluid_surface_faces = extract_faces(fluid_surface, fluid_volume)
                             if boundary_layer and fluid:
+                                fluid_surface_faces = extract_faces(fluid_surface, fluid_volume)
                                 # Use lumen (vessel wall) surfaces for boundary-layer generation
                                 lumens = fluid_surface_faces[3]
                                 if len(lumens) > 1:
@@ -422,8 +424,7 @@ class Simulation(object):
                     self.fluid_domain_surface_meshes[0], self.fluid_domain_volume_meshes[0],
                     crease_angle=crease_angle, verbose=verbose)
                 # For fluid, use lumen surfaces as primary vessel walls, but include any remaining walls
-                all_walls = lumens + walls
-                self.fluid_domain_faces.append({'walls': all_walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
+                self.fluid_domain_faces.append({'walls': walls, 'lumens': lumens, 'caps': caps, 'shared_boundaries': shared_boundaries})
                 fluid_mesh = GeneralMesh()
                 fluid_mesh.add_mesh(self.fluid_domain_volume_meshes[0], name='fluid_msh_0')
                 for i, wall in enumerate(walls):
@@ -438,7 +439,7 @@ class Simulation(object):
                 faces, walls, caps, lumens, shared_boundaries = extract_faces(
                     self.tissue_domain_surface_meshes[0], self.tissue_domain_volume_meshes[0],
                     crease_angle=crease_angle, verbose=verbose)
-                self.tissue_domain_faces.append({'walls': walls, 'caps': caps, 'shared_boundaries': shared_boundaries})
+                self.tissue_domain_faces.append({'walls': walls, 'lumens': lumens, 'caps': caps, 'shared_boundaries': shared_boundaries})
                 tissue_mesh = GeneralMesh()
                 tissue_mesh.add_mesh(self.tissue_domain_volume_meshes[0], name='tissue_msh_0')
                 for i, wall in enumerate(walls):
@@ -683,6 +684,10 @@ class Simulation(object):
             else:
                 raise ValueError("Mesh must be a pyvista mesh object.")
             for name, face in fluid_mesh.faces.items():
+                #face.cell_data["ModelFaceID"] = face.cell_data["ModelFaceID"].astype(numpy.int32)
+                #face.cell_data["GlobalElementID"] = face.cell_data["GlobalElementID"].astype(numpy.int32)
+                face.cell_data.remove("ModelFaceID")
+                face.cell_data.remove("GlobalElementID")
                 if isinstance(face, pyvista.PolyData):
                     face.save(self.file_path + os.sep + "mesh" + os.sep + fluid_mesh.name + os.sep + "mesh-surfaces" + os.sep + "{}.vtp".format(name))
                 else:

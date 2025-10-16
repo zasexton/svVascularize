@@ -38,7 +38,10 @@ class Output(OutputBase):
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def set_type(self, output_type):
         if output_type not in ["Boundary_integral", "Spatial", "Volume_integral", "Alias"]:
