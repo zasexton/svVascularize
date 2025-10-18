@@ -686,8 +686,8 @@ class Simulation(object):
             for name, face in fluid_mesh.faces.items():
                 #face.cell_data["ModelFaceID"] = face.cell_data["ModelFaceID"].astype(numpy.int32)
                 #face.cell_data["GlobalElementID"] = face.cell_data["GlobalElementID"].astype(numpy.int32)
-                face.cell_data.remove("ModelFaceID")
-                face.cell_data.remove("GlobalElementID")
+                #face.cell_data.remove("ModelFaceID")
+                #face.cell_data.remove("GlobalElementID")
                 if isinstance(face, pyvista.PolyData):
                     face.save(self.file_path + os.sep + "mesh" + os.sep + fluid_mesh.name + os.sep + "mesh-surfaces" + os.sep + "{}.vtp".format(name))
                 else:

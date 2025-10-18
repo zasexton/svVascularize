@@ -427,7 +427,7 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             wall_faces = numpy.sort(wall_faces, axis=1)
             _, indices = tet_face_tree.query(wall_faces)
             wall_surface.cell_data["GlobalElementID"] = indices // 4
-            wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(int)
+            wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = wall_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                              feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()
@@ -451,13 +451,12 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             _, indices = global_node_tree.query(cap_surface.points)
             cap_surface.point_data["GlobalNodeID"] = indices.astype(int)
             # Assign Global Element IDs
-            cap_faces = cap_surface.point_data["GlobalNodeID"][wall_surface.faces]
+            cap_faces = cap_surface.point_data["GlobalNodeID"][cap_surface.faces]
             cap_faces = cap_faces.reshape(-1, 4)[:, 1:]
             cap_faces = numpy.sort(cap_faces, axis=1)
             _, indices = tet_face_tree.query(cap_faces)
-            wall_surface.cell_data["GlobalElementID"] = indices // 4
-            wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(int)
-            # Assign Global Element IDs
+            cap_surface.cell_data["GlobalElementID"] = indices // 4
+            cap_surface.cell_data["GlobalElementID"] = cap_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = cap_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                            feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()
@@ -482,6 +481,12 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             _, indices = global_node_tree.query(lumen_surface.points)
             lumen_surface.point_data["GlobalNodeID"] = indices.astype(int)
             # Assign Global Element IDs
+            lumen_faces = lumen_surface.point_data["GlobalNodeID"][lumen_surface.faces]
+            lumen_faces = lumen_faces.reshape(-1, 4)[:, 1:]
+            lumen_faces = numpy.sort(lumen_faces, axis=1)
+            _, indices = tet_face_tree.query(lumen_faces)
+            lumen_surface.cell_data["GlobalElementID"] = indices // 4
+            lumen_surface.cell_data["GlobalElementID"] = lumen_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = lumen_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                            feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()
