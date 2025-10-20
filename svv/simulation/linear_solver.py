@@ -7,7 +7,12 @@ class LinearSolverBase:
         self.absolute_tolerance = 1.0e-10
         self.tolerance = 0.5
         self.max_iterations = 1000
-        self.preconditioner = None
+        # Linear algebra backend and options used by svMultiPhysics.
+        # These control the required <Linear_algebra> section emitted
+        # under the <LS> element.
+        self.linear_algebra_type = "fsils"  # fsils | petsc | trilinos
+        self.preconditioner = None          # e.g., fsils, petsc-rcs, trilinos-ilut
+        self.assembly = None                # Optional: none | fsils | petsc | trilinos
         self.ns_cg_max_iterations = 1000
         self.ns_cg_tolerance = 1.0e-2
         self.ns_gm_max_iterations = 1000
@@ -42,7 +47,10 @@ class LinearSolver(LinearSolverBase):
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def set_type(self, solver_type):
         """
@@ -53,12 +61,59 @@ class LinearSolver(LinearSolverBase):
             raise ValueError("Solver type must be 'CG' or 'GMRES'.")
         self.solver_type = solver_type
 
+    def set_linear_algebra_type(self, linalg_type):
+        """
+        Set the linear algebra backend type used by svMultiPhysics.
+        Valid values: 'fsils', 'petsc', 'trilinos'.
+        """
+        if not isinstance(linalg_type, str):
+            raise ValueError("Linear algebra type must be a string.")
+        if linalg_type.lower() not in ["fsils", "petsc", "trilinos"]:
+            raise ValueError("Linear algebra type must be 'fsils', 'petsc', or 'trilinos'.")
+        self.linear_algebra_type = linalg_type.lower()
+
+    def set_preconditioner(self, preconditioner):
+        """
+        Set the linear algebra preconditioner string. This is passed
+        through to svMultiPhysics and must be compatible with the
+        selected backend (e.g., 'fsils', 'petsc-rcs', 'trilinos-ilut').
+        """
+        if not isinstance(preconditioner, str):
+            raise ValueError("Preconditioner must be a string.")
+        self.preconditioner = preconditioner
+
+    def set_linear_algebra(self, linalg_type=None, preconditioner=None, assembly=None):
+        """
+        Convenience method to set linear algebra backend, preconditioner,
+        and optional assembly type.
+        """
+        if isinstance(linalg_type, str):
+            self.set_linear_algebra_type(linalg_type)
+        if isinstance(preconditioner, str):
+            self.set_preconditioner(preconditioner)
+        if isinstance(assembly, str):
+            self.assembly = assembly
+
     def toxml(self):
         ls = self.file.createElement("LS")
         if not isinstance(self.solver_type, type(None)):
             ls.setAttribute("type", self.solver_type)
         else:
             raise ValueError("Solver type must be set.")
+
+        # Emit required <Linear_algebra> section for svMultiPhysics.
+        if not isinstance(self.linear_algebra_type, type(None)):
+            linear_algebra = self.file.createElement("Linear_algebra")
+            linear_algebra.setAttribute("type", self.linear_algebra_type)
+            if isinstance(self.preconditioner, str) and len(self.preconditioner) > 0:
+                precond = self.file.createElement("Preconditioner")
+                precond.appendChild(self.file.createTextNode(self.preconditioner))
+                linear_algebra.appendChild(precond)
+            if isinstance(self.assembly, str) and len(self.assembly) > 0:
+                assembly = self.file.createElement("Assembly")
+                assembly.appendChild(self.file.createTextNode(self.assembly))
+                linear_algebra.appendChild(assembly)
+            ls.appendChild(linear_algebra)
 
         if not isinstance(self.absolute_tolerance, type(None)):
             absolute_tolerance = self.file.createElement("Absolute_tolerance")
@@ -75,10 +130,10 @@ class LinearSolver(LinearSolverBase):
             max_iterations.appendChild(self.file.createTextNode(str(self.max_iterations)))
             ls.appendChild(max_iterations)
 
-        if not isinstance(self.preconditioner, type(None)):
-            preconditioner = self.file.createElement("Preconditioner")
-            preconditioner.appendChild(self.file.createTextNode(self.preconditioner))
-            ls.appendChild(preconditioner)
+        #if not isinstance(self.preconditioner, type(None)):
+        #    preconditioner = self.file.createElement("Preconditioner")
+        #    preconditioner.appendChild(self.file.createTextNode(self.preconditioner))
+        #    ls.appendChild(preconditioner)
 
         if not isinstance(self.ns_cg_max_iterations, type(None)):
             ns_cg_max_iterations = self.file.createElement("NS_CG_max_iterations")

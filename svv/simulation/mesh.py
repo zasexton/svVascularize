@@ -137,10 +137,20 @@ class GeneralMesh(GeneralMeshBase):
             self.folder = self.directory + '/' + "mesh"
 
     def __str__(self):
-        return self.file.toxml().toprettyxml()
+        # Pretty-print only the <Add_mesh> subtree for quick inspection
+        # Build a fresh element each time to reflect current state
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            # Fallback to a simple dict string if XML build fails
+            return str({"name": self.name, "faces": list(self.faces.keys())})
 
     def __repr__(self):
-        return self
+        # Return a pretty-printed XML snippet so `print(obj)`/`obj` in REPL is useful
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str({"name": self.name, "faces": list(self.faces.keys())})
 
     def toxml(self):
         add_mesh = self.file.createElement("Add_mesh")

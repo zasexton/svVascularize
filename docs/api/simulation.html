@@ -68,8 +68,8 @@
         <!-- Quick Example -->
         <div class="api-quick-example">
             <h2>Quick Example</h2>
-            <pre data-copy><code class="language-python">from svv.simulation import Simulation
-from svv.tree import Tree
+            <pre data-copy><code class="language-python">from svv.simulation.simulation import Simulation
+# Assumes `tree` is an existing svv.tree.Tree built as in the Quickstart
 
 # Create simulation from tree
 sim = Simulation(tree, name="coronary_sim", directory="./simulations")
@@ -425,9 +425,9 @@ sim.construct_1d_fluid_simulation(
 
                     <div class="api-example">
                         <h3>Complete 3D CFD Simulation Setup</h3>
-                        <pre data-copy><code class="language-python">from svv.simulation import Simulation
-from svv.tree import Tree
-from svv.domain import Domain
+                        <pre data-copy><code class="language-python">from svv.simulation.simulation import Simulation
+from svv.tree.tree import Tree
+from svv.domain.domain import Domain
 import pyvista as pv
 
 # Generate vascular tree
@@ -492,7 +492,8 @@ sim.construct_1d_fluid_simulation(
 
 # Write both simulations
 sim.write_3d_fluid_simulation()
-sim.write_1d_fluid_simulation()
+# Note: writing 1-D files is not yet automated.
+# Use the returned centerlines/mesh/params to invoke the SimVascular 1-D tools.
 
 # Access centerlines for coupling
 centerlines = sim.fluid_1d_simulations[0][0]

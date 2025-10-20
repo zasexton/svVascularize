@@ -66,8 +66,8 @@
         <!-- Quick Example -->
         <div class="api-quick-example">
             <h2>Quick Example</h2>
-            <pre data-copy><code class="language-python">from svv.tree import Tree
-from svv.domain import Domain
+            <pre data-copy><code class="language-python">from svv.tree.tree import Tree
+from svv.domain.domain import Domain
 import pyvista as pv
 
 # Create domain from mesh
@@ -397,8 +397,8 @@ centerlines, polys = tree.export_centerlines()</code></pre>
 
                     <div class="api-example">
                         <h3>Basic Tree Generation</h3>
-                        <pre data-copy><code class="language-python">from svv.tree import Tree
-from svv.domain import Domain
+                        <pre data-copy><code class="language-python">from svv.tree.tree import Tree
+from svv.domain.domain import Domain
 import numpy as np
 import pyvista as pv
 
@@ -457,7 +457,8 @@ solid.save('vascular_tree.stl')</code></pre>
 
                     <div class="api-example">
                         <h3>Export for Simulation</h3>
-                        <pre data-copy><code class="language-python"># Generate tree
+                        <pre data-copy><code class="language-python">import numpy as np
+# Generate tree
 tree = Tree()
 tree.set_domain(domain)
 tree.set_root([0, 0, 0])
@@ -509,7 +510,8 @@ vessel_map = tree.vessel_map  # Connectivity information</code></pre>
 
                     <h3>Timing Analysis</h3>
                     <p>Access detailed timing information through the <code>times</code> attribute:</p>
-                    <pre data-copy><code class="language-python"># After growing tree
+                        <pre data-copy><code class="language-python"># After growing tree
+import numpy as np
 import pandas as pd
 
 # Convert timing data to DataFrame

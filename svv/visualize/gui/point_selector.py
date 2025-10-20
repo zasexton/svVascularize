@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QComboBox
 )
 from PySide6.QtCore import Signal
+from svv.visualize.gui.styles import ModernTheme, Icons
 
 
 class PointSelectorWidget(QWidget):
@@ -38,21 +39,27 @@ class PointSelectorWidget(QWidget):
     def _init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         self.setLayout(layout)
 
         # Group box for point management
-        group_box = QGroupBox("Start Points & Directions")
+        group_box = QGroupBox(f"{Icons.POINT} Start Points & Directions")
         group_layout = QVBoxLayout()
+        group_layout.setSpacing(10)
         group_box.setLayout(group_layout)
 
         # Network configuration
         network_layout = QHBoxLayout()
-        network_layout.addWidget(QLabel("Networks:"))
+        network_label = QLabel("Networks:")
+        network_label.setToolTip("Number of independent vascular networks")
+        network_layout.addWidget(network_label)
         self.network_spin = QSpinBox()
         self.network_spin.setMinimum(1)
         self.network_spin.setMaximum(10)
         self.network_spin.setValue(1)
         self.network_spin.valueChanged.connect(self._on_network_changed)
+        self.network_spin.setToolTip("Number of independent vascular networks")
         network_layout.addWidget(self.network_spin)
         network_layout.addStretch()
         group_layout.addLayout(network_layout)
@@ -78,15 +85,19 @@ class PointSelectorWidget(QWidget):
         group_layout.addWidget(self.point_list)
 
         # Add point buttons
-        button_layout = QHBoxLayout()
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(6)
 
-        self.pick_mode_btn = QPushButton("Pick Point (Click on Domain)")
+        self.pick_mode_btn = QPushButton(f"{Icons.POINT} Pick Point (Click on Domain)")
         self.pick_mode_btn.setCheckable(True)
         self.pick_mode_btn.clicked.connect(self._toggle_pick_mode)
+        self.pick_mode_btn.setToolTip("Click on the 3D domain to select a start point")
         button_layout.addWidget(self.pick_mode_btn)
 
-        self.manual_btn = QPushButton("Manual Input...")
+        self.manual_btn = QPushButton(f"{Icons.PLUS} Manual Input...")
         self.manual_btn.clicked.connect(self._manual_input)
+        self.manual_btn.setObjectName("secondaryButton")
+        self.manual_btn.setToolTip("Enter point coordinates manually")
         button_layout.addWidget(self.manual_btn)
 
         group_layout.addLayout(button_layout)
@@ -105,8 +116,9 @@ class PointSelectorWidget(QWidget):
         details_layout.addLayout(coord_layout)
 
         # Direction checkbox
-        self.use_direction_cb = QCheckBox("Use Custom Direction")
+        self.use_direction_cb = QCheckBox(f"{Icons.ARROW} Use Custom Direction")
         self.use_direction_cb.stateChanged.connect(self._on_direction_toggled)
+        self.use_direction_cb.setToolTip("Specify a custom growth direction for this start point")
         details_layout.addWidget(self.use_direction_cb)
 
         # Direction inputs
@@ -150,12 +162,16 @@ class PointSelectorWidget(QWidget):
 
         # Delete and Clear buttons
         action_layout = QHBoxLayout()
-        self.delete_btn = QPushButton("Delete Selected")
+        self.delete_btn = QPushButton(f"{Icons.MINUS} Delete Selected")
         self.delete_btn.clicked.connect(self._delete_selected)
+        self.delete_btn.setObjectName("dangerButton")
+        self.delete_btn.setToolTip("Delete the currently selected point")
         action_layout.addWidget(self.delete_btn)
 
-        self.clear_btn = QPushButton("Clear All")
+        self.clear_btn = QPushButton(f"{Icons.CROSS} Clear All")
         self.clear_btn.clicked.connect(self._clear_all)
+        self.clear_btn.setObjectName("dangerButton")
+        self.clear_btn.setToolTip("Remove all start points")
         action_layout.addWidget(self.clear_btn)
 
         group_layout.addLayout(action_layout)
@@ -176,11 +192,13 @@ class PointSelectorWidget(QWidget):
     def _toggle_pick_mode(self, checked):
         """Toggle point picking mode."""
         if checked and self.parent_gui:
-            self.pick_mode_btn.setText("Picking... (Click Domain)")
+            self.pick_mode_btn.setText(f"{Icons.POINT} Picking... (Click Domain)")
+            self.pick_mode_btn.setStyleSheet(f"background-color: {ModernTheme.SUCCESS};")
             # Connect to VTK widget's point picking signal
             self.parent_gui.vtk_widget.point_picked.connect(self._on_point_picked)
         else:
-            self.pick_mode_btn.setText("Pick Point (Click on Domain)")
+            self.pick_mode_btn.setText(f"{Icons.POINT} Pick Point (Click on Domain)")
+            self.pick_mode_btn.setStyleSheet("")
             if self.parent_gui:
                 try:
                     self.parent_gui.vtk_widget.point_picked.disconnect(self._on_point_picked)

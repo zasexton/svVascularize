@@ -45,10 +45,11 @@ import numpy as np
 from collections import OrderedDict
 
 from scipy.signal import argrelextrema
-import vtk
-from vtk.util.numpy_support import vtk_to_numpy as v2n
-from vtk import vtkIdList
-from vtk import vtkPoints, vtkLine, vtkCellArray, vtkPolyData, vtkXMLPolyDataWriter
+from vtkmodules.util.numpy_support import vtk_to_numpy as v2n
+from vtkmodules.vtkCommonCore import vtkIdList, vtkPoints
+from vtkmodules.vtkCommonDataModel import vtkLine, vtkCellArray, vtkPolyData
+from vtkmodules.vtkFiltersCore import vtkConnectivityFilter
+from vtkmodules.vtkIOXML import vtkXMLPolyDataWriter
 
 from .manage import get_logger_name
 from .parameters import OutflowBoundaryConditionType, MaterialModel
@@ -256,7 +257,7 @@ class Mesh(object):
         """
         Check if centerline is one connected region
         """
-        con = vtk.vtkConnectivityFilter()
+        con = vtkConnectivityFilter()
         con.SetInputData(self.centerline)
         con.SetExtractionModeToAllRegions()
         con.ColorRegionsOn()

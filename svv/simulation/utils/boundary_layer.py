@@ -8,7 +8,6 @@ from scipy.spatial import cKDTree
 from scipy.sparse.csgraph import min_weight_full_bipartite_matching
 from svv.utils.remeshing.remesh import remesh_surface_2d, remesh_volume
 import tetgen
-import vtk
 
 
 class BoundaryLayer(object):
@@ -601,13 +600,7 @@ class BoundaryLayer(object):
         layer_cells = layers_volume.cells.reshape(-1, 5)[:, 1:]
         """
 
-        appender = vtk.vtkAppendDataSets()
-        appender.AddInputData(layers_volume)
-        appender.AddInputData(mesh_interior)
-        appender.SetTolerance(tolerance) #need to change from hard-coded value
-        appender.MergePointsOn()
-        appender.Update()
-        combined_mesh = pv.wrap(appender.GetOutput())
+        combined_mesh = pv.merge([layers_volume, mesh_interior], merge_points=True, tolerance=tolerance)
         #combined_mesh = combined_mesh.clean()
         #combined_mesh = pv.merge([layers_volume, mesh_interior])
         #combined_mesh = combined_mesh.triangulate().clean()
@@ -689,9 +682,5 @@ def append_boundary_layers(mesh, layers, inner_surface_cell_entity_id=1, outer_s
         warnings.warn("Combined Mesh has negative jacobian at {}".format(np.argwhere(quality < 0).flatten()))
         print("Attempting to fix negative jacobians via volume meshing.")
     #combined_mesh = pv.merge([layers, mesh], merge_points=True)
-    appender = vtk.vtkAppendDataSets()
-    appender.AddInputData(layers)
-    appender.AddInputData(mesh)
-    appender.Update()
-    combined_mesh = pv.wrap(appender.GetOutput())
+    combined_mesh = pv.merge([layers, mesh], merge_points=True)
     return combined_mesh, mesh

@@ -16,7 +16,10 @@ class BoundaryConditionBase:
         return str(vars(self))
 
     def __repr__(self):
-        return str(vars(self))
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def __eq__(self, other):
         check = ["bc_type", "value", "time_varying", "time_varying_file", "impose_flux", "profile"]
@@ -37,7 +40,10 @@ class BoundaryCondition(BoundaryConditionBase):
         return self.toxml().toprettyxml()
 
     def __repr__(self):
-        return self.toxml().toprettyxml()
+        try:
+            return self.toxml().toprettyxml(indent="  ")
+        except Exception:
+            return str(vars(self))
 
     def set_type(self, bc_type):
         if bc_type not in ["Dirichlet", "Neumann", "Dir", "Neu"]:

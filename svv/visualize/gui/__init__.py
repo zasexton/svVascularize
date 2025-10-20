@@ -39,10 +39,12 @@ if sys.platform.startswith('linux'):
         if 'WAYLAND_DISPLAY' in os.environ:
             os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
 
-from svv.visualize.gui.main_window import VascularizeGUI
+# Import both GUI styles
+from svv.visualize.gui.main_window import VascularizeGUI  # Original modern style
+from svv.visualize.gui.main_window_cad import VascularizeCADGUI  # CAD style (default)
 
 
-def launch_gui(domain=None, block=True):
+def launch_gui(domain=None, block=True, style='cad'):
     """
     Launch the Vascularize GUI from a Python interpreter or script.
 
@@ -53,6 +55,9 @@ def launch_gui(domain=None, block=True):
     block : bool
         If True, start the Qt event loop and block until exit.
         If False, return ``(app, gui)`` without starting the loop.
+    style : str
+        GUI style: 'cad' for CAD/engineering interface (default),
+        'modern' for consumer/mobile-style interface.
 
     Returns
     -------
@@ -72,7 +77,13 @@ def launch_gui(domain=None, block=True):
             pass
 
     app = QApplication.instance() or QApplication(sys.argv)
-    gui = VascularizeGUI(domain=domain)
+
+    # Choose GUI style
+    if style == 'cad':
+        gui = VascularizeCADGUI(domain=domain)
+    else:
+        gui = VascularizeGUI(domain=domain)
+
     gui.show()
 
     if not block:
@@ -85,4 +96,4 @@ def launch_gui(domain=None, block=True):
     return None
 
 
-__all__ = ['VascularizeGUI', 'launch_gui']
+__all__ = ['VascularizeGUI', 'VascularizeCADGUI', 'launch_gui']

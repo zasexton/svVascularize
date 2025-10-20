@@ -66,8 +66,8 @@
         <!-- Quick Example -->
         <div class="api-quick-example">
             <h2>Quick Example</h2>
-            <pre data-copy><code class="language-python">from svv.forest import Forest
-from svv.domain import Domain
+            <pre data-copy><code class="language-python">from svv.forest.forest import Forest
+from svv.domain.domain import Domain
 import numpy as np
 import pyvista as pv
 
@@ -394,9 +394,10 @@ forest.show(plot_domain=True)</code></pre>
 
                     <div class="api-example">
                         <h3>Arterial-Venous Network</h3>
-                        <pre data-copy><code class="language-python">from svv.forest import Forest
-from svv.domain import Domain
+                        <pre data-copy><code class="language-python">from svv.forest.forest import Forest
+from svv.domain.domain import Domain
 import numpy as np
+import pyvista as pv
 
 # Create organ domain
 organ = pv.read('liver.stl')
@@ -438,7 +439,9 @@ forest.show(colors=['red', 'blue'], plot_domain=True)</code></pre>
 
                     <div class="api-example">
                         <h3>Multi-Tree Network with Connections</h3>
-                        <pre data-copy><code class="language-python"># Create forest with multiple trees per network
+                        <pre data-copy><code class="language-python">from svv.forest.forest import Forest
+import numpy as np
+# Create forest with multiple trees per network
 forest = Forest(
     n_networks=1,
     n_trees_per_network=[4],  # 4 trees in single network
@@ -468,13 +471,17 @@ forest.connect(5)  # Higher degree for smoother connections
 if forest.connections:
     print(f"Tree connections solved: {len(forest.connections.tree_connections)}")
 
-# Export connected network
-forest.export_solid(outdir='connected_network')</code></pre>
+# Export connected network: save each tree as STL
+for i in range(forest.n_networks):
+    for j in range(forest.n_trees_per_network[i]):
+        model = forest.networks[i][j].export_solid(watertight=True)
+        model.save(f'connected_network_{i}_{j}.stl')</code></pre>
                     </div>
 
                     <div class="api-example">
                         <h3>Competitive Growth Pattern</h3>
                         <pre data-copy><code class="language-python"># Enable competition between networks
+from svv.forest.forest import Forest
 import numpy as np
 forest = Forest(
     domain=domain,

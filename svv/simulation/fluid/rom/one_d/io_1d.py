@@ -41,9 +41,10 @@ from .parameters import OutflowBoundaryConditionType, MaterialModel
 import numpy as np
 from collections import OrderedDict
 
-import vtk.util.numpy_support as nps
-from vtk import vtkIdList
-from vtk import vtkPoints, vtkLine, vtkCellArray, vtkPolyData, vtkXMLPolyDataWriter
+from vtkmodules.util import numpy_support as nps
+from vtkmodules.vtkCommonCore import vtkIdList, vtkPoints
+from vtkmodules.vtkCommonDataModel import vtkLine, vtkCellArray, vtkPolyData
+from vtkmodules.vtkIOXML import vtkXMLPolyDataWriter
 from .utils import SurfaceFileFormats, read_polydata, write_polydata
 from .io_headers import Headers
 from collections import namedtuple

@@ -27,3 +27,17 @@ svZeroDSolver*
 
 # Sample artifacts
 cube.dmn
+
+# Local GUI docs and scripts (ignored)
+CAD_GUI_DOCUMENTATION.md
+CAD_GUI_SUMMARY.md
+FIX_LLVM_MISMATCH.sh
+GUI_FEATURES.md
+GUI_IMPROVEMENTS.md
+GUI_QUICK_START.md
+GUI_UPGRADE_SUMMARY.md
+OPENGL_FIX_SUMMARY.md
+OPENGL_TROUBLESHOOTING.md
+STYLE_COMPARISON.md
+UBUNTU_20.04_SETUP.md
+launch_gui_system_mesa.sh
