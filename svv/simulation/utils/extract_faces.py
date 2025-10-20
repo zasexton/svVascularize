@@ -401,8 +401,10 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         tet_faces = []
         for i in tqdm.trange(global_elements.shape[0], desc="Building tetrahedral faces", leave=False):
             for j in range(4):
-                idx = set(list(range(4))) - set([j])
-                tet_faces.append(global_elements[i, list(idx)])
+                # Build each face as a sorted triple of node IDs for exact matching
+                face_nodes = numpy.delete(global_elements[i], j)
+                face_nodes = numpy.sort(face_nodes)
+                tet_faces.append(face_nodes)
         tet_face_tree = cKDTree(tet_faces)
     #for i, cap in enumerate(iscap):
     #    if not cap == 1:
@@ -425,7 +427,16 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             wall_faces = wall_surface.point_data["GlobalNodeID"][wall_surface.faces]
             wall_faces = wall_faces.reshape(-1, 4)[:, 1:]
             wall_faces = numpy.sort(wall_faces, axis=1)
-            _, indices = tet_face_tree.query(wall_faces)
+            dists, indices = tet_face_tree.query(wall_faces)
+            if not numpy.all(numpy.isclose(dists, 0.0)):
+                # Identify a small sample of mismatches for debugging
+                bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+                sample = bad_idx[:5]
+                examples = wall_faces[sample]
+                raise ValueError(
+                    f"Failed to map all wall surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+                    f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+                )
             wall_surface.cell_data["GlobalElementID"] = indices // 4
             wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = wall_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
@@ -454,7 +465,15 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             cap_faces = cap_surface.point_data["GlobalNodeID"][cap_surface.faces]
             cap_faces = cap_faces.reshape(-1, 4)[:, 1:]
             cap_faces = numpy.sort(cap_faces, axis=1)
-            _, indices = tet_face_tree.query(cap_faces)
+            dists, indices = tet_face_tree.query(cap_faces)
+            if not numpy.all(numpy.isclose(dists, 0.0)):
+                bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+                sample = bad_idx[:5]
+                examples = cap_faces[sample]
+                raise ValueError(
+                    f"Failed to map all cap surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+                    f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+                )
             cap_surface.cell_data["GlobalElementID"] = indices // 4
             cap_surface.cell_data["GlobalElementID"] = cap_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = cap_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
@@ -484,7 +503,15 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             lumen_faces = lumen_surface.point_data["GlobalNodeID"][lumen_surface.faces]
             lumen_faces = lumen_faces.reshape(-1, 4)[:, 1:]
             lumen_faces = numpy.sort(lumen_faces, axis=1)
-            _, indices = tet_face_tree.query(lumen_faces)
+            dists, indices = tet_face_tree.query(lumen_faces)
+            if not numpy.all(numpy.isclose(dists, 0.0)):
+                bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+                sample = bad_idx[:5]
+                examples = lumen_faces[sample]
+                raise ValueError(
+                    f"Failed to map all lumen surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+                    f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+                )
             lumen_surface.cell_data["GlobalElementID"] = indices // 4
             lumen_surface.cell_data["GlobalElementID"] = lumen_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = lumen_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
