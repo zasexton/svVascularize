@@ -1,4 +1,4 @@
-__version__ = "0.0.33"
+__version__ = "0.0.34"
 
 # If the optional companion package with compiled accelerators is installed
 # (svv-accelerated), prefer those modules transparently by aliasing them into
