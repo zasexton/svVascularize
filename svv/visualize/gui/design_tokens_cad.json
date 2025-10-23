@@ -1,0 +1,131 @@
+{
+  "name": "CAD Theme Tokens",
+  "version": "1.0.0",
+  "description": "Design tokens for svVascularize CAD-style GUI with WCAG AA compliance",
+  "color": {
+    "background": {
+      "primary": "#353535",
+      "secondary": "#2C2C2C",
+      "tertiary": "#404040",
+      "surface": "#3A3A3A"
+    },
+    "text": {
+      "primary": "#E0E0E0",
+      "secondary": "#ABABAB",
+      "accent": "#4CAF50",
+      "disabled": "#A3A3A3",
+      "inverse": "#1A1A1A"
+    },
+    "action": {
+      "primary": "#4A6A8F",
+      "primary-hover": "#5A7FA8",
+      "primary-pressed": "#3D5A7A",
+      "primary-text": "#FFFFFF",
+      "danger": "#E74C3C",
+      "danger-hover": "#C0392B",
+      "success": "#4CAF50",
+      "success-hover": "#45A047"
+    },
+    "status": {
+      "success": "#4CAF50",
+      "warning": "#FFA726",
+      "error": "#E74C3C",
+      "info": "#42A5F5"
+    },
+    "border": {
+      "subtle": "#808080",
+      "strong": "#1A1A1A",
+      "focus": "#7A9BC0",
+      "divider": "#505050"
+    },
+    "accent": {
+      "orange": "#E67E22",
+      "blue": "#5A7FA8",
+      "green": "#4CAF50",
+      "red": "#E74C3C"
+    },
+    "viewport": {
+      "background-top": "#404040",
+      "background-bottom": "#353535",
+      "grid": "#666666",
+      "selection": "#FFD700",
+      "hover": "#00FFFF"
+    }
+  },
+  "spacing": {
+    "xs": "2px",
+    "sm": "4px",
+    "md": "8px",
+    "lg": "12px",
+    "xl": "16px",
+    "2xl": "24px",
+    "3xl": "32px"
+  },
+  "typography": {
+    "family": {
+      "primary": "Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif",
+      "monospace": "Consolas, Monaco, Courier New, monospace"
+    },
+    "size": {
+      "caption": "8pt",
+      "body-small": "9pt",
+      "body": "9pt",
+      "body-large": "10pt",
+      "heading": "10pt",
+      "title": "12pt",
+      "display": "14pt"
+    },
+    "weight": {
+      "normal": "400",
+      "medium": "500",
+      "bold": "700"
+    },
+    "lineHeight": {
+      "tight": "1.2",
+      "normal": "1.4",
+      "relaxed": "1.6"
+    }
+  },
+  "borderRadius": {
+    "none": "0px",
+    "sm": "2px",
+    "md": "3px",
+    "lg": "4px"
+  },
+  "elevation": {
+    "0": "none",
+    "1": "0 1px 3px rgba(0, 0, 0, 0.3)",
+    "2": "0 2px 6px rgba(0, 0, 0, 0.4)",
+    "3": "0 4px 12px rgba(0, 0, 0, 0.5)"
+  },
+  "animation": {
+    "duration": {
+      "fast": "100ms",
+      "normal": "200ms",
+      "slow": "300ms"
+    },
+    "easing": {
+      "standard": "ease",
+      "decelerate": "ease-out",
+      "accelerate": "ease-in"
+    }
+  },
+  "size": {
+    "icon": {
+      "small": "16px",
+      "medium": "20px",
+      "large": "24px"
+    },
+    "button": {
+      "height": "28px",
+      "min-width": "80px"
+    },
+    "input": {
+      "height": "24px"
+    },
+    "toolbar": {
+      "height": "36px",
+      "icon-size": "20px"
+    }
+  }
+}

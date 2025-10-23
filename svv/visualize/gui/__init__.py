@@ -82,6 +82,13 @@ def launch_gui(domain=None, block=True, style='cad'):
     if style == 'cad':
         gui = VascularizeCADGUI(domain=domain)
     else:
+        import warnings
+        warnings.warn(
+            "The 'modern' GUI style is deprecated and will be removed in a future version. "
+            "Please use 'cad' style (the default) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         gui = VascularizeGUI(domain=domain)
 
     gui.show()
