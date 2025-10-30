@@ -107,7 +107,7 @@ class Simulation(object):
                 if isinstance(fluid_volume_mesh, type(None)):
                     print("Failed to generate fluid volume mesh.")
                 else:
-                    hsize = fluid_surface_mesh.hsize
+                    hsize = fluid_surface_mesh.cell_data["hsize"][0]
                     fluid_surface_mesh = fluid_volume_mesh.extract_surface()
                     # faces, wall_surfaces, cap_surfaces, lumen_surfaces, _
                     # fluid_surface_faces = extract_faces(fluid_surface_mesh, fluid_volume_mesh)
@@ -163,7 +163,8 @@ class Simulation(object):
                                 fluid_wall = remesh_volume(fluid_wall, hausd=hausd, nosurf=True, verbosity=4)
                             self.fluid_domain_wall_layers.append(fluid_wall)
                     fluid_surface_mesh = fluid_volume_mesh.extract_surface()
-                    fluid_surface_mesh.hsize = hsize
+                    fluid_surface_mesh.cell_data["hsize"] = hsize
+                    fluid_surface_mesh.cell_data["hsize"][0] = hsize
                     self.fluid_domain_surface_meshes.append(fluid_surface_mesh)
                     self.fluid_domain_volume_meshes.append(fluid_volume_mesh)
                     if tissue:
@@ -180,7 +181,7 @@ class Simulation(object):
                         fluid_surface_boolean_mesh = deepcopy(self.fluid_domain_surface_meshes[-1])
                     else:
                         fluid_surface_boolean_mesh = deepcopy(self.fluid_domain_wall_layers[-1])
-                hsize = fluid_surface_boolean_mesh.hsize
+                hsize = fluid_surface_boolean_mesh.cell_data["hsize"][0]
                 tissue_domain = remesh_surface(self.synthetic_object.domain.boundary, hausd=hausd) # Check if this should be remeshed
                 area = tissue_domain.area
                 tissue_domain = boolean(tissue_domain, fluid_surface_boolean_mesh, operation='difference')
@@ -371,7 +372,7 @@ class Simulation(object):
             if tissue:
                 tissue_domain = deepcopy(self.synthetic_object.domain.boundary)
                 tissue_domain = tissue_domain.compute_normals(auto_orient_normals=True)
-                fluid_hsize = min([mesh.hsize for mesh in self.fluid_domain_surface_meshes])
+                fluid_hsize = min([mesh.cell_data["hsize"][0] for mesh in self.fluid_domain_surface_meshes])
                 radii = []
                 for net in range(len(self.synthetic_object.networks)):
                     for tr in range(len(self.synthetic_object.networks[net])):
