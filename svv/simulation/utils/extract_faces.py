@@ -396,14 +396,18 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
     if not isinstance(mesh, type(None)):
         global_nodes = mesh.points
         global_node_tree = cKDTree(global_nodes)
-        global_elements = mesh.cell_connectivity.reshape(-1, 4)
-        global_elements = numpy.sort(global_elements, axis=1)
-        tet_faces = []
-        for i in tqdm.trange(global_elements.shape[0], desc="Building tetrahedral faces", leave=False):
-            for j in range(4):
-                idx = set(list(range(4))) - set([j])
-                tet_faces.append(global_elements[i, list(idx)])
-        tet_face_tree = cKDTree(tet_faces)
+        # Build a robust face->cell index using canonical keys (sorted tuples)
+        face_to_cell = {}
+        n_cells = mesh.n_cells
+        for i in tqdm.trange(n_cells, desc="Indexing cell faces", leave=False):
+            cell = mesh.GetCell(i)
+            nfaces = cell.GetNumberOfFaces()
+            for j in range(nfaces):
+                face = cell.GetFace(j)
+                npts = face.GetNumberOfPoints()
+                # Canonicalize face nodes to a sorted tuple so orientation/order doesn't matter
+                key = tuple(sorted(face.GetPointId(k) for k in range(npts)))
+                face_to_cell[key] = i
     #for i, cap in enumerate(iscap):
     #    if not cap == 1:
     #        walls.append(faces[i])
@@ -416,18 +420,33 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         wall_cells = surface.extract_cells(walls[i])
         wall_surface = wall_cells.extract_surface()
         if not isinstance(mesh, type(None)):
-            wall_surface.point_data["GlobalNodeID"] = numpy.zeros(wall_surface.n_points, dtype=int)
-            wall_surface.cell_data['GlobalElementID'] = numpy.zeros(wall_surface.n_cells, dtype=int)
-            wall_surface.cell_data['ModelFaceID'] = numpy.ones(wall_surface.n_cells, dtype=int)
+            wall_surface.point_data["GlobalNodeID"] = numpy.zeros(wall_surface.n_points, dtype=numpy.int32)
+            wall_surface.cell_data['GlobalElementID'] = numpy.zeros(wall_surface.n_cells, dtype=numpy.int32)
+            wall_surface.cell_data['ModelFaceID'] = numpy.ones(wall_surface.n_cells, dtype=numpy.int32)
             _, indices = global_node_tree.query(wall_surface.points)
             wall_surface.point_data["GlobalNodeID"] = indices.astype(int)
             # Assign Global Element IDs
             wall_faces = wall_surface.point_data["GlobalNodeID"][wall_surface.faces]
-            wall_faces = wall_faces.reshape(-1, 4)[:, 1:]
-            wall_faces = numpy.sort(wall_faces, axis=1)
-            _, indices = tet_face_tree.query(wall_faces)
-            wall_surface.cell_data["GlobalElementID"] = indices // 4
-            wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(numpy.int32)
+            wall_faces = wall_faces.reshape(-1, 4)[:, 1:].tolist()
+            elem_ids = []
+            for face in wall_faces:
+                # Use the same canonical key used to build the map
+                elem_ids.append(face_to_cell[tuple(sorted(face))])
+            wall_surface.cell_data["GlobalElementID"] = numpy.array(elem_ids, dtype=numpy.int32)
+            #wall_faces = numpy.sort(wall_faces, axis=1)
+            #dists, indices = tet_face_tree.query(wall_faces)
+            #if not numpy.all(numpy.isclose(dists, 0.0)):
+            #    # Identify a small sample of mismatches for debugging
+            #    bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+            #    sample = bad_idx[:5]
+            #    examples = wall_faces[sample]
+            #    raise ValueError(
+            #        f"Failed to map all wall surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+            #        f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+            #    )
+            #wall_surface.cell_data["GlobalElementID"] = indices // 4
+            #wall_surface.cell_data["GlobalElementID"] = wall_surface.cell_data["GlobalElementID"].astype(numpy.int32)
+
         boundaries = wall_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                              feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()
@@ -444,19 +463,31 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         cap_cells = surface.extract_cells(face_cap)
         cap_surface = cap_cells.extract_surface()
         if not isinstance(mesh, type(None)):
-            cap_surface.point_data["GlobalNodeID"] = numpy.zeros(cap_surface.n_points, dtype=int)
-            cap_surface.cell_data["GlobalElementID"] = numpy.zeros(cap_surface.n_cells, dtype=int)
-            cap_surface.cell_data["ModelFaceID"] = numpy.ones(cap_surface.n_cells, dtype=int) * (i + 2)
+            cap_surface.point_data["GlobalNodeID"] = numpy.zeros(cap_surface.n_points, dtype=numpy.int32)
+            cap_surface.cell_data["GlobalElementID"] = numpy.zeros(cap_surface.n_cells, dtype=numpy.int32)
+            cap_surface.cell_data["ModelFaceID"] = numpy.ones(cap_surface.n_cells, dtype=numpy.int32)
             # Assign Global Node IDs
             _, indices = global_node_tree.query(cap_surface.points)
             cap_surface.point_data["GlobalNodeID"] = indices.astype(int)
             # Assign Global Element IDs
             cap_faces = cap_surface.point_data["GlobalNodeID"][cap_surface.faces]
-            cap_faces = cap_faces.reshape(-1, 4)[:, 1:]
-            cap_faces = numpy.sort(cap_faces, axis=1)
-            _, indices = tet_face_tree.query(cap_faces)
-            cap_surface.cell_data["GlobalElementID"] = indices // 4
-            cap_surface.cell_data["GlobalElementID"] = cap_surface.cell_data["GlobalElementID"].astype(numpy.int32)
+            cap_faces = cap_faces.reshape(-1, 4)[:, 1:].tolist()
+            elem_ids = []
+            for face in cap_faces:
+                elem_ids.append(face_to_cell[tuple(sorted(face))])
+            cap_surface.cell_data["GlobalElementID"] = numpy.array(elem_ids, dtype=numpy.int32)
+            #cap_faces = numpy.sort(cap_faces, axis=1)
+            #dists, indices = tet_face_tree.query(cap_faces)
+            #if not numpy.all(numpy.isclose(dists, 0.0)):
+            #    bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+            #    sample = bad_idx[:5]
+            #    examples = cap_faces[sample]
+            #    raise ValueError(
+            #        f"Failed to map all cap surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+            #        f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+            #    )
+            #cap_surface.cell_data["GlobalElementID"] = indices // 4
+            #cap_surface.cell_data["GlobalElementID"] = cap_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = cap_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                            feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()
@@ -482,11 +513,23 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             lumen_surface.point_data["GlobalNodeID"] = indices.astype(int)
             # Assign Global Element IDs
             lumen_faces = lumen_surface.point_data["GlobalNodeID"][lumen_surface.faces]
-            lumen_faces = lumen_faces.reshape(-1, 4)[:, 1:]
-            lumen_faces = numpy.sort(lumen_faces, axis=1)
-            _, indices = tet_face_tree.query(lumen_faces)
-            lumen_surface.cell_data["GlobalElementID"] = indices // 4
-            lumen_surface.cell_data["GlobalElementID"] = lumen_surface.cell_data["GlobalElementID"].astype(numpy.int32)
+            lumen_faces = lumen_faces.reshape(-1, 4)[:, 1:].tolist()
+            elem_ids = []
+            for face in lumen_faces:
+                elem_ids.append(face_to_cell[tuple(sorted(face))])
+            lumen_surface.cell_data["GlobalElementID"] = numpy.array(elem_ids, dtype=numpy.int32)
+            #lumen_faces = numpy.sort(lumen_faces, axis=1)
+            #dists, indices = tet_face_tree.query(lumen_faces)
+            #if not numpy.all(numpy.isclose(dists, 0.0)):
+            #    bad_idx = numpy.where(~numpy.isclose(dists, 0.0))[0]
+            #    sample = bad_idx[:5]
+            #    examples = lumen_faces[sample]
+            #    raise ValueError(
+            #        f"Failed to map all lumen surface faces to volume mesh faces: {bad_idx.size} mismatches. "
+            #        f"Example face node triples (GlobalNodeID) that failed exact match: {examples.tolist()}"
+            #    )
+            #lumen_surface.cell_data["GlobalElementID"] = indices // 4
+            #lumen_surface.cell_data["GlobalElementID"] = lumen_surface.cell_data["GlobalElementID"].astype(numpy.int32)
         boundaries = lumen_surface.extract_feature_edges(boundary_edges=True, manifold_edges=False,
                                                            feature_edges=False, non_manifold_edges=False)
         boundaries = boundaries.split_bodies()

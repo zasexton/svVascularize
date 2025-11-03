@@ -8,12 +8,12 @@ from PySide6.QtWidgets import (
     QMessageBox, QLabel, QTreeWidget, QTreeWidgetItem,
     QSplitter, QTabWidget
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QSettings
 from PySide6.QtGui import QAction, QKeySequence, QIcon
 from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.point_selector import PointSelectorWidget
 from svv.visualize.gui.parameter_panel import ParameterPanel
-from svv.visualize.gui.cad_styles import CADTheme, CADIcons
+from svv.visualize.gui.theme import CADTheme, CADIcons
 
 
 class ObjectBrowserWidget(QTreeWidget):
@@ -133,6 +133,9 @@ class VascularizeCADGUI(QMainWindow):
         self.trees = []
         self.forest = None
 
+        # Initialize QSettings for persistent layout
+        self.settings = QSettings("SimVascular", "svVascularize")
+
         # Apply CAD theme
         self.setStyleSheet(CADTheme.get_stylesheet())
 
@@ -153,6 +156,9 @@ class VascularizeCADGUI(QMainWindow):
 
         # Create status bar
         self._create_status_bar()
+
+        # Restore window geometry and dock layout from settings
+        self._restore_layout()
 
         # Load domain if provided
         if domain is not None:
@@ -365,6 +371,19 @@ class VascularizeCADGUI(QMainWindow):
         toolbars_menu.addAction(self.view_toolbar.toggleViewAction())
         toolbars_menu.addAction(self.gen_toolbar.toggleViewAction())
 
+        view_menu.addSeparator()
+
+        # Layout management
+        save_layout_action = QAction("Save Layout", self)
+        save_layout_action.setStatusTip("Save current window layout")
+        save_layout_action.triggered.connect(self._save_layout)
+        view_menu.addAction(save_layout_action)
+
+        reset_layout_action = QAction("Reset Layout", self)
+        reset_layout_action.setStatusTip("Reset window layout to defaults")
+        reset_layout_action.triggered.connect(self._reset_layout)
+        view_menu.addAction(reset_layout_action)
+
         # Generation menu
         gen_menu = menubar.addMenu("&Generate")
         gen_menu.addAction(self.action_add_point)
@@ -513,3 +532,62 @@ class VascularizeCADGUI(QMainWindow):
     def update_vessel_count(self, count):
         """Update vessel count in status bar."""
         self.status_elements.setText(f"Vessels: {count}")
+
+    def _restore_layout(self):
+        """Restore window geometry and dock widget layout from QSettings."""
+        # Restore window geometry
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        # Restore window state (dock positions, toolbar positions, etc.)
+        window_state = self.settings.value("windowState")
+        if window_state:
+            self.restoreState(window_state)
+
+    def _save_layout(self):
+        """Save current window geometry and dock widget layout to QSettings."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+        self.update_status(f"{CADIcons.SUCCESS} Layout saved")
+
+    def _reset_layout(self):
+        """Reset window layout to default configuration."""
+        # Clear saved settings
+        self.settings.remove("geometry")
+        self.settings.remove("windowState")
+
+        # Reset to default geometry
+        self.setGeometry(100, 100, 1600, 1000)
+
+        # Reset dock positions
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.tree_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.info_dock)
+
+        # Show/hide default panels
+        self.tree_dock.show()
+        self.properties_dock.show()
+        self.info_dock.hide()
+
+        # Reset toolbar positions
+        self.addToolBar(Qt.TopToolBarArea, self.file_toolbar)
+        self.addToolBar(Qt.TopToolBarArea, self.view_toolbar)
+        self.addToolBar(Qt.TopToolBarArea, self.gen_toolbar)
+
+        self.update_status(f"{CADIcons.SUCCESS} Layout reset to defaults")
+
+    def closeEvent(self, event):
+        """
+        Handle window close event - save layout before closing.
+
+        Parameters
+        ----------
+        event : QCloseEvent
+            The close event
+        """
+        # Save current layout
+        self._save_layout()
+
+        # Accept the close event
+        event.accept()

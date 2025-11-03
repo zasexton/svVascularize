@@ -136,15 +136,20 @@ class VTKWidget(QWidget):
         self.plotter.enable_point_picking(
             callback=self._on_point_picked,
             show_message=True,
-            color='red',
-            point_size=10
+            color='#FFD700',  # Gold selection color
+            point_size=12
         )
 
-        # Set background
-        self.plotter.set_background('white')
+        # Set Fusion360-inspired gradient background
+        # Dark gray gradient for professional CAD look
+        self.plotter.set_background('#2F3136', top='#37393E')
 
         # Initial camera setup
         self.plotter.camera_position = 'iso'
+
+        # Add subtle grid for better spatial reference (optional)
+        # Can be toggled in future versions
+        # self.plotter.show_grid(color='#505050')
 
     def set_domain(self, domain):
         """
@@ -162,13 +167,15 @@ class VTKWidget(QWidget):
         self.clear()
 
         # Add domain boundary if available
+        # Use Fusion360-inspired colors for better visibility
         if hasattr(domain, 'boundary') and domain.boundary is not None:
             self.domain_actor = self.plotter.add_mesh(
                 domain.boundary,
-                color='lightblue',
-                opacity=0.3,
+                color='#4FC3F7',  # Cyan-blue for domain surface
+                opacity=0.25,
                 show_edges=True,
-                edge_color='gray',
+                edge_color='#7A9BC0',  # Subtle blue-gray edges
+                line_width=1,
                 name='domain'
             )
 

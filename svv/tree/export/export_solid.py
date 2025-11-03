@@ -380,7 +380,8 @@ def union_tubes(tubes, lines, cap_resolution=40):
             hsize = min(hsize, (min(lines[i]['radius'])*2*numpy.pi)/cap_resolution)
             model = remesh_surface(model, hsiz=hsize)
             model = model.compute_normals(auto_orient_normals=True)
-    model.hsize = hsize
+    model.cell_data['hsize'] = 0
+    model.cell_data['hsize'][0] = hsize
     return model
 
 
@@ -413,9 +414,11 @@ def build_watertight_solid(tree, cap_resolution=40):
         non_manifold_model = non_manifold_model.extract_surface()
         fix = pymeshfix.MeshFix(non_manifold_model)
         fix.repair(verbose=True)
-        hsize = model.hsize
+        hsize = model.cell_data["hsize"][0] #hsize
         model = fix.mesh.compute_normals(auto_orient_normals=True)
-        model.hsize = hsize
+        #model.hsize = hsize
+        model.cell_data['hsize'] = 0
+        model.cell_data['hsize'][0] = hsize
     return model
 
 

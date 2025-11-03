@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressDialog
 )
 from PySide6.QtCore import Signal, Qt
-from svv.visualize.gui.styles import ModernTheme, Icons
+from svv.visualize.gui.theme_fusion360 import Fusion360Theme, Fusion360Icons
 
 
 class ParameterPanel(QWidget):
@@ -48,13 +48,13 @@ class ParameterPanel(QWidget):
         scroll_layout.setSpacing(12)
 
         # Mode selection
-        mode_group = QGroupBox(f"{Icons.SETTINGS} Generation Mode")
+        mode_group = QGroupBox(f"{Fusion360Icons.SETTINGS} Generation Mode")
         mode_layout = QVBoxLayout()
         mode_group.setLayout(mode_layout)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem(f"{Icons.TREE} Single Tree")
-        self.mode_combo.addItem(f"{Icons.FOREST} Forest (Multiple Trees)")
+        self.mode_combo.addItem(f"{Fusion360Icons.TREE} Single Tree")
+        self.mode_combo.addItem(f"{Fusion360Icons.FOREST} Forest (Multiple Trees)")
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.mode_combo.setToolTip("Select whether to generate a single tree or a forest with multiple trees")
         mode_layout.addWidget(self.mode_combo)
@@ -62,7 +62,7 @@ class ParameterPanel(QWidget):
         scroll_layout.addWidget(mode_group)
 
         # Tree parameters
-        tree_params_group = QGroupBox(f"{Icons.SETTINGS} Tree Parameters")
+        tree_params_group = QGroupBox(f"{Fusion360Icons.SETTINGS} Tree Parameters")
         tree_form = QFormLayout()
         tree_form.setSpacing(10)
         tree_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
@@ -102,7 +102,7 @@ class ParameterPanel(QWidget):
         scroll_layout.addWidget(tree_params_group)
 
         # Forest parameters (initially hidden)
-        self.forest_params_group = QGroupBox(f"{Icons.FOREST} Forest Parameters")
+        self.forest_params_group = QGroupBox(f"{Fusion360Icons.FOREST} Forest Parameters")
         forest_form = QFormLayout()
         forest_form.setSpacing(10)
         forest_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
@@ -126,7 +126,7 @@ class ParameterPanel(QWidget):
         self.forest_params_group.hide()
 
         # Advanced parameters
-        advanced_group = QGroupBox(f"{Icons.SETTINGS} Advanced Parameters")
+        advanced_group = QGroupBox(f"{Fusion360Icons.SETTINGS} Advanced Parameters")
         advanced_form = QFormLayout()
         advanced_form.setSpacing(10)
         advanced_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
@@ -153,13 +153,13 @@ class ParameterPanel(QWidget):
         button_layout = QVBoxLayout()
         button_layout.setSpacing(8)
 
-        self.generate_btn = QPushButton(f"{Icons.PLAY} Generate Tree/Forest")
+        self.generate_btn = QPushButton(f"{Fusion360Icons.PLAY} Generate Tree/Forest")
         self.generate_btn.clicked.connect(self._generate)
         self.generate_btn.setObjectName("primaryButton")
         self.generate_btn.setToolTip("Generate vascular tree or forest with current parameters")
         button_layout.addWidget(self.generate_btn)
 
-        self.export_btn = QPushButton(f"{Icons.SAVE} Export Configuration")
+        self.export_btn = QPushButton(f"{Fusion360Icons.SAVE} Export Configuration")
         self.export_btn.clicked.connect(self._export_config)
         self.export_btn.setObjectName("secondaryButton")
         self.export_btn.setToolTip("Export current configuration to JSON file")
@@ -179,7 +179,7 @@ class ParameterPanel(QWidget):
         if not self.parent_gui or not self.parent_gui.domain:
             QMessageBox.warning(
                 self,
-                f"{Icons.WARNING} No Domain",
+                f"{Fusion360Icons.WARNING} No Domain",
                 "Please load a domain file before generating trees.\n\n"
                 "Use File > Load Domain to get started."
             )
@@ -219,10 +219,10 @@ class ParameterPanel(QWidget):
 
         except Exception as e:
             if self.parent_gui:
-                self.parent_gui.update_status(f"{Icons.ERROR} Generation failed")
+                self.parent_gui.update_status(f"{Fusion360Icons.ERROR} Generation failed")
             QMessageBox.critical(
                 self,
-                f"{Icons.ERROR} Generation Error",
+                f"{Fusion360Icons.ERROR} Generation Error",
                 f"Failed to generate tree/forest:\n\n{str(e)}\n\n"
                 "Please check your parameters and try again."
             )
@@ -233,12 +233,12 @@ class ParameterPanel(QWidget):
 
         # Update status
         if self.parent_gui:
-            self.parent_gui.update_status(f"{Icons.PLAY} Generating tree with {n_vessels} vessels...")
+            self.parent_gui.update_status(f"{Fusion360Icons.PLAY} Generating tree with {n_vessels} vessels...")
 
         # Create progress dialog
         progress = QProgressDialog(
-            f"{Icons.TREE} Generating tree...\nThis may take a few moments.",
-            f"{Icons.CROSS} Cancel",
+            f"{Fusion360Icons.TREE} Generating tree...\nThis may take a few moments.",
+            f"{Fusion360Icons.CROSS} Cancel",
             0,
             n_vessels,
             self
@@ -293,11 +293,11 @@ class ParameterPanel(QWidget):
 
         # Update status
         if self.parent_gui:
-            self.parent_gui.update_status(f"{Icons.CHECK} Tree generated successfully with {tree.n_terminals} vessels")
+            self.parent_gui.update_status(f"{Fusion360Icons.CHECK} Tree generated successfully with {tree.n_terminals} vessels")
 
         QMessageBox.information(
             self,
-            f"{Icons.CHECK} Success",
+            f"{Fusion360Icons.CHECK} Success",
             f"Tree generated successfully!\n\n"
             f"Total vessels: {tree.n_terminals}\n"
             f"Physical clearance: {physical_clearance}\n"
@@ -311,12 +311,12 @@ class ParameterPanel(QWidget):
 
         # Update status
         if self.parent_gui:
-            self.parent_gui.update_status(f"{Icons.PLAY} Generating forest with {n_vessels} total vessels...")
+            self.parent_gui.update_status(f"{Fusion360Icons.PLAY} Generating forest with {n_vessels} total vessels...")
 
         # Create progress dialog
         progress = QProgressDialog(
-            f"{Icons.FOREST} Generating forest...\nThis may take a few moments.",
-            f"{Icons.CROSS} Cancel",
+            f"{Fusion360Icons.FOREST} Generating forest...\nThis may take a few moments.",
+            f"{Fusion360Icons.CROSS} Cancel",
             0,
             n_vessels,
             self
@@ -376,12 +376,12 @@ class ParameterPanel(QWidget):
         # Update status
         if self.parent_gui:
             self.parent_gui.update_status(
-                f"{Icons.CHECK} Forest generated successfully with {total_vessels} vessels across {n_networks} networks"
+                f"{Fusion360Icons.CHECK} Forest generated successfully with {total_vessels} vessels across {n_networks} networks"
             )
 
         QMessageBox.information(
             self,
-            f"{Icons.CHECK} Success",
+            f"{Fusion360Icons.CHECK} Success",
             f"Forest generated successfully!\n\n"
             f"Total vessels: {total_vessels}\n"
             f"Networks: {n_networks}\n"
