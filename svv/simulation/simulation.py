@@ -85,13 +85,13 @@ class Simulation(object):
                 if tissue:
                     extension_scale = 4.0
                     for i in range(5):
-                        new_root = self.synthetic_object.data[0, 0:3] - extension_scale * self.synthetic_object.data[0, 21]*self.synthetic_object.data.get('w_basis', 0)
+                        new_root = self.synthetic_object.data[0, 0:3] + extension_scale * self.synthetic_object.data[0, 21]*self.synthetic_object.data.get('w_basis', 0)
                         if self.synthetic_object.domain(new_root.reshape(1, 3)) > 0:
                             break
                         else:
                             extension_scale += 1.0
                     root_extension = self.synthetic_object.data[0, 21] * extension_scale
-                    self.synthetic_object.data[0, 0:3] -= root_extension * self.synthetic_object.data.get('w_basis', 0)
+                    self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
                 fluid_surface_mesh = self.synthetic_object.export_solid(watertight=True)
                 tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                 try:
@@ -193,9 +193,9 @@ class Simulation(object):
                     hmin = ((4.0*low_tri_area)/3.0**0.5) ** (0.5)
                     upper_tri_area = area / lower_num_triangles
                     hmax = ((4.0*upper_tri_area)/3.0**0.5) ** (0.5)
-                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
-                else:
-                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
+                    #tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
+                #else:
+                #    #tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
                 tet_tissue = tetgen.TetGen(tissue_domain)
                 if not fluid:
                     self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
@@ -213,7 +213,7 @@ class Simulation(object):
                 if isinstance(tissue_volume_mesh, type(None)):
                     print("Failed to generate tissue volume mesh.")
                 else:
-                    if remesh_volume:
+                    if remesh_vol:
                         tissue_volume_mesh = remesh_volume(tissue_volume_mesh, hausd=hausd, nosurf=True)
                     tissue_domain = tissue_volume_mesh.extract_surface()
                     self.tissue_domain_surface_meshes.append(tissue_domain)
