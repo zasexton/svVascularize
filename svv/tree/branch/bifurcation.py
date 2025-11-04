@@ -91,7 +91,7 @@ def add_vessel(tree, **kwargs):
     nonconvex_sampling = kwargs.pop('nonconvex_sampling', 10)
     homogeneous = kwargs.pop('homogeneous', True)
     use_brute = kwargs.pop('use_brute', False)
-    max_iter = kwargs.pop('max_iter', 10)
+    max_iter = kwargs.pop('max_iter', 100)
     return_cost = kwargs.pop('return_cost', False)
     #defualt_threshold = ((tree.domain.mesh.volume ** (1/3)) /
     #                     (tree.n_terminals ** threshold_exponent)) + tree.data[0, 21]*2.0
@@ -218,8 +218,8 @@ def add_vessel(tree, **kwargs):
                                 #plt.colorbar(label='Function values')
                                 #plt.show()
                                 cons = [{"type": "ineq", "fun": lambda a: 1 - a[0] - a[1]}]
-                                result = minimize(cost, x0, bounds=[(0, 1.0), (0, 1.0)], callback=callback,
-                                                  options={'maxiter':max_iter})
+                                result = minimize(cost, x0, bounds=[(0.05, 0.95), (0.05, 0.95)], callback=callback,
+                                                  options={'maxiter':max_iter},constraints=cons, method="COBYLA")
                                 #print('SOLUTION: {}'.format(result.x))
                                 #print('SOLUTION FUN: {}'.format(result.fun))
                                 bifurcation_point = triad(result.x)
@@ -1901,10 +1901,10 @@ def construct_optimizer(tree, point, vessel, **kwargs):
              scale=tree_scale,connectivity=tree.connectivity):
         x = triad(x)
         #dists = close_exact_point(lines, x)
-        #dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
-        #                     numpy.linalg.norm(lines[0, 3:6] - x),
-        #                     numpy.linalg.norm(lines[1, 3:6] - x)])
-        #triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
+        dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
+                             numpy.linalg.norm(lines[0, 3:6] - x),
+                             numpy.linalg.norm(lines[1, 3:6] - x)])
+        triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
         #[TODO] angle penalty
         #[TODO] require that resulting parent vessel is at least a certain length? remove buffer region around triad
         # points
@@ -1924,7 +1924,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         #assert results > tree_scale, '{} results < {} tree_scale'.format(results, tree_scale)
         #return (((np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty) + triad_penalty))/(scale+penalty))# + 1.0
         #return -1/np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty)
-        return -1 / np.clip(numpy.nan_to_num(results, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        return -1 / np.clip(numpy.nan_to_num(results + triad_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
         #return results
         #return results
         #return value
