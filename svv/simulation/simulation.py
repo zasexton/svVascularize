@@ -92,7 +92,10 @@ class Simulation(object):
                             extension_scale += 1.0
                     root_extension = self.synthetic_object.data[0, 21] * extension_scale
                     self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
+                print("Unioning water-tight model")
                 fluid_surface_mesh = self.synthetic_object.export_solid(watertight=True)
+                print("Finished Unioning water-tight model")
+                print("Tetrahedralizing")
                 tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                 try:
                     tet_fluid.make_manifold(verbose=True)
@@ -182,7 +185,11 @@ class Simulation(object):
                     else:
                         fluid_surface_boolean_mesh = deepcopy(self.fluid_domain_wall_layers[-1])
                 hsize = fluid_surface_boolean_mesh.cell_data["hsize"][0]
-                tissue_domain = remesh_surface(self.synthetic_object.domain.boundary, hausd=hausd) # Check if this should be remeshed
+                try:
+                    tissue_domain = remesh_surface(self.synthetic_object.domain.boundary, hausd=hausd) # Check if this should be remeshed
+                except:
+                    print("REMESHING FAILS: CHECKING FOR TRIANGLE INTERSECTIONS")
+                    tmp_boundary = pymeshfix.MeshFix(self.synthetic_object.domain.boundary)
                 area = tissue_domain.area
                 tissue_domain = boolean(tissue_domain, fluid_surface_boolean_mesh, operation='difference')
                 if fluid:
