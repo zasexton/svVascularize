@@ -1904,6 +1904,19 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
                              numpy.linalg.norm(lines[0, 3:6] - x),
                              numpy.linalg.norm(lines[1, 3:6] - x)])
+        vec1 = distal - x
+        vec2 = terminal - x
+        vec3 = proximal - x
+        vec1 = vec1/numpy.linalg.norm(vec1)
+        vec2 = vec2/numpy.linalg.norm(vec2)
+        vec3 = vec3/numpy.linalg.norm(vec3)
+        angle1 = numpy.arctan2(numpy.dot(vec1, vec3))*(180/numpy.pi)
+        angle2 = numpy.arctan2(numpy.dot(vec2, vec3))*(180/numpy.pi)
+        #angle3 = numpy.arccos(numpy.dot(vec3, vec1))*(180/numpy.pi)
+        if angle1 > 90 or angle2 > 90:
+            angle_penalty = penalty
+        else:
+            angle_penalty = 0.0
         triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
         #[TODO] angle penalty
         #[TODO] require that resulting parent vessel is at least a certain length? remove buffer region around triad
@@ -1924,7 +1937,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         #assert results > tree_scale, '{} results < {} tree_scale'.format(results, tree_scale)
         #return (((np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty) + triad_penalty))/(scale+penalty))# + 1.0
         #return -1/np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty)
-        return -1 / np.clip(numpy.nan_to_num(results + triad_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        return -1 / np.clip(numpy.nan_to_num(results + triad_penalty + angle_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
         #return results
         #return results
         #return value
