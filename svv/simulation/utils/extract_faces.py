@@ -407,6 +407,7 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
                 npts = face.GetNumberOfPoints()
                 # Canonicalize face nodes to a sorted tuple so orientation/order doesn't matter
                 key = tuple(sorted(face.GetPointId(k) for k in range(npts)))
+                print("key: {} -> {}".format(key, i))
                 face_to_cell[key] = i
     #for i, cap in enumerate(iscap):
     #    if not cap == 1:
@@ -422,9 +423,9 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         if not isinstance(mesh, type(None)):
             wall_surface.point_data["GlobalNodeID"] = numpy.zeros(wall_surface.n_points, dtype=numpy.int32)
             wall_surface.cell_data['GlobalElementID'] = numpy.zeros(wall_surface.n_cells, dtype=numpy.int32)
-            wall_surface.cell_data['ModelFaceID'] = numpy.ones(wall_surface.n_cells, dtype=numpy.int32)
+            wall_surface.cell_data['ModelFaceID'] = numpy.ones(wall_surface.n_cells, dtype=numpy.int32) * i
             _, indices = global_node_tree.query(wall_surface.points)
-            wall_surface.point_data["GlobalNodeID"] = indices.astype(int)
+            wall_surface.point_data["GlobalNodeID"] = indices.astype(numpy.int32)
             # Assign Global Element IDs
             wall_faces = wall_surface.point_data["GlobalNodeID"][wall_surface.faces]
             wall_faces = wall_faces.reshape(-1, 4)[:, 1:].tolist()
@@ -465,10 +466,10 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         if not isinstance(mesh, type(None)):
             cap_surface.point_data["GlobalNodeID"] = numpy.zeros(cap_surface.n_points, dtype=numpy.int32)
             cap_surface.cell_data["GlobalElementID"] = numpy.zeros(cap_surface.n_cells, dtype=numpy.int32)
-            cap_surface.cell_data["ModelFaceID"] = numpy.ones(cap_surface.n_cells, dtype=numpy.int32)
+            cap_surface.cell_data["ModelFaceID"] = numpy.ones(cap_surface.n_cells, dtype=numpy.int32) * (len(walls) + i)
             # Assign Global Node IDs
             _, indices = global_node_tree.query(cap_surface.points)
-            cap_surface.point_data["GlobalNodeID"] = indices.astype(int)
+            cap_surface.point_data["GlobalNodeID"] = indices.astype(numpy.int32)
             # Assign Global Element IDs
             cap_faces = cap_surface.point_data["GlobalNodeID"][cap_surface.faces]
             cap_faces = cap_faces.reshape(-1, 4)[:, 1:].tolist()
@@ -507,10 +508,10 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
         if not isinstance(mesh, type(None)):
             lumen_surface.point_data["GlobalNodeID"] = numpy.zeros(lumen_surface.n_points, dtype=int)
             lumen_surface.cell_data["GlobalElementID"] = numpy.zeros(lumen_surface.n_cells, dtype=int)
-            lumen_surface.cell_data["ModelFaceID"] = numpy.ones(lumen_surface.n_cells, dtype=int) * (len(caps) + i + 2)
+            lumen_surface.cell_data["ModelFaceID"] = numpy.ones(lumen_surface.n_cells, dtype=int) * (len(walls) + len(caps) + i)
             # Assign Global Node IDs
             _, indices = global_node_tree.query(lumen_surface.points)
-            lumen_surface.point_data["GlobalNodeID"] = indices.astype(int)
+            lumen_surface.point_data["GlobalNodeID"] = indices.astype(numpy.int32)
             # Assign Global Element IDs
             lumen_faces = lumen_surface.point_data["GlobalNodeID"][lumen_surface.faces]
             lumen_faces = lumen_faces.reshape(-1, 4)[:, 1:].tolist()

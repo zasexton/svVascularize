@@ -200,9 +200,9 @@ class Simulation(object):
                     hmin = ((4.0*low_tri_area)/3.0**0.5) ** (0.5)
                     upper_tri_area = area / lower_num_triangles
                     hmax = ((4.0*upper_tri_area)/3.0**0.5) ** (0.5)
-                    #tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
-                #else:
-                #    #tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
+                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
+                else:
+                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
                 tet_tissue = tetgen.TetGen(tissue_domain)
                 if not fluid:
                     self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
