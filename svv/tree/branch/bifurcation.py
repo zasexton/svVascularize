@@ -1851,6 +1851,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
     lines[2, 3:6] = terminal
     lines[:, 12:15] = (lines[:, 3:6] - lines[:, 0:3])/numpy.linalg.norm(lines[:, 3:6] - lines[:, 0:3]).reshape(-1, 1)
     lines[0, 21] = data[vessel, 21]
+    parent_vessel = data[vessel, 17]
     if tree.clamped_root and vessel == 0:
         get_line_pt = map_clamped(tree, point, vessel)
         def cost(x, func=tree_cost_2, d_min=d_min, terminal=terminal,
@@ -1898,7 +1899,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
              terminal_flow=tree.parameters.terminal_flow, root_pressure=tree.parameters.root_pressure,
              terminal_pressure=tree.parameters.terminal_pressure, radius_exponent=tree.parameters.radius_exponent,
              length_exponent=tree.parameters.length_exponent, triad=triad, lines=lines, penalty=penalty,
-             scale=tree_scale,connectivity=tree.connectivity):
+             scale=tree_scale,connectivity=tree.connectivity, parent_vessel=parent_vessel):
         x = triad(x)
         #dists = close_exact_point(lines, x)
         dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
@@ -1910,13 +1911,23 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         vec1 = vec1/numpy.linalg.norm(vec1)
         vec2 = vec2/numpy.linalg.norm(vec2)
         vec3 = vec3/numpy.linalg.norm(vec3)
-        angle1 = numpy.arctan2(numpy.dot(vec1, vec3))*(180/numpy.pi)
-        angle2 = numpy.arctan2(numpy.dot(vec2, vec3))*(180/numpy.pi)
+        angle1 = numpy.arccos(numpy.dot(vec1, vec3))*(180/numpy.pi)
+        angle2 = numpy.arccos(numpy.dot(vec2, vec3))*(180/numpy.pi)
         #angle3 = numpy.arccos(numpy.dot(vec3, vec1))*(180/numpy.pi)
+        #ADD Parent angles
+
         if angle1 > 90 or angle2 > 90:
             angle_penalty = penalty
         else:
             angle_penalty = 0.0
+        if not isinstance(parent_vessel,type(numpy.nan)):
+            parent_vessel = int(parent_vessel)
+            vec4 = data[parent_vessel, 3:6] - data[parent_vessel, 0:3]
+            vec4 = vec4/numpy.linalg.norm(vec4)
+            angle3 = numpy.arccos(numpy.dot(vec3, vec4))*(180/numpy.pi)
+            if angle3 > 90:
+                angle_penalty += penalty
+        angle_penalty = 0.0
         triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
         #[TODO] angle penalty
         #[TODO] require that resulting parent vessel is at least a certain length? remove buffer region around triad
