@@ -1,9 +1,13 @@
 import numpy
+import os
+import tempfile
+import multiprocessing as mp
 import pyvista
 import pymeshfix
 from tqdm import trange, tqdm
 from scipy.interpolate import splprep, splev
-from svv.utils.remeshing.remesh import remesh_surface
+from scipy.spatial import cKDTree
+from svv.utils.remeshing.remesh import remesh_surface, write_medit_sol
 from svv.domain.routines.boolean import boolean
 
 
@@ -455,7 +459,7 @@ def generate_polylines(xyz, r, num=1000):
     return polylines
 
 
-def generate_tube(polyline, hsize=None):
+def generate_tube(polyline, hsize=None, radius_based=False):
     """
     This function generates a tube from a given polyline representing a single vessel of a
     vascular object (tree or forest).
@@ -465,7 +469,12 @@ def generate_tube(polyline, hsize=None):
     polyline : pyvista.PolyData
         A polyline object representing the centerline of a vessel.
     hsize : float
-        The mesh element size for the surface mesh of the vessel.
+        The mesh element size for the surface mesh of the vessel. When
+        radius_based is True, this acts as the target size at the minimum
+        centerline radius and scales proportionally elsewhere.
+    radius_based : bool
+        If True, writes a per-vertex sizing function (in.sol) proportional to
+        the local centerline radius so MMG adapts edge sizes accordingly.
 
     Returns
     -------
@@ -482,7 +491,41 @@ def generate_tube(polyline, hsize=None):
     tube = tube.compute_normals(auto_orient_normals=True)
     if isinstance(hsize, type(None)):
         hsize = (min(polyline['radius'])*2*numpy.pi)/25
-    tube = remesh_surface(tube, hsiz=hsize)
+    if radius_based:
+        # Per-vertex sizing based on local centerline radius using k-NN from KDTree.
+        # Scale so hsize matches the size at the minimum radius; elsewhere scales proportionally.
+        poly_pts = numpy.asarray(polyline.points, dtype=float)
+        poly_rad = numpy.asarray(polyline['radius'], dtype=float).reshape(-1)
+        rmin = float(poly_rad.min()) if poly_rad.size else 1.0
+        scale = float(hsize) / rmin if rmin > 0 else float(hsize)
+
+        surf_pts = numpy.asarray(tube.points, dtype=float)
+        n_poly = poly_pts.shape[0]
+        k_nn = min(4, n_poly) if n_poly > 0 else 1
+        if n_poly == 0:
+            sizes = numpy.full(surf_pts.shape[0], float(hsize), dtype=float)
+        else:
+            tree = cKDTree(poly_pts)
+            d, idx = tree.query(surf_pts, k=k_nn)
+            # Handle k=1 return shape
+            if k_nn == 1:
+                r_local = poly_rad[numpy.asarray(idx).reshape(-1)].astype(float)
+            else:
+                d = numpy.asarray(d, dtype=float)
+                idx = numpy.asarray(idx, dtype=int)
+                # Inverse-distance weights; protect against zero distances
+                w = 1.0 / (d + 1e-12)
+                w /= w.sum(axis=1, keepdims=True)
+                r_neighbors = poly_rad[idx]
+                r_local = (w * r_neighbors).sum(axis=1)
+            sizes = scale * r_local
+        # Ensure strictly positive sizes for MMG
+        sizes = numpy.maximum(sizes, numpy.finfo(float).eps)
+        tube.point_data['MeshSizingFunction'] = sizes
+        # Write MMG sizing file the remesher will pick up in this temp directory
+        write_medit_sol(tube, 'in.sol', array_name='MeshSizingFunction', scale=1, default_size=hsize)
+    # If using a sizing function, let MMG drive sizes solely from in.sol (omit -hsiz)
+    tube = remesh_surface(tube, hsiz=(None if radius_based else hsize), verbosity=0)
     tube = tube.compute_normals(auto_orient_normals=True)
     fix = pymeshfix.MeshFix(tube)
     fix.repair()
@@ -514,6 +557,103 @@ def generate_tubes(polylines, hsize=None):
         tubes.append(tube)
     return tubes
 
+
+def _tube_worker(args):
+    """Worker that builds a single tube in an isolated temp directory.
+
+    Args
+    ----
+    args : tuple
+        (idx, points, radius, hsize, radius_based)
+
+    Returns
+    -------
+    tuple
+        (idx, points, faces) for reconstructed PolyData.
+    """
+    idx, pts, rad, hsize, radius_based = args
+    old_cwd = os.getcwd()
+    # Isolate MMG temp files to avoid collisions between processes
+    with tempfile.TemporaryDirectory(prefix="svv_remesh_") as tmpdir:
+        try:
+            os.chdir(tmpdir)
+            poly = polyline_from_points(numpy.asarray(pts), numpy.asarray(rad))
+            tube = generate_tube(poly, hsize=hsize, radius_based=radius_based)
+            # Return minimal geometry to avoid pickling VTK objects
+            return idx, numpy.asarray(tube.points), numpy.asarray(tube.faces)
+        finally:
+            os.chdir(old_cwd)
+
+
+def generate_tubes_parallel(polylines, hsize=None, processes=None, chunksize=1, start_method=None, show_progress=True, radius_based=False):
+    """
+    Parallel tube generation using multiprocessing. Each tube is built in a
+    separate process and in a per-process temporary directory to avoid MMG
+    temp-file collisions.
+
+    Parameters
+    ----------
+    polylines : list[pyvista.PolyData]
+        Centerline polylines with point-data array 'radius'.
+    hsize : float, optional
+        Target surface edge size for remeshing (forwarded to generate_tube).
+    processes : int, optional
+        Number of worker processes. Defaults to `os.cpu_count()`.
+    chunksize : int, optional
+        Chunk size for Pool.imap. Default 1.
+    start_method : {"spawn","fork","forkserver"}, optional
+        Multiprocessing start method. Defaults to 'spawn' when available.
+    show_progress : bool, optional
+        If True, display a tqdm progress bar.
+    radius_based : bool, optional
+        If True, build a per-vertex MMG sizing function based on the local
+        centerline radius and pass it via in.sol, yielding radius-proportional
+        edge sizes. Default False.
+
+    Returns
+    -------
+    list[pyvista.PolyData]
+        Reconstructed tube meshes in the same order as input polylines.
+    """
+    n = len(polylines)
+    if n == 0:
+        return []
+
+    # Serialize inputs (avoid sending VTK objects across processes)
+    tasks = []
+    for i, pl in enumerate(polylines):
+        pts = numpy.asarray(pl.points)
+        if 'radius' not in pl.point_data:
+            raise KeyError("Each polyline must have a 'radius' point-data array")
+        rad = numpy.asarray(pl['radius']).reshape(-1)
+        tasks.append((i, pts, rad, hsize, radius_based))
+
+    # Choose a safe start method to avoid forking VTK state
+    if start_method is None:
+        try:
+            ctx = mp.get_context('spawn')
+        except ValueError:
+            ctx = mp.get_context()
+    else:
+        ctx = mp.get_context(start_method)
+
+    tubes_arrays = [None] * n
+    with ctx.Pool(processes=processes) as pool:
+        iterator = pool.imap(_tube_worker, tasks, chunksize)
+        if show_progress:
+            iterator = tqdm(iterator, total=n, desc='Generate tubes ', unit='tube', leave=False)
+        for idx, pts, faces in iterator:
+            tubes_arrays[idx] = (pts, faces)
+
+    # Reconstruct PolyData objects in parent process
+    tubes = []
+    for i in range(n):
+        pts, faces = tubes_arrays[i]
+        tube = pyvista.PolyData(pts, faces)
+        # Ensure normals are available
+        tube = tube.compute_normals(auto_orient_normals=True)
+        tubes.append(tube)
+    return tubes
 
 def union_tubes(tubes, lines, cap_resolution=40):
     """
@@ -564,10 +704,10 @@ def build_watertight_solid(tree, cap_resolution=40):
     """
     xyz, r, _, _, branches, _ = get_interpolated_sv_data(tree.data)
     lines = generate_polylines(xyz, r)
-    tubes = generate_tubes(lines)
-    model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
+    tubes = generate_tubes_parallel(lines, radius_based=True)
+    model = union_tubes_balanced(tubes, lines, cap_resolution=cap_resolution)
     # Remove poor quality elements and repair the mesh.
-    # cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
+    cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
     keep = cell_quality.cell_data["CellQuality"] > 0.1
     if not numpy.all(keep):
         print("Removing poor quality elements from the mesh.")
@@ -586,7 +726,7 @@ def build_watertight_solid(tree, cap_resolution=40):
 
 def union_tubes_balanced(tubes, lines, cap_resolution=40, method='centerline', engine='manifold', fix_mesh=True):
     """
-    Perform topology-aware, size-balanced boolean unions over a set of vessel tubes.
+    Perform topology-aware, compute-balanced boolean unions over a set of vessel tubes.
 
     The function:
     - Detects unionable parent/child pairs using `find_unionable_pairs` (child's
@@ -707,7 +847,7 @@ def union_tubes_balanced(tubes, lines, cap_resolution=40, method='centerline', e
         if comp_count > 0:
             total_merges += max(comp_count - 1, 0)
 
-    pbar = tqdm(total=total_merges, desc='Union tubes (balanced)', unit='union', leave=False)
+    pbar = tqdm(total=total_merges, desc='Union tubes ', unit='union', leave=False)
 
     # Iteratively union smallest available pairs until components are reduced
     while heap:
@@ -765,9 +905,12 @@ def union_tubes_balanced(tubes, lines, cap_resolution=40, method='centerline', e
         # Fallback heuristic if radii missing
         hsize = None
 
-    if hsize is not None and hsize > 0:
-        model = remesh_surface(model, hsiz=hsize)
+    #if hsize is not None and hsize > 0:
+    #    model = remesh_surface(model, hsiz=hsize, verbosity=0)
     model = model.compute_normals(auto_orient_normals=True)
+    #fix = pymeshfix.MeshFix(model)
+    #fix.repair()
+    #model = fix.mesh
     if hsize is not None:
         model.cell_data['hsize'] = 0
         model.cell_data['hsize'][0] = hsize
