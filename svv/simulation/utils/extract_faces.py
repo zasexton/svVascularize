@@ -95,6 +95,16 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
     for i in new_idx:
         new_faces.append(faces[i])
     faces = new_faces
+    # Precompute boundary-loop KD-trees for all faces (used for robust matching)
+    all_boundary_trees = []
+    for i in range(len(faces)):
+        f = surface.extract_cells(faces[i]).extract_surface()
+        loops = f.extract_feature_edges(boundary_edges=True,
+                                        manifold_edges=False,
+                                        feature_edges=False,
+                                        non_manifold_edges=False)
+        splits = loops.split_bodies()
+        all_boundary_trees.append([cKDTree(splits[j].points) for j in range(splits.n_blocks)])
     iscap = []
     wall_faces = []
     cap_faces = []
@@ -348,13 +358,62 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
             wall_boundary_trees.append(tmp_wall_boundary_trees)
             iscap.append(0)
             wall_faces.append(faces[i])
-    # Do not reclassify single-loop planar faces: these are caps by definition.
-    # A cap’s boundary loop will naturally coincide with a wall boundary; this is expected
-    # and should not trigger reclassification.
+
+    # Post-classification validation: a CAP must have a single boundary loop that
+    # matches exactly one LUMEN boundary and no other face boundaries.
+    # If a cap loop is shared among multiple faces or not shared with any lumen,
+    # demote it to a wall.
+    def boundaries_match(tree_a, tree_b, tol=1e-9):
+        dists, _ = tree_a.query(tree_b.data)
+        return numpy.all(numpy.isclose(dists, 0.0, atol=tol))
+
+    for i in range(len(faces)):
+        if iscap[i] != 1:
+            continue
+        # Require exactly one boundary loop on the cap face
+        cap_loops = all_boundary_trees[i]
+        if len(cap_loops) != 1:
+            iscap[i] = 0
+            continue
+        cap_loop_tree = cap_loops[0]
+        lumen_matches = 0
+        other_matches = 0
+        for j in range(len(faces)):
+            if j == i:
+                continue
+            for other_loop in all_boundary_trees[j]:
+                if boundaries_match(cap_loop_tree, other_loop):
+                    if iscap[j] == 2:
+                        lumen_matches += 1
+                    else:
+                        other_matches += 1
+            # Early exit if already invalid
+            if lumen_matches > 1 or other_matches > 0:
+                break
+        # Enforce: shared only with a single lumen loop
+        if not (lumen_matches == 1 and other_matches == 0):
+            iscap[i] = 0  # demote to wall
+    # Rebuild type-specific face lists and boundary trees after cap validation
+    wall_faces = []
+    cap_faces = []
+    lumen_faces = []
+    wall_boundary_trees = []
+    cap_boundary_trees = []
+    lumen_boundary_trees = []
+    for i in range(len(faces)):
+        if iscap[i] == 0:
+            wall_faces.append(faces[i])
+            wall_boundary_trees.append(all_boundary_trees[i])
+        elif iscap[i] == 1:
+            cap_faces.append(faces[i])
+            cap_boundary_trees.append(all_boundary_trees[i])
+        elif iscap[i] == 2:
+            lumen_faces.append(faces[i])
+            lumen_boundary_trees.append(all_boundary_trees[i])
 
     # IMPORTANT: Caps and lumens should NEVER be merged with walls or each other
-    # Only walls can be combined if they share boundaries
-    # Combine cap and lumen boundary trees to prevent walls from merging with them
+    # Only walls can be combined if they share boundaries. Prevent merges across
+    # cap and lumen boundaries by providing them as non-wall constraints.
     all_non_wall_boundary_trees = cap_boundary_trees + lumen_boundary_trees
 
     if combine_walls and len(wall_faces) > 0:
