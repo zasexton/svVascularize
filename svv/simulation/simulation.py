@@ -21,7 +21,7 @@ from svv.simulation.general_parameters import GeneralSimulationParameters
 from svv.simulation.mesh import GeneralMesh
 from svv.simulation.fluid.fluid_equation import FluidEquation
 from svv.simulation.utils.boundary_layer import BoundaryLayer
-
+from svv.domain.routines.tetrahedralize import tetrahedralize
 
 # Defer 1D/0D ROM imports to their respective methods to avoid importing
 # vtk-heavy modules during Simulation class import.
@@ -96,17 +96,20 @@ class Simulation(object):
                 fluid_surface_mesh = self.synthetic_object.export_solid(watertight=True)
                 print("Finished Unioning water-tight model")
                 print("Tetrahedralizing")
-                tet_fluid = tetgen.TetGen(fluid_surface_mesh)
+                #tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                 try:
-                    tet_fluid.make_manifold(verbose=True)
+                    #tet_fluid.make_manifold(verbose=True)
                     #tet_fluid.tetrahedralize(minratio=minratio, mindihedral=10.0, steinerleft=-1, order=order, nobisect=True, verbose=2, switches='M')
-                    tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                    fluid_volume_mesh = tet_fluid.grid
+                    #tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    grid, node, elems = tetrahedralize(fluid_surface_mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    fluid_volume_mesh = grid
                 except:
-                    tet_fluid.make_manifold(verbose=True)
+                    fix = pymeshfix.MeshFix(fluid_surface_mesh)
+                    fix.repair(verbose=True)
+                    #tet_fluid.make_manifold(verbose=True)
                     #tet_fluid.tetrahedralize(minratio=minratio, mindihedral=10.0, steinerleft=-1, order=order, nobisect=True, verbose=2, switches='M')
-                    tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                    fluid_volume_mesh = tet_fluid.grid
+                    grid, node, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    fluid_volume_mesh = grid
                 if isinstance(fluid_volume_mesh, type(None)):
                     print("Failed to generate fluid volume mesh.")
                 else:
@@ -176,7 +179,7 @@ class Simulation(object):
                 # Extrude the root of the tree to ensure proper intersection with the tissue domain.
                 if not fluid:
                     root_extension = max(self.synthetic_object.data[0, 21] * 4, self.synthetic_object.data[0, 20] * 0.5)
-                    self.synthetic_object.data[0, 0:3] -= root_extension * self.synthetic_object.data.get('w_basis', 0)
+                    self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
                     # Should check to see that the extended point does not intersect with another fluid or tissue domain.
                     fluid_surface_boolean_mesh = self.synthetic_object.export_solid(watertight=True)
                 else:
@@ -186,7 +189,7 @@ class Simulation(object):
                         fluid_surface_boolean_mesh = deepcopy(self.fluid_domain_wall_layers[-1])
                 hsize = fluid_surface_boolean_mesh.cell_data["hsize"][0]
                 try:
-                    tissue_domain = remesh_surface(self.synthetic_object.domain.boundary, hausd=hausd) # Check if this should be remeshed
+                    tissue_domain = remesh_surface(self.synthetic_object.domain.boundary, hausd=hausd, verbosity=0) # Check if this should be remeshed
                 except:
                     print("REMESHING FAILS: CHECKING FOR TRIANGLE INTERSECTIONS")
                     tmp_boundary = pymeshfix.MeshFix(self.synthetic_object.domain.boundary)
@@ -200,23 +203,25 @@ class Simulation(object):
                     hmin = ((4.0*low_tri_area)/3.0**0.5) ** (0.5)
                     upper_tri_area = area / lower_num_triangles
                     hmax = ((4.0*upper_tri_area)/3.0**0.5) ** (0.5)
-                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
+                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd, verbosity=0)
                 else:
-                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
-                tet_tissue = tetgen.TetGen(tissue_domain)
+                    tissue_domain = remesh_surface(tissue_domain, hausd=hausd, verbosity=0)
+                #tet_tissue = tetgen.TetGen(tissue_domain)
                 if not fluid:
                     self.synthetic_object.data[0, 0:3] += root_extension * self.synthetic_object.data.get('w_basis', 0)
                 try:
-                    tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    grid, nodes, elems = tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                     #tet_tissue.tetrahedralize(minratio=minratio, order=order)
-                    tissue_volume_mesh = tet_tissue.grid
+                    tissue_volume_mesh = grid
                 except:
                     if fluid:
                         print('Mesh interface may be corrupted after mesh fixing for tetrahedralization.')
-                    tet_tissue.make_manifold(verbose=True)
+                    fix = pymeshfix.MeshFix(tissue_domain)
+                    fix.repair(verbose=True)
+                    #tet_tissue.make_manifold(verbose=True)
                     #tet_tissue.tetrahedralize(minratio=minratio, order=order)
-                    tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                    tissue_volume_mesh = tet_tissue.grid
+                    grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    tissue_volume_mesh = grid
                 if isinstance(tissue_volume_mesh, type(None)):
                     print("Failed to generate tissue volume mesh.")
                 else:
@@ -234,17 +239,19 @@ class Simulation(object):
                 for tree in network:
                     if fluid:
                         fluid_surface_mesh = tree.export_solid(watertight=True)
-                        tet_fluid = tetgen.TetGen(fluid_surface_mesh)
+                        #tet_fluid = tetgen.TetGen(fluid_surface_mesh)
                         try:
-                            tet_fluid.make_manifold(verbose=False)
+                            # tet_fluid.make_manifold(verbose=False)
                             # Tetrahedralize the fluid domain (correct target object)
-                            tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                            fluid_volume_mesh = tet_fluid.grid
+                            grid, nodes, elems = tetrahedralize(fluid_surface_mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                            fluid_volume_mesh = grid
                         except:
                             try:
-                                tet_fluid.make_manifold(verbose=True)
-                                tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                                fluid_volume_mesh = tet_fluid.grid
+                                #tet_fluid.make_manifold(verbose=True)
+                                fix = pymeshfix.MeshFix(fluid_surface_mesh)
+                                fix.repair(verbose=True)
+                                grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                                fluid_volume_mesh = grid
                             except:
                                 fluid_volume_mesh = None
                         if isinstance(fluid_volume_mesh, type(None)):
@@ -259,7 +266,7 @@ class Simulation(object):
                     if tissue:
                         # Extrude the root of the tree to ensure proper intersection with the tissue domain.
                         root_extension = max(tree.data[0, 21] * 4, tree.data[0, 20] * 0.5)
-                        tree.data[0, 0:3] -= root_extension * tree.data.get('w_basis', 0)
+                        tree.data[0, 0:3] += root_extension * tree.data.get('w_basis', 0)
                         # Should check to see that the extended point does not intersect with another fluid or tissue domain.
                         fluid_surface_boolean_mesh = tree.export_solid(watertight=True)
                         if len(self.tissue_domain_surface_meshes) > 0:
@@ -267,18 +274,22 @@ class Simulation(object):
                         else:
                             tissue_domain = tree.domain.boundary
                         tissue_domain = boolean(tissue_domain, fluid_surface_boolean_mesh, operation='difference')
-                        tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
-                        tet_tissue = tetgen.TetGen(tissue_domain)
-                        tree.data[0, 0:3] += root_extension * tree.data.get('w_basis', 0)
+                        tissue_domain = remesh_surface(tissue_domain, hausd=hausd, verbosity=0)
+                        #tet_tissue = tetgen.TetGen(tissue_domain)
+                        #tree.data[0, 0:3] += root_extension * tree.data.get('w_basis', 0)
                         try:
-                            tet_tissue.make_manifold(verbose=False)
-                            tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                            tissue_volume_mesh = tet_tissue.grid
+                            # tet_tissue.make_manifold(verbose=False)
+                            # fix = pymeshfix.MeshFix(tissue_domain)
+                            # fix.repair(verbose=True)
+                            grid, nodes, elems = tetrahedralize(tissue_domain, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                            tissue_volume_mesh = grid
                         except:
                             try:
-                                tet_tissue.make_manifold(verbose=True)
-                                tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                                tissue_volume_mesh = tet_tissue.grid
+                                # tet_tissue.make_manifold(verbose=True)
+                                fix = pymeshfix.MeshFix(fix.mesh)
+                                fix.repair(verbose=True)
+                                grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                                tissue_volume_mesh = grid
                             except:
                                 tissue_volume_mesh = None
                         if isinstance(tissue_volume_mesh, type(None)):
@@ -286,7 +297,8 @@ class Simulation(object):
                             network_tissue_surface_meshes.append(None)
                             network_tissue_volume_meshes.append(None)
                         else:
-                            tissue_volume_mesh = remesh_volume(tissue_volume_mesh, hausd=hausd)
+                            if remesh_vol:
+                                tissue_volume_mesh = remesh_volume(tissue_volume_mesh, hausd=hausd)
                             tissue_domain = tissue_volume_mesh.extract_surface()
                             network_tissue_surface_meshes.append(tissue_domain)
                             network_tissue_volume_meshes.append(tissue_volume_mesh)
@@ -302,14 +314,16 @@ class Simulation(object):
                     network_solids, _, _ = self.synthetic_object.connections.export_solid(extrude_roots=False)
                 for i, fluid_surface in enumerate(network_solids):
                     if fluid:
-                        tet_fluid = tetgen.TetGen(fluid_surface)
+                        #tet_fluid = tetgen.TetGen(fluid_surface)
                         try:
-                            tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                            fluid_volume = tet_fluid.grid
+                            grid, nodes, elems = tetrahedralize(fluid_surface, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                            fluid_volume = grid
                         except:
-                            tet_fluid.make_manifold(verbose=True)
-                            tet_fluid.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                            fluid_volume = tet_fluid.grid
+                            #tet_fluid.make_manifold(verbose=True)
+                            fix = pymeshfix.MeshFix(fluid_surface)
+                            fix.repair(verbose=True)
+                            grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                            fluid_volume = grid
                         if isinstance(fluid_volume, type(None)):
                             print("Failed to generate fluid volume mesh.")
                             self.fluid_domain_surface_meshes.append(fluid_surface)
@@ -386,7 +400,7 @@ class Simulation(object):
                         radii.append(self.synthetic_object.networks[net][tr].data[0, 21])
                 hsize = min(radii) * 2.0
                 print("Remeshing tissue domain with edge size {}.".format(hsize))
-                tissue_domain = remesh_surface(tissue_domain, hsiz=hsize)
+                tissue_domain = remesh_surface(tissue_domain, hsiz=hsize, verbosity=0)
                 for i, fluid_surface in enumerate(self.fluid_domain_surface_meshes):
                     fluid_surface_normals = fluid_surface.compute_normals(auto_orient_normals=True)
                     print("Performing boolean operation with fluid surface mesh {}.".format(i))
@@ -398,14 +412,16 @@ class Simulation(object):
                 self.tissue_domain_surface_meshes.append(tissue_domain)
                 #tissue_domain = remesh_surface(tissue_domain, hausd=hausd)
                 print("Tetrahedralizing tissue domain.")
-                tet_tissue = tetgen.TetGen(tissue_domain)
+                #tet_tissue = tetgen.TetGen(tissue_domain)
                 try:
-                    tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                    tissue_volume_mesh = tet_tissue.grid
+                    grid, nodes, elems = tetrahedralize(tissue_domain, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    tissue_volume_mesh = grid
                 except:
-                    tet_tissue.make_manifold(verbose=True)
-                    tet_tissue.tetrahedralize(switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
-                    tissue_volume_mesh = tet_tissue.grid
+                    #tet_tissue.make_manifold(verbose=True)
+                    fix = pymeshfix.MeshFix(tissue_domain)
+                    fix.repair(verbose=True)
+                    grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
+                    tissue_volume_mesh = grid
                 if isinstance(tissue_volume_mesh, type(None)):
                     print("Failed to generate tissue volume mesh.")
                 else:
