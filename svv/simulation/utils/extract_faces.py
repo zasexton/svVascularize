@@ -407,7 +407,7 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
                 npts = face.GetNumberOfPoints()
                 # Canonicalize face nodes to a sorted tuple so orientation/order doesn't matter
                 key = tuple(sorted(face.GetPointId(k) for k in range(npts)))
-                print("key: {} -> {}".format(key, i))
+                #print("key: {} -> {}".format(key, i))
                 face_to_cell[key] = i
     #for i, cap in enumerate(iscap):
     #    if not cap == 1:
