@@ -167,17 +167,63 @@ class Domain(object):
         self.random_generator = np.random.Generator(np.random.PCG64(seed=self.random_seed))
         return None
 
-    def create(self, **kwargs):
+    def create(self,
+               min_patch_size: int = 10,
+               max_patch_size: int = 20,
+               overlap: float = 0.2,
+               feature_angle: float = 30) -> None:
         """
-        Create the patches for the domain. This is the first step in the process.
-        :param kwargs:
-        :return:
+        Partition input data into spatial patches and initialize Patch objects.
+
+        This is the first step of the domain pipeline (create → solve → build).
+        It groups the input point cloud (and optional normals) into overlapping
+        local neighborhoods (“patches”) and instantiates a Patch for each one.
+        Internally this delegates to `svv.domain.routines.allocate.allocate`,
+        which performs the neighbor search, duplicate handling, and optional
+        feature‑angle filtering.
+
+        Parameters
+        ----------
+        min_patch_size : int, optional
+            Minimum number of points required to form a patch. Default 10.
+        max_patch_size : int, optional
+            Target maximum points per patch (nearest‑neighbor window). Default 20.
+        overlap : float, optional
+            Fraction [0, 1] controlling allowed overlap of point indices between
+            patches; higher permits more shared points. Default 0.2.
+        feature_angle : float, optional
+            Maximum allowed angle in degrees between point‑wise normal vectors
+            for inclusion in the same patch as the seed point. Used only when
+            normals are provided. Default 30.
+
+        Side Effects
+        ------------
+        - Populates `self.patches` with Patch instances. Each Patch receives its
+          subset of points (and normals if available) and, by default, builds a
+          Kernel and sets initial values in `Patch.set_data`.
+
+        Notes
+        -----
+        - If `self.normals` is None, patches are created using spatial proximity only.
+        - If normals are provided, the `feature_angle` criterion is enforced and
+          duplicate points with incompatible normals are handled by `allocate`.
+        - No solving or function assembly happens here; call `solve()` next to fit
+          per‑patch coefficients, then `build()` to assemble the global implicit
+          function and precompute fast‑evaluation arrays.
         """
         self.patches = []
         if self.normals is None:
-            patch_data = allocate(self.points, **kwargs)
+            patch_data = allocate(self.points,
+                                  min_patch_size=min_patch_size,
+                                  max_patch_size=max_patch_size,
+                                  overlap=overlap,
+                                  feature_angle=feature_angle)
         else:
-            patch_data = allocate(self.points, self.normals, **kwargs)
+            patch_data = allocate(self.points, self.normals,
+                                  min_patch_size=min_patch_size,
+                                  max_patch_size=max_patch_size,
+                                  overlap=overlap,
+                                  feature_angle=feature_angle)
         for i in trange(len(patch_data), desc='Creating patches', unit='patch', leave=False):
             self.patches.append(Patch())
             if self.normals is None:
@@ -186,29 +232,46 @@ class Domain(object):
                 self.patches[-1].set_data(patch_data[i][0], patch_data[i][1])
         return None
 
-    def solve(self, **kwargs):
+    def solve(self, method: str = "L-BFGS-B", precision: int = 9) -> None:
         """
-        Solve the individual patch interpolation problems prior to blending.
+        Solve each Patch's interpolation problem before blending.
 
         Parameters
         ----------
-            None
+        method : str, optional
+            Optimization method passed to the underlying SciPy optimizer via
+            `Patch.solve`. Default "L-BFGS-B".
+        precision : int, optional
+            Number of decimal places for rounding the solved constants per patch.
+            Default 9.
 
-        Returns
-        -------
-            None
+        Notes
+        -----
+        This step computes per‑patch coefficients used later by `build()` to
+        assemble the global implicit function and fast‑evaluation arrays.
         """
         for i in trange(len(self.patches), desc='Solving patches', unit='patch', leave=False):
-            self.patches[i].solve(**kwargs)
+            self.patches[i].solve(method=method, precision=precision)
         return None
 
-    def build(self, **kwargs):
+    def build(self, resolution: int = 25, skip_boundary: bool = False) -> None:
         """
-        Build the implicit function describing the domain.
-        :return:
+        Assemble the global implicit function and optional boundary/mesh artifacts.
+
+        This combines per‑patch solutions into a structure that supports fast
+        evaluation of the implicit field via `evaluate_fast`/`__call__`. When a
+        Domain is loaded from a .dmn file, precomputed arrays may be present and
+        this method will reuse them, only rebuilding missing lightweight indices.
+
+        Parameters
+        ----------
+        resolution : int, optional
+            Grid resolution used when extracting the boundary surface/curve.
+            Higher values yield finer boundaries at increased cost. Default 25.
+        skip_boundary : bool, optional
+            When True, skip building boundary and interior mesh artifacts and
+            only assemble fast‑evaluation structures. Default False.
         """
-        resolution = kwargs.get('resolution', 25)
-        skip_boundary = kwargs.get('skip_boundary', False)
         # If this Domain was loaded from a .dmn file, it already has
         # A/B/C/D/PTS and possibly a function_tree. In that case, skip
         # rebuilding from patches (which will be empty) and only ensure

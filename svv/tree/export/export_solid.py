@@ -1,10 +1,172 @@
 import numpy
 import pyvista
 import pymeshfix
-from tqdm import trange
+from tqdm import trange, tqdm
 from scipy.interpolate import splprep, splev
 from svv.utils.remeshing.remesh import remesh_surface
 from svv.domain.routines.boolean import boolean
+
+
+def find_unionable_pairs(lines, tubes, method='centerline', bbox_pad_factor=0.1, eps_factor=0.05):
+    """
+    Determine all tube index pairs (i, m) such that the initial point of the
+    polyline `lines[i]` lies inside tube `tubes[m]`. These pairs are safe
+    candidates for boolean unioning in a topology-aware manner (child into parent).
+
+    Parameters
+    ----------
+    lines : list[pyvista.PolyData]
+        Polylines with a single line cell each. Must have point array 'radius'.
+    tubes : list[pyvista.PolyData]
+        Triangulated surface meshes for each corresponding line (tube geometry).
+    method : str, optional
+        How to test containment. One of:
+          - 'centerline' (default): project the line's initial point onto each
+            candidate parent's polyline and compare distance to interpolated
+            radius at the closest segment. Fast and robust to minor mesh issues.
+          - 'surface': use VTK's select_enclosed_points against the tube surface
+            to check if the point is inside. More expensive but purely geometric.
+    bbox_pad_factor : float, optional
+        Fraction of a tube's characteristic radius used to pad its axis-aligned
+        bounding box for a quick inclusion prefilter. Default 0.1.
+    eps_factor : float, optional
+        Tolerance expressed as a fraction of the parent's median segment length
+        for the centerline method. Default 0.05.
+
+    Returns
+    -------
+    pairs : list[tuple[int, int]]
+        List of (child_index, parent_index) pairs deemed unionable.
+
+    Notes
+    -----
+    - This function assumes `len(lines) == len(tubes)` and that each line[i]
+      corresponds to tube[i]. Pairs with identical indices (i == m) are skipped.
+    - The 'centerline' method does not require watertight tubes and is typically
+      much faster. The 'surface' method can be used when geometric certainty is
+      preferred over speed.
+    """
+    import numpy as _np
+    import pyvista as _pv
+
+    assert len(lines) == len(tubes), "lines and tubes must have the same length"
+    n = len(lines)
+
+    # Precompute tube AABBs with padding and per-line helpers
+    bounds = []
+    pad = _np.zeros((n,), dtype=float)
+    line_points = []
+    line_radii = []
+    line_seg_vecs = []
+    line_seg_len2 = []
+    line_seg_len = []
+    line_med_seg = _np.zeros((n,), dtype=float)
+
+    for i in range(n):
+        l = lines[i]
+        t = tubes[i]
+        # Lines are expected to carry a 'radius' point array
+        radii = _np.asarray(l['radius']).reshape(-1)
+        pts = _np.asarray(l.points)
+        line_points.append(pts)
+        line_radii.append(radii)
+        # Segment vectors and lengths for centerline projection
+        if pts.shape[0] >= 2:
+            vecs = pts[1:] - pts[:-1]
+            seg_len2 = _np.einsum('ij,ij->i', vecs, vecs)
+            seg_len = _np.sqrt(seg_len2)
+            med = _np.median(seg_len) if seg_len.size > 0 else 0.0
+        else:
+            vecs = _np.zeros((0, 3))
+            seg_len2 = _np.zeros((0,))
+            seg_len = _np.zeros((0,))
+            med = 0.0
+        line_seg_vecs.append(vecs)
+        line_seg_len2.append(seg_len2)
+        line_seg_len.append(seg_len)
+        line_med_seg[i] = med
+        # Tube bounds and padding derived from characteristic radius
+        b = t.bounds  # (xmin, xmax, ymin, ymax, zmin, zmax)
+        bounds.append(b)
+        r_char = float(_np.median(radii)) if radii.size else 0.0
+        pad[i] = bbox_pad_factor * r_char
+
+    def _in_padded_bounds(p, b, pad_val):
+        return (b[0]-pad_val <= p[0] <= b[1]+pad_val and
+                b[2]-pad_val <= p[1] <= b[3]+pad_val and
+                b[4]-pad_val <= p[2] <= b[5]+pad_val)
+
+    def _closest_distance_to_polyline(point, pts, vecs, seg_len2, radii):
+        """Return (d_min, j_best, t_best, r_interp) for a point-to-polyline query."""
+        if pts.shape[0] == 0:
+            return _np.inf, -1, 0.0, 0.0
+        if pts.shape[0] == 1:
+            d = _np.linalg.norm(point - pts[0])
+            return d, 0, 0.0, float(radii[0]) if radii.size else 0.0
+        d_min = _np.inf
+        j_best = -1
+        t_best = 0.0
+        r_best = 0.0
+        p = point
+        p1 = pts[:-1]
+        v = vecs
+        w = p - p1
+        # Parametric projection along each segment
+        with _np.errstate(invalid='ignore', divide='ignore'):
+            t = _np.einsum('ij,ij->i', w, v) / seg_len2
+        t = _np.clip(t, 0.0, 1.0, out=t)
+        proj = p1 + (t[:, None] * v)
+        diff = p - proj
+        dists = _np.linalg.norm(diff, axis=1)
+        if dists.size > 0:
+            j = int(_np.argmin(dists))
+            d_min = float(dists[j])
+            j_best = j
+            t_best = float(t[j])
+            # Linear interpolate radius on segment
+            if radii.size >= 2:
+                r1 = float(radii[j])
+                r2 = float(radii[j+1])
+                r_best = (1.0 - t_best) * r1 + t_best * r2
+            else:
+                r_best = float(radii[0]) if radii.size else 0.0
+        return d_min, j_best, t_best, r_best
+
+    pairs = []
+    # Build a single-point PolyData once for surface checks (reused per candidate)
+    for i in range(n):
+        # Initial point of child line i
+        p0 = _np.asarray(lines[i].points[0])
+        # Evaluate against all other tubes with quick AABB prefilter
+        for m in range(n):
+            if m == i:
+                continue
+            if not _in_padded_bounds(p0, bounds[m], pad[m]):
+                continue
+            if method == 'surface':
+                # Use VTK select_enclosed_points
+                pt_poly = _pv.PolyData(p0.reshape(1, 3))
+                classified = tubes[m].select_enclosed_points(pt_poly, tolerance=0.0)
+                # PyVista may name the array 'SelectedPoints' or 'Selected'
+                if 'SelectedPoints' in classified.point_data:
+                    inside = bool(int(classified.point_data['SelectedPoints'][0]))
+                elif 'Selected' in classified.point_data:
+                    inside = bool(int(classified.point_data['Selected'][0]))
+                else:
+                    inside = False
+                if inside:
+                    pairs.append((i, m))
+            else:
+                # Centerline projection test
+                d_min, j_best, t_best, r_interp = _closest_distance_to_polyline(
+                    p0, line_points[m], line_seg_vecs[m], line_seg_len2[m], line_radii[m]
+                )
+                # Tolerance scaled by parent's median segment length
+                eps = eps_factor * (line_med_seg[m] if line_med_seg[m] > 0 else 1.0)
+                if d_min <= (r_interp + eps):
+                    pairs.append((i, m))
+
+    return pairs
 
 def get_longest_path(data, seed_edge):
     dig = True
@@ -405,18 +567,208 @@ def build_watertight_solid(tree, cap_resolution=40):
     tubes = generate_tubes(lines)
     model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
     # Remove poor quality elements and repair the mesh.
-    cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
+    # cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
     keep = cell_quality.cell_data["CellQuality"] > 0.1
     if not numpy.all(keep):
         print("Removing poor quality elements from the mesh.")
-        keep = numpy.argwhere(keep).flatten()
-        non_manifold_model = model.extract_cells(keep)
-        non_manifold_model = non_manifold_model.extract_surface()
-        fix = pymeshfix.MeshFix(non_manifold_model)
+        #keep = numpy.argwhere(keep).flatten()
+        #non_manifold_model = model.extract_cells(keep)
+        #non_manifold_model = non_manifold_model.extract_surface()
+        fix = pymeshfix.MeshFix(model) # non_manifold_model)
         fix.repair(verbose=True)
         hsize = model.cell_data["hsize"][0] #hsize
         model = fix.mesh.compute_normals(auto_orient_normals=True)
         #model.hsize = hsize
+        model.cell_data['hsize'] = 0
+    model.cell_data['hsize'][0] = hsize
+    return model
+
+
+def union_tubes_balanced(tubes, lines, cap_resolution=40, method='centerline', engine='manifold', fix_mesh=True):
+    """
+    Perform topology-aware, size-balanced boolean unions over a set of vessel tubes.
+
+    The function:
+    - Detects unionable parent/child pairs using `find_unionable_pairs` (child's
+      initial point inside parent's tube).
+    - Schedules unions with a min-heap keyed by current mesh sizes so that the
+      smallest unions occur first, keeping intermediates compact.
+    - Updates the graph as components merge until each connected component is
+      reduced to a single mesh.
+    - Applies a final remesh and normal computation once on the result.
+
+    Parameters
+    ----------
+    tubes : list[pyvista.PolyData]
+        Per-vessel tube surface meshes (triangulated).
+    lines : list[pyvista.PolyData]
+        Per-vessel polylines carrying point-data array 'radius'.
+    cap_resolution : int, optional
+        Controls target edge size for final remeshing via: hsiz ≈ 2π·min_radius / cap_resolution.
+        Default 40.
+    method : {'centerline','surface'}, optional
+        Containment test used by `find_unionable_pairs`. Default 'centerline' (fast).
+    engine : str, optional
+        Boolean engine forwarded to trimesh via `boolean`. Default 'manifold'.
+    fix_mesh : bool, optional
+        Whether to run mesh fixing during boolean operations. Forwarded to `boolean`.
+        Default True.
+
+    Returns
+    -------
+    model : pyvista.PolyData
+        The watertight surface representing the union of all tubes, remeshed once
+        at a global target size derived from cap_resolution.
+    """
+    import heapq
+    import numpy as _np
+    import pyvista as _pv
+
+    n = len(tubes)
+    if n == 0:
+        return _pv.PolyData()
+    if len(lines) != n:
+        raise ValueError("lines and tubes must have the same length")
+
+    # Determine all unionable pairs (child, parent)
+    pairs = find_unionable_pairs(lines, tubes, method=method)
+    if len(pairs) == 0:
+        # Fallback: sequential union as last resort
+        return union_tubes(tubes, lines, cap_resolution=cap_resolution)
+
+    # Disjoint-set (union-find)
+    parent = list(range(n))
+    rank = [0] * n
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return ra
+        if rank[ra] < rank[rb]:
+            parent[ra] = rb
+            return rb
+        elif rank[ra] > rank[rb]:
+            parent[rb] = ra
+            return ra
+        else:
+            parent[rb] = ra
+            rank[ra] += 1
+            return ra
+
+    # Component meshes and sizes
+    comp_mesh = {i: tubes[i] for i in range(n)}
+    comp_size = {i: int(tubes[i].n_cells) for i in range(n)}
+
+    # Build neighbor sets from pairs (treat undirected for scheduling)
+    neighbors = {i: set() for i in range(n)}
+    for i, m in pairs:
+        if i == m:
+            continue
+        neighbors[i].add(m)
+        neighbors[m].add(i)
+
+    # Min-heap of candidate unions keyed by sum of component sizes
+    heap = []
+    for i, m in pairs:
+        ra, rb = find(i), find(m)
+        if ra == rb:
+            continue
+        key = comp_size[ra] + comp_size[rb]
+        heapq.heappush(heap, (key, ra, rb))
+
+    # Compute total planned unions for progress: sum(|C|-1) over connected components
+    # Build node set from pairs and traverse via neighbors
+    nodes = set()
+    for i, m in pairs:
+        nodes.add(i); nodes.add(m)
+    visited = set()
+    total_merges = 0
+    for v in nodes:
+        if v in visited:
+            continue
+        # BFS/DFS over neighbor graph
+        stack = [v]
+        comp_count = 0
+        while stack:
+            u = stack.pop()
+            if u in visited:
+                continue
+            visited.add(u)
+            comp_count += 1
+            for w in neighbors.get(u, ()):  # undirected traversal
+                if w not in visited:
+                    stack.append(w)
+        if comp_count > 0:
+            total_merges += max(comp_count - 1, 0)
+
+    pbar = tqdm(total=total_merges, desc='Union tubes (balanced)', unit='union', leave=False)
+
+    # Iteratively union smallest available pairs until components are reduced
+    while heap:
+        _, a0, b0 = heapq.heappop(heap)
+        ra, rb = find(a0), find(b0)
+        if ra == rb:
+            continue  # stale
+        # Perform boolean union between current component meshes
+        try:
+            merged = boolean(comp_mesh[ra], comp_mesh[rb], operation='union', fix_mesh=fix_mesh, engine=engine)
+        except Exception as e:
+            # If an error occurs, try with fix_mesh=True as a fallback
+            if not fix_mesh:
+                merged = boolean(comp_mesh[ra], comp_mesh[rb], operation='union', fix_mesh=True, engine=engine)
+            else:
+                raise e
+        r = union(ra, rb)
+        comp_mesh[r] = merged
+        comp_size[r] = int(merged.n_cells)
+        pbar.update(1)
+
+        # Merge neighbor sets and push new edges against r
+        na = neighbors.get(ra, set())
+        nb = neighbors.get(rb, set())
+        merged_neighbors = set()
+        for c in (na | nb):
+            rc = find(c)
+            if rc != r:
+                merged_neighbors.add(rc)
+        neighbors[r] = merged_neighbors
+
+        for rc in merged_neighbors:
+            key = comp_size[r] + comp_size[find(rc)]
+            heapq.heappush(heap, (key, r, rc))
+
+    pbar.close()
+
+    # Collect final components (roots)
+    roots = {}
+    for i in range(n):
+        ri = find(i)
+        roots[ri] = comp_mesh[ri]
+
+    # Merge disjoint components without boolean (safe if disjoint)
+    if len(roots) == 1:
+        model = next(iter(roots.values()))
+    else:
+        model = _pv.merge(list(roots.values()))
+
+    # Final remesh once using a global target size derived from min radius
+    try:
+        min_r = min(float(_np.min(lines[i]['radius'])) for i in range(len(lines)) if lines[i].n_points > 0)
+        hsize = (2.0 * _np.pi * min_r) / float(cap_resolution)
+    except Exception:
+        # Fallback heuristic if radii missing
+        hsize = None
+
+    if hsize is not None and hsize > 0:
+        model = remesh_surface(model, hsiz=hsize)
+    model = model.compute_normals(auto_orient_normals=True)
+    if hsize is not None:
         model.cell_data['hsize'] = 0
         model.cell_data['hsize'][0] = hsize
     return model
