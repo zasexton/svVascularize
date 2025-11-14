@@ -459,6 +459,14 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
         raise NotImplementedError("Operating system not supported.")
     devnull = open(os.devnull, 'w')
     executable_list = [_EXE_, "tmp.mesh"]
+    # If caller prepared a sizing function file in the working directory,
+    # detect and pass it through to MMG.
+    sol_path = None
+    try:
+        if os.path.exists("in.sol"):
+            sol_path = "in.sol"
+    except Exception:
+        sol_path = None
     if ar is not None:
         executable_list.extend(["-ar", str(ar)])
     if hausd is not None:
@@ -487,6 +495,8 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
         executable_list.extend(["-optim"])
     if rn is not None:
         executable_list.extend(["-rn", str(rn)])
+    if sol_path:
+        executable_list.extend(["-sol", sol_path])
     if verbosity == 0:
         try:
             subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
@@ -522,6 +532,12 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
     os.remove("tmp.mesh")
     os.remove("tmp.o.sol")
     os.remove("tmp.o.mesh")
+    # Clean up sizing file if provided
+    if sol_path and os.path.exists(sol_path):
+        try:
+            os.remove(sol_path)
+        except Exception:
+            pass
     return remeshed_surface
 
 

@@ -251,34 +251,44 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
 
                         <div class="api-method">
                             <div class="api-method-signature">
-                                <code>create(**kwargs)</code>
+                                <code>create(min_patch_size=10, max_patch_size=20, overlap=0.2, feature_angle=30)</code>
                             </div>
                             <p>Create patches for the domain. This is the first step in building the implicit function.</p>
                             <div class="api-method-params">
                                 <h4>Parameters</h4>
                                 <ul>
-                                    <li><code>**kwargs</code>: Parameters passed to the allocation algorithm</li>
+                                    <li><code>min_patch_size</code> (int, default=10): Minimum number of points required to form a patch.</li>
+                                    <li><code>max_patch_size</code> (int, default=20): Target maximum number of points per patch (nearest-neighbor window).</li>
+                                    <li><code>overlap</code> (float, default=0.2): Fraction [0, 1] controlling allowed overlap of points between patches.</li>
+                                    <li><code>feature_angle</code> (float, default=30): Maximum angle in degrees between point-wise normal vectors for inclusion in the same patch (used only when normals are provided).</li>
                                 </ul>
                             </div>
                         </div>
 
                         <div class="api-method">
                             <div class="api-method-signature">
-                                <code>solve(**kwargs)</code>
+                                <code>solve(method="L-BFGS-B", precision=9)</code>
                             </div>
                             <p>Solve the individual patch interpolation problems prior to blending.</p>
+                            <div class="api-method-params">
+                                <h4>Parameters</h4>
+                                <ul>
+                                    <li><code>method</code> (str, default="L-BFGS-B"): Optimization method for SciPy's minimize (see Patch.solve).</li>
+                                    <li><code>precision</code> (int, default=9): Decimal places to round the solved constants.</li>
+                                </ul>
+                            </div>
                         </div>
 
                         <div class="api-method">
                             <div class="api-method-signature">
-                                <code>build(**kwargs)</code>
+                                <code>build(resolution=25, skip_boundary=False)</code>
                             </div>
-                            <p>Build the implicit function describing the domain.</p>
+                            <p>Build the implicit function describing the domain and optionally extract boundary/mesh artifacts.</p>
                             <div class="api-method-params">
                                 <h4>Parameters</h4>
                                 <ul>
-                                    <li><code>resolution</code> (int, default=25): Grid resolution for boundary extraction</li>
-                                    <li><code>skip_boundary</code> (bool, default=False): Skip boundary generation</li>
+                                    <li><code>resolution</code> (int, default=25): Grid resolution for boundary extraction.</li>
+                                    <li><code>skip_boundary</code> (bool, default=False): If true, only assemble fast-evaluation structures and skip boundary and interior mesh generation.</li>
                                 </ul>
                             </div>
                         </div>
@@ -477,6 +487,34 @@ domain.build(resolution=30)
 print(f"Domain volume: {domain.volume:.2f}")
 print(f"Domain surface area: {domain.area:.2f}")
 print(f"Convexity: {domain.convexity:.3f}")</code></pre>
+                    </div>
+
+                    <div class="api-example">
+                        <h3>Customized Patch Allocation</h3>
+                        <pre data-copy><code class="language-python">import pyvista as pv
+from svv.domain.domain import Domain
+
+mesh = pv.read('vessel.stl')
+domain = Domain(mesh)
+
+# Tune patch allocation for dense data with noisy normals
+domain.create(
+    min_patch_size=8,      # allow smaller patches in sparse areas
+    max_patch_size=32,     # include more neighbors in dense regions
+    overlap=0.35,          # increase overlap for smoother blending
+    feature_angle=45       # be more tolerant to normal variation/noise
+)
+domain.solve()
+domain.build(resolution=30)</code></pre>
+                        <div class="callout tip">
+                            <strong>When to adjust defaults:</strong>
+                            <ul>
+                                <li><em>Dense point clouds:</em> increase <code>max_patch_size</code> to capture local context and reduce edge artifacts.</li>
+                                <li><em>Sparse/heterogeneous sampling:</em> decrease <code>min_patch_size</code> so isolated regions still form patches.</li>
+                                <li><em>Noisy or inconsistent normals:</em> raise <code>feature_angle</code> to admit neighbors with larger normal differences; lower it to preserve sharp features.</li>
+                                <li><em>Smoother blends vs. speed:</em> higher <code>overlap</code> yields smoother transitions across patches but increases compute.</li>
+                            </ul>
+                        </div>
                     </div>
 
                     <div class="api-example">
