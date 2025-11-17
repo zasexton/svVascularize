@@ -9,6 +9,8 @@ usearch
 scikit-image
 tetgen
 trimesh[all]
+meshio
+open3d
 pyvista>=0.44.2
 scikit-learn
 tqdm
