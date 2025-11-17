@@ -151,7 +151,26 @@ jobs:
           link="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/basic-smoke-test.yml?query=branch%3A${GITHUB_REF_NAME}"
           new_badge="[![SVV smoke test](${badge_url})](${link})"
 
-          perl -0pi -e "s/<!-- smoke-test-badge -->.*?<!-- \\/smoke-test-badge -->/<!-- smoke-test-badge -->${new_badge}<!-- \\/smoke-test-badge -->/s" README.md
+          BADGE_URL="${badge_url}" BADGE_LINK="${link}" BADGE_MD="${new_badge}" python - << 'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          readme_path = Path("README.md")
+          text = readme_path.read_text(encoding="utf-8")
+
+          badge_url = os.environ["BADGE_URL"]
+          link = os.environ["BADGE_LINK"]
+          badge_md = os.environ["BADGE_MD"]
+
+          pattern = re.compile(r"<!-- smoke-test-badge -->.*?<!-- /smoke-test-badge -->", re.S)
+          replacement = f"<!-- smoke-test-badge -->\n{badge_md}\n<!-- /smoke-test-badge -->"
+          new_text, n = pattern.subn(replacement, text)
+          if n == 0:
+              raise SystemExit("smoke-test-badge markers not found in README.md")
+
+          readme_path.write_text(new_text, encoding="utf-8")
+          PY
 
       - name: Commit README badge update
         run: |
