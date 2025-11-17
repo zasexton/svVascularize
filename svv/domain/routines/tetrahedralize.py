@@ -204,10 +204,11 @@ def tetrahedralize(surface: pv.PolyData,
                 f"STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}"
             )
 
-        # Load results
-        data = np.load(out_path)
-        nodes = data["nodes"]
-        elems = data["elems"]
+        # Load results and ensure the file handle is closed before the
+        # temporary directory is cleaned up (important on Windows).
+        with np.load(out_path) as data:
+            nodes = data["nodes"]
+            elems = data["elems"]
 
     if elems.min() == 1:
         elems = elems - 1
