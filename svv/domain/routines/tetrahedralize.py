@@ -86,7 +86,19 @@ def tetrahedralize(surface: pv.PolyData,
     """
     tet_kwargs.setdefault("verbose", 0)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # On Windows, `tempfile` honors TMPDIR, which may be set to a POSIX-style
+    # path such as '/tmp' and is not a valid directory there. Prefer the
+    # standard TEMP/TMP locations when available to avoid spurious
+    # "[WinError 267] The directory name is invalid" errors.
+    tmp_root = None
+    if os.name == "nt":
+        for env_var in ("TEMP", "TMP"):
+            candidate = os.environ.get(env_var)
+            if candidate and os.path.isdir(candidate):
+                tmp_root = candidate
+                break
+
+    with tempfile.TemporaryDirectory(dir=tmp_root) as tmpdir:
         surface_path = os.path.join(tmpdir, "surface.vtp")
         out_path = os.path.join(tmpdir, "tet.npz")
         config_path = os.path.join(tmpdir, "config.json")

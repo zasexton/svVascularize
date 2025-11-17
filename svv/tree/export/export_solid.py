@@ -574,7 +574,17 @@ def _tube_worker(args):
     idx, pts, rad, hsize, radius_based = args
     old_cwd = os.getcwd()
     # Isolate MMG temp files to avoid collisions between processes
-    with tempfile.TemporaryDirectory(prefix="svv_remesh_") as tmpdir:
+    # As in the tetrahedralizer, prefer TEMP/TMP on Windows to avoid
+    # issues when TMPDIR is set to an invalid POSIX-style path.
+    tmp_root = None
+    if os.name == "nt":
+        for env_var in ("TEMP", "TMP"):
+            candidate = os.environ.get(env_var)
+            if candidate and os.path.isdir(candidate):
+                tmp_root = candidate
+                break
+
+    with tempfile.TemporaryDirectory(prefix="svv_remesh_", dir=tmp_root) as tmpdir:
         try:
             os.chdir(tmpdir)
             poly = polyline_from_points(numpy.asarray(pts), numpy.asarray(rad))
