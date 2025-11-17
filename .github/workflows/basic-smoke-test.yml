@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     defaults:
       run:
         shell: bash
@@ -106,15 +106,34 @@ jobs:
             os="${line%%=*}"
             status="${line#*=}"
 
-            result="fail"
-            if [ "$status" = "success" ]; then
-              result="ok"
-            fi
-
             case "$os" in
-              ubuntu-latest) linux="$result" ;;
-              macos-latest) macos="$result" ;;
-              windows-latest) windows="$result" ;;
+              ubuntu-latest)
+                if [ "$status" = "success" ]; then
+                  if [ "$linux" = "unknown" ]; then
+                    linux="ok"
+                  fi
+                else
+                  linux="fail"
+                fi
+                ;;
+              macos-latest)
+                if [ "$status" = "success" ]; then
+                  if [ "$macos" = "unknown" ]; then
+                    macos="ok"
+                  fi
+                else
+                  macos="fail"
+                fi
+                ;;
+              windows-latest)
+                if [ "$status" = "success" ]; then
+                  if [ "$windows" = "unknown" ]; then
+                    windows="ok"
+                  fi
+                else
+                  windows="fail"
+                fi
+                ;;
             esac
           done
 
@@ -145,4 +164,3 @@ jobs:
             git commit -m "Update smoke test status badge"
             git push
           fi
-
