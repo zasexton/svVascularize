@@ -629,6 +629,21 @@ def generate_tubes_parallel(polylines, hsize=None, processes=None, chunksize=1, 
     if n == 0:
         return []
 
+    # Optional sequential fallback, useful on environments where
+    # multiprocessing with the 'spawn' context is problematic
+    # (e.g., inline scripts on Windows such as `python - <<` in CI).
+    disable_env = os.environ.get("SVV_DISABLE_TUBE_PARALLEL", "")
+    disable_parallel = disable_env.strip().lower() in {"1", "true", "yes", "on"}
+    if disable_parallel:
+        tubes = []
+        iterable = polylines
+        if show_progress:
+            iterable = tqdm(iterable, total=n, desc='Generate tubes ', unit='tube', leave=False)
+        for pl in iterable:
+            tube = generate_tube(pl, hsize=hsize, radius_based=radius_based)
+            tubes.append(tube)
+        return tubes
+
     # Serialize inputs (avoid sending VTK objects across processes)
     tasks = []
     for i, pl in enumerate(polylines):

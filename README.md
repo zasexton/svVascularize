@@ -8,7 +8,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)]()
 [![Docs](https://img.shields.io/badge/docs-gh--pages-brightgreen)](https://simvascular.github.io/svVascularize/)
 <!-- smoke-test-badge -->
-[![SVV smoke test](https://img.shields.io/badge/svv_smoke-not_run-lightgrey)](https://github.com/SimVascular/svVascularize/actions/workflows/basic-smoke-test.yml?query=branch%3Amain)
+[![SVV passing](https://img.shields.io/badge/svv_passing-not_run-lightgrey)](https://github.com/SimVascular/svVascularize/actions/workflows/basic-smoke-test.yml?query=branch%3Amain)
 <!-- /smoke-test-badge -->
 
 <p align="left">

@@ -39,6 +39,8 @@ jobs:
           pip install .
 
       - name: Run basic smoke test
+        env:
+          SVV_DISABLE_TUBE_PARALLEL: "1"
         run: |
           python - << 'PY'
           import pyvista as pv
@@ -147,9 +149,9 @@ jobs:
             color="lightgrey"
           fi
 
-          badge_url="https://img.shields.io/badge/svv_smoke-${label}-${color}"
+          badge_url="https://img.shields.io/badge/svv_passing-${label}-${color}"
           link="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/basic-smoke-test.yml?query=branch%3A${GITHUB_REF_NAME}"
-          new_badge="[![SVV smoke test](${badge_url})](${link})"
+          new_badge="[![SVV passing](${badge_url})](${link})"
 
           BADGE_URL="${badge_url}" BADGE_LINK="${link}" BADGE_MD="${new_badge}" python - << 'PY'
           import os
