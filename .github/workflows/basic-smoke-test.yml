@@ -39,28 +39,8 @@ jobs:
           pip install .
 
       - name: Run basic smoke test
-        env:
-          SVV_DISABLE_TUBE_PARALLEL: "1"
         run: |
-          python - << 'PY'
-          import pyvista as pv
-          from svv.domain.domain import Domain
-          from svv.tree.tree import Tree
-          from svv.simulation.simulation import Simulation
-
-          cube = Domain(pv.Cube())
-          cube.create()
-          cube.solve()
-          cube.build()
-
-          t = Tree()
-          t.set_domain(cube)
-          t.set_root()
-          t.n_add(10)
-
-          sim = Simulation(t)
-          sim.build_meshes(fluid=True, tissue=True, boundary_layer=False)
-          PY
+          python .github/scripts/basic_smoke_test.py
 
       - name: Record job status
         if: always()
