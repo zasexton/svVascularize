@@ -26,6 +26,32 @@ def format_elapsed(seconds: float) -> str:
     else:
         return f"{m:02d}:{s:02d}"
 
+
+def _spinner_cycle():
+    """
+    Return a spinner cycle that is safe for the current stdout encoding.
+
+    On Windows runners the default code page may not support the braille
+    characters used by common Unicode spinners, which can raise a
+    UnicodeEncodeError when writing to sys.stdout. To avoid this, we
+    fall back to a simple ASCII spinner if the encoding cannot handle
+    the Unicode characters.
+    """
+    ascii_spinner = ["-", "\\", "|", "/"]
+
+    encoding = getattr(sys.stdout, "encoding", None)
+    if not encoding:
+        return cycle(ascii_spinner)
+
+    fancy_spinner = ["⠋", "⠙", "⠹", "⠸", "⠼",
+                     "⠴", "⠦", "⠧", "⠇", "⠏"]
+    try:
+        "".join(fancy_spinner).encode(encoding)
+    except Exception:
+        return cycle(ascii_spinner)
+
+    return cycle(fancy_spinner)
+
 def triangulate(curve, verbose=False, **kwargs):
     """
     Triangulate a curve using VTK.
@@ -124,8 +150,7 @@ def tetrahedralize(surface: pv.PolyData,
             text=True,   # decode to strings
         )
 
-        spinner = cycle(["⠋", "⠙", "⠹", "⠸", "⠼",
-                         "⠴", "⠦", "⠧", "⠇", "⠏"])
+        spinner = _spinner_cycle()
         start_time = time.time()
 
         # Print label once
