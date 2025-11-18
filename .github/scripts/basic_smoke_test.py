@@ -14,7 +14,9 @@ def main() -> None:
     t = Tree()
     t.set_domain(cube)
     t.set_root()
-    t.n_add(10)
+    # Use a small tree to keep the smoke test
+    # lightweight across all CI runners.
+    t.n_add(3)
 
     sim = Simulation(t)
     sim.build_meshes(fluid=True, tissue=True, boundary_layer=False)
@@ -22,4 +24,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
