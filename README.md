@@ -31,4 +31,5 @@ The package is published on PyPI as `svv`:
 pip install svv
 ```
 
-On clusters / HPC systems (for example Stanford Sherlock), use a recent Python (3.9–3.12) and `pip`, and install into a clean virtual environment or user site-packages. The runtime dependencies now require `numpy>=1.26`, which has pre-built wheels for Python 3.12 on standard x86_64 Linux, so `pip install svv` should no longer try to build NumPy (or SciPy) from source on these systems.
+On clusters / HPC systems (for example Stanford Sherlock), use a recent Python (3.9–3.12) and `pip`, and install into a 
+clean virtual environment or user site-packages. 
