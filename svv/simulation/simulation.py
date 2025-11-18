@@ -105,7 +105,7 @@ class Simulation(object):
                     fluid_volume_mesh = grid
                 except:
                     fix = pymeshfix.MeshFix(fluid_surface_mesh)
-                    fix.repair(verbose=True)
+                    fix.repair()
                     #tet_fluid.make_manifold(verbose=True)
                     #tet_fluid.tetrahedralize(minratio=minratio, mindihedral=10.0, steinerleft=-1, order=order, nobisect=True, verbose=2, switches='M')
                     grid, node, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
@@ -217,7 +217,7 @@ class Simulation(object):
                     if fluid:
                         print('Mesh interface may be corrupted after mesh fixing for tetrahedralization.')
                     fix = pymeshfix.MeshFix(tissue_domain)
-                    fix.repair(verbose=True)
+                    fix.repair()
                     #tet_tissue.make_manifold(verbose=True)
                     #tet_tissue.tetrahedralize(minratio=minratio, order=order)
                     grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
@@ -249,7 +249,7 @@ class Simulation(object):
                             try:
                                 #tet_fluid.make_manifold(verbose=True)
                                 fix = pymeshfix.MeshFix(fluid_surface_mesh)
-                                fix.repair(verbose=True)
+                                fix.repair()
                                 grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                                 fluid_volume_mesh = grid
                             except:
@@ -287,7 +287,7 @@ class Simulation(object):
                             try:
                                 # tet_tissue.make_manifold(verbose=True)
                                 fix = pymeshfix.MeshFix(fix.mesh)
-                                fix.repair(verbose=True)
+                                fix.repair()
                                 grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                                 tissue_volume_mesh = grid
                             except:
@@ -321,7 +321,7 @@ class Simulation(object):
                         except:
                             #tet_fluid.make_manifold(verbose=True)
                             fix = pymeshfix.MeshFix(fluid_surface)
-                            fix.repair(verbose=True)
+                            fix.repair()
                             grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                             fluid_volume = grid
                         if isinstance(fluid_volume, type(None)):
@@ -419,7 +419,7 @@ class Simulation(object):
                 except:
                     #tet_tissue.make_manifold(verbose=True)
                     fix = pymeshfix.MeshFix(tissue_domain)
-                    fix.repair(verbose=True)
+                    fix.repair()
                     grid, nodes, elems = tetrahedralize(fix.mesh, switches='pq{}/{}MVYSJ'.format(minratio, mindihedral))
                     tissue_volume_mesh = grid
                 if isinstance(tissue_volume_mesh, type(None)):
