@@ -84,6 +84,12 @@ jobs:
           macos="unknown"
           windows="unknown"
 
+          # If no smoke-status artifacts were downloaded, skip badge update.
+          if ! compgen -G "smoke-status/*/*" > /dev/null; then
+            echo "No smoke-status artifacts found; skipping badge update."
+            exit 0
+          fi
+
           # Each artifact directory contains a single smoke-status.txt file.
           for f in smoke-status/*/*; do
             line=$(cat "$f")
