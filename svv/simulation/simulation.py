@@ -25,7 +25,8 @@ from svv.domain.routines.tetrahedralize import tetrahedralize
 
 # Defer 1D/0D ROM imports to their respective methods to avoid importing
 # vtk-heavy modules during Simulation class import.
-
+from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation as export_tree_0d_simulation
+from svv.simulation.fluid.rom.zero_d.zerod_forest import export_0d_simulation as export_forest_0d_simulation
 
 class Simulation(object):
     def __init__(self, synthetic_object, name=None, directory=None):
@@ -768,14 +769,16 @@ class Simulation(object):
     def write_1d_fluid_simulation(self, *args):
         pass
 
-    def construct_0d_fluid_equation(self, *args):
-        pass
-
     def construct_0d_fluid_simulation(self, *args):
         pass
 
-    def write_0d_fluid_simulation(self, *args):
-        pass
+    def write_0d_fluid_simulation(self, *args, **kwargs):
+        if isinstance(self.synthetic_object, svv.tree.tree.Tree):
+            export_tree_0d_simulation(self.synthetic_object, kwargs)
+        elif isinstance(self.synthetic_object, svv.forest.forest.Forest) and not isinstance(self.synthetic_object.connections, type(None)):
+            for idx in range(len(self.synthetic_object.networks)):
+                # args are the network_id and the inlet selection
+                export_forest_0d_simulation(self.synthetic_object, args, kwargs)
 
     def construct_3d_tissue_perfusion_equation(self, *args):
         pass

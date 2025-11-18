@@ -74,7 +74,6 @@ jobs:
         with:
           pattern: smoke-status-*
           path: smoke-status
-          merge-multiple: true
 
       - name: Update README smoke test badge
         run: |
@@ -85,13 +84,13 @@ jobs:
           windows="unknown"
 
           # If no smoke-status artifacts were downloaded, skip badge update.
-          if ! compgen -G "smoke-status/*/*" > /dev/null; then
+          if ! compgen -G "smoke-status/*/smoke-status.txt" > /dev/null; then
             echo "No smoke-status artifacts found; skipping badge update."
             exit 0
           fi
 
           # Each artifact directory contains a single smoke-status.txt file.
-          for f in smoke-status/*/*; do
+          for f in smoke-status/*/smoke-status.txt; do
             line=$(cat "$f")
             os="${line%%=*}"
             status="${line#*=}"
