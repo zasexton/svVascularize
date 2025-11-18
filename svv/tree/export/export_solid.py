@@ -730,7 +730,7 @@ def build_watertight_solid(tree, cap_resolution=40):
     xyz, r, _, _, branches, _ = get_interpolated_sv_data(tree.data)
     lines = generate_polylines(xyz, r)
     tubes = generate_tubes_parallel(lines, radius_based=True)
-    model = union_tubes_balanced(tubes, lines, cap_resolution=cap_resolution)
+    model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
     # Remove poor quality elements and repair the mesh.
     cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
     keep = cell_quality.cell_data["CellQuality"] > 0.1
