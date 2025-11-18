@@ -52,15 +52,32 @@ def boolean(pyvista_object_1, pyvista_object_2, operation='union', fix_mesh=True
         else:
             raise ValueError("Unsupported boolean operation.")
 
+    result_tm = None
     try:
-        result = _apply(operation, engine)
-    except KeyError:
-        # If the requested engine (e.g., 'manifold') is not registered
-        # in trimesh.boolean._engines, fall back to trimesh's default
-        # engine selection by omitting the explicit engine argument.
-        result = _apply(operation, eng=None)
+        try:
+            result_tm = _apply(operation, engine)
+        except KeyError:
+            # If the requested engine (e.g., 'manifold') is not registered
+            # in trimesh.boolean._engines, fall back to trimesh's default
+            # engine selection by omitting the explicit engine argument.
+            result_tm = _apply(operation, eng=None)
+    except Exception:
+        result_tm = None
 
-    result = convert_to_pyvista(result)
+    if result_tm is not None:
+        result = convert_to_pyvista(result_tm)
+    else:
+        # Fallback to PyVista/VTK boolean operations when no trimesh
+        # boolean backend is available on the current platform.
+        if operation == 'union':
+            result = pyvista_object_1.boolean_union(pyvista_object_2)
+        elif operation == 'intersection':
+            result = pyvista_object_1.boolean_intersection(pyvista_object_2)
+        elif operation == 'difference':
+            result = pyvista_object_1.boolean_difference(pyvista_object_2)
+        else:
+            raise ValueError("Unsupported boolean operation.")
+
     if not result.is_manifold and fix_mesh:
         fix = pymeshfix.MeshFix(result)
         fix.repair(verbose=False)
