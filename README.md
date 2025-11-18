@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20|%20linux%20|%20windows-blue)
 ![Latest Release](https://img.shields.io/github/v/release/SimVascular/svVascularize?label=latest)
 [![codecov](https://codecov.io/github/SimVascular/svVascularize/graph/badge.svg)](https://codecov.io/github/SimVascular/svVascularize)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)]()
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)](https://doi.org/10.5281/zenodo.15151168)
 [![Docs](https://img.shields.io/badge/docs-gh--pages-brightgreen)](https://simvascular.github.io/svVascularize/)
 <!-- smoke-test-badge -->
 [![SVV passing](https://img.shields.io/badge/svv_passing-not_run-lightgrey)](https://github.com/SimVascular/svVascularize/actions/workflows/basic-smoke-test.yml?query=branch%3Amain)
