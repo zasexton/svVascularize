@@ -7,6 +7,9 @@
 [![codecov](https://codecov.io/github/SimVascular/svVascularize/graph/badge.svg)](https://codecov.io/github/SimVascular/svVascularize)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)]()
 [![Docs](https://img.shields.io/badge/docs-gh--pages-brightgreen)](https://simvascular.github.io/svVascularize/)
+<!-- smoke-test-badge -->
+[![SVV passing](https://img.shields.io/badge/svv_passing-not_run-lightgrey)](https://github.com/SimVascular/svVascularize/actions/workflows/basic-smoke-test.yml?query=branch%3Amain)
+<!-- /smoke-test-badge -->
 
 <p align="left">
 The svVascularize (svv) is an open-source API for automated vascular generation and multi-fidelity hemodynamic simulation
@@ -19,3 +22,14 @@ biomanufacturing applications or computational fluid dynamic (CFD) analysis.
 * **Website:** https://simvascular.github.io/svVascularize/
 * **PyPi:** https://pypi.org/project/svv/
 * **Source code:** https://github.com/SimVascular/svVascularize
+
+## Installation
+
+The package is published on PyPI as `svv`:
+
+```bash
+pip install svv
+```
+
+On clusters / HPC systems (for example Stanford Sherlock), use a recent Python (3.9–3.12) and `pip`, and install into a 
+clean virtual environment or user site-packages. 

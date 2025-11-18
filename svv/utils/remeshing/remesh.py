@@ -4,6 +4,7 @@ import os
 import stat
 import platform
 import subprocess
+import errno
 import pyvista as pv
 import pymeshfix
 import meshio
@@ -500,13 +501,63 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
     if verbosity == 0:
         try:
             subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except:
+        except OSError as e:
+            # Exec format error means the bundled MMGS binary is not
+            # compatible with this platform (e.g., wrong architecture).
+            # Fall back to returning the input surface (optionally
+            # auto-fixed) so callers can still proceed.
+            if e.errno == errno.ENOEXEC:
+                devnull.close()
+                for fname in ("tmp.mesh", "tmp.o.sol", "tmp.o.mesh"):
+                    try:
+                        os.remove(fname)
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+                if sol_path and os.path.exists(sol_path):
+                    try:
+                        os.remove(sol_path)
+                    except Exception:
+                        pass
+                remeshed_surface = pv_polydata_object
+                if autofix:
+                    fix = pymeshfix.MeshFix(remeshed_surface)
+                    fix.repair(verbose=False)
+                    remeshed_surface = fix.mesh
+                return remeshed_surface
+            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
+        except Exception:
             os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
     else:
         try:
             subprocess.check_call(executable_list)
-        except:
+        except OSError as e:
+            if e.errno == errno.ENOEXEC:
+                devnull.close()
+                for fname in ("tmp.mesh", "tmp.o.sol", "tmp.o.mesh"):
+                    try:
+                        os.remove(fname)
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+                if sol_path and os.path.exists(sol_path):
+                    try:
+                        os.remove(sol_path)
+                    except Exception:
+                        pass
+                remeshed_surface = pv_polydata_object
+                if autofix:
+                    fix = pymeshfix.MeshFix(remeshed_surface)
+                    fix.repair(verbose=True)
+                    remeshed_surface = fix.mesh
+                return remeshed_surface
+            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            subprocess.check_call(executable_list)
+        except Exception:
             os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             subprocess.check_call(executable_list)
     clean_medit("tmp.o.mesh")

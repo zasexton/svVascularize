@@ -574,7 +574,17 @@ def _tube_worker(args):
     idx, pts, rad, hsize, radius_based = args
     old_cwd = os.getcwd()
     # Isolate MMG temp files to avoid collisions between processes
-    with tempfile.TemporaryDirectory(prefix="svv_remesh_") as tmpdir:
+    # As in the tetrahedralizer, prefer TEMP/TMP on Windows to avoid
+    # issues when TMPDIR is set to an invalid POSIX-style path.
+    tmp_root = None
+    if os.name == "nt":
+        for env_var in ("TEMP", "TMP"):
+            candidate = os.environ.get(env_var)
+            if candidate and os.path.isdir(candidate):
+                tmp_root = candidate
+                break
+
+    with tempfile.TemporaryDirectory(prefix="svv_remesh_", dir=tmp_root) as tmpdir:
         try:
             os.chdir(tmpdir)
             poly = polyline_from_points(numpy.asarray(pts), numpy.asarray(rad))
@@ -618,6 +628,21 @@ def generate_tubes_parallel(polylines, hsize=None, processes=None, chunksize=1, 
     n = len(polylines)
     if n == 0:
         return []
+
+    # Optional sequential fallback, useful on environments where
+    # multiprocessing with the 'spawn' context is problematic
+    # (e.g., inline scripts on Windows such as `python - <<` in CI).
+    disable_env = os.environ.get("SVV_DISABLE_TUBE_PARALLEL", "")
+    disable_parallel = disable_env.strip().lower() in {"1", "true", "yes", "on"}
+    if disable_parallel:
+        tubes = []
+        iterable = polylines
+        if show_progress:
+            iterable = tqdm(iterable, total=n, desc='Generate tubes ', unit='tube', leave=False)
+        for pl in iterable:
+            tube = generate_tube(pl, hsize=hsize, radius_based=radius_based)
+            tubes.append(tube)
+        return tubes
 
     # Serialize inputs (avoid sending VTK objects across processes)
     tasks = []

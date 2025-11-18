@@ -402,6 +402,31 @@ def build_0d(num_cores=None):
     print(f"svZeroDSolver executables have been installed into: {install_tmp_prefix}")
 
 
+def install_igl_backend():
+    """
+    Ensure that the `igl` Python package is available so that trimesh
+    has a robust boolean backend. If `igl` is already importable this
+    is a no-op; otherwise we attempt to install it via pip.
+
+    Any installation failure is converted into a warning so that the
+    overall svv build can still succeed, but boolean operations may
+    lack the libigl-backed engine in that case.
+    """
+    try:
+        import igl  # type: ignore  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    print("Installing 'igl' for trimesh boolean backends...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "igl"])
+        print("Finished installing 'igl'.")
+    except Exception as e:
+        print(f"Warning: failed to install 'igl' ({e}). "
+              "Trimesh boolean operations may not have a robust backend.")
+
+
 class DownloadAndBuildExt(build_ext):
     def run(self):
         # Make external tool builds opt-in to avoid brittle installs and network fetches
@@ -419,6 +444,10 @@ class DownloadAndBuildExt(build_ext):
                 build_0d(num_cores=num_cores)
             except Exception as e:
                 print(f"Warning: svZeroDSolver build failed ({e}). Continuing without building solver.")
+
+        # Always ensure a trimesh/libigl backend is present for boolean operations,
+        # but do not fail the build if installation is not possible.
+        install_igl_backend()
 
         # Always proceed to build Cython extensions
         super().run()
