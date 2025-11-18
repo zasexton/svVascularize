@@ -24,7 +24,7 @@ def main() -> None:
     # For CI we only require the fluid mesh;
     # skipping the tissue mesh keeps TetGen runs lighter,
     # especially on Windows and macOS runners.
-    # sim.build_meshes(fluid=True, tissue=False, boundary_layer=False)
+    sim.build_meshes(fluid=True, tissue=False, boundary_layer=False)
 
 
 if __name__ == "__main__":
