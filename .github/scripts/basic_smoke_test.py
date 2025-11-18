@@ -13,6 +13,8 @@ def main() -> None:
 
     t = Tree()
     t.set_domain(cube)
+    t.parameters.set('root_pressure', 100)
+    t.parameters.set('terminal_pressure', 0)
     t.set_root()
     # Use a small tree to keep the smoke test
     # lightweight across all CI runners.
