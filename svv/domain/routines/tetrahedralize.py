@@ -150,50 +150,57 @@ def tetrahedralize(surface: pv.PolyData,
             text=True,   # decode to strings
         )
 
-        spinner = _spinner_cycle()
-        start_time = time.time()
+        show_spinner = sys.stdout.isatty()
+        if show_spinner:
+            spinner = _spinner_cycle()
+            start_time = time.time()
 
-        # Print label once
-        sys.stdout.write("TetGen meshing| ")
-        sys.stdout.flush()
-
-        # Live spinner loop
-        while proc.poll() is None:
-            # Compute elapsed time
-            elapsed = time.time() - start_time
-            elapsed_str = format_elapsed(elapsed)
-
-            # Build left side message
-            spin_char = next(spinner)
-            left = f"TetGen meshing| {spin_char}"
-
-            # Get terminal width (fallback if IDE doesn't report it)
-            try:
-                width = shutil.get_terminal_size(fallback=(80, 20)).columns
-            except Exception:
-                width = 80
-
-            # Compute spacing so elapsed time is right-aligned
-            # We'll always keep at least one space between left and right
-            min_gap = 1
-            total_len = len(left) + min_gap + len(elapsed_str)
-            if total_len <= width:
-                spaces = width - len(left) - len(elapsed_str)
-            else:
-                # If line is longer than terminal, don't try to be clever; just put a single space
-                spaces = min_gap
-
-            line = f"{left}{' ' * spaces}{elapsed_str}"
-
-            # '\r' to return to the start of the same line and overwrite
-            sys.stdout.write("\r" + line)
+            # Print label once
+            sys.stdout.write("TetGen meshing| ")
             sys.stdout.flush()
 
-            time.sleep(0.1)
+            # Live spinner loop
+            while proc.poll() is None:
+                # Compute elapsed time
+                elapsed = time.time() - start_time
+                elapsed_str = format_elapsed(elapsed)
 
-        # Finish line
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+                # Build left side message
+                spin_char = next(spinner)
+                left = f"TetGen meshing| {spin_char}"
+
+                # Get terminal width (fallback if IDE doesn't report it)
+                try:
+                    width = shutil.get_terminal_size(fallback=(80, 20)).columns
+                except Exception:
+                    width = 80
+
+                # Compute spacing so elapsed time is right-aligned
+                # We'll always keep at least one space between left and right
+                min_gap = 1
+                total_len = len(left) + min_gap + len(elapsed_str)
+                if total_len <= width:
+                    spaces = width - len(left) - len(elapsed_str)
+                else:
+                    # If line is longer than terminal, don't try to be clever; just put a single space
+                    spaces = min_gap
+
+                line = f"{left}{' ' * spaces}{elapsed_str}"
+
+                # '\r' to return to the start of the same line and overwrite
+                sys.stdout.write("\r" + line)
+                sys.stdout.flush()
+
+                time.sleep(0.1)
+
+            # Finish line
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        else:
+            # Non-interactive environment (e.g., CI): just wait for the
+            # worker process to finish without a live spinner to avoid
+            # any potential overhead from frequent stdout updates.
+            proc.wait()
 
         # Collect output (so the pipes don't hang)
         stdout, stderr = proc.communicate()
