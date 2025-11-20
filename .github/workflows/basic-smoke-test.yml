@@ -57,7 +57,7 @@ jobs:
           path: smoke-status.txt
 
   update-smoke-badge:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ github.actor != 'github-actions[bot]' && always() }}
     needs: build-and-test
     runs-on: ubuntu-latest
     defaults:
