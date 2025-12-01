@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/github/SimVascular/svVascularize/graph/badge.svg)](https://codecov.io/github/SimVascular/svVascularize)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15151168.svg)](https://doi.org/10.5281/zenodo.15151168)
 [![Docs](https://img.shields.io/badge/docs-gh--pages-brightgreen)](https://simvascular.github.io/svVascularize/)
-[![Telemetry](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/SimVascular/svVascularize/main/docs/badges/telemetry.json)](https://sentry.io)
+[![Telemetry](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zasexton/svVascularize/main/docs/badges/telemetry.json)](https://sentry.io)
 <!-- smoke-test-badge -->
 [![SVV passing](https://img.shields.io/badge/svv_passing-linux_fail-macos_fail-windows_fail-red)](https://github.com/zasexton/svVascularize/actions/workflows/basic-smoke-test.yml?query=branch%3Amain)
 <!-- /smoke-test-badge -->
