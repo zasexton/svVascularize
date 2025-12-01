@@ -23,6 +23,9 @@ jobs:
           BADGE_PATH: docs/badges/telemetry.json
         run: |
           set -euo pipefail
+          if grep -q "__BADGE_REPO__" README.md; then
+            sed -i "s#__BADGE_REPO__#${GITHUB_REPOSITORY}#g" README.md
+          fi
           python - <<'PY'
           import json
           import os
@@ -122,4 +125,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update telemetry badge"
-          file_pattern: docs/badges/telemetry.json
+          file_pattern: docs/badges/telemetry.json README.md
