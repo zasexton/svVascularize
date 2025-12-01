@@ -19,8 +19,8 @@ _EXCEPTHOOK_INSTALLED: bool = False
 # Sentry DSNs to be embedded in client applications, but environment variables
 # still take precedence when present.
 _DEFAULT_GUI_DSN: str = (
-    "https://bdd1bed11029e7bca85d0b0d908fa38f@"
-    "o4510450670174208.ingest.us.sentry.io/4510450673319936"
+    "https://c76b4f3a871ce81fb7d5b55df436e6fc@"
+    "o4510450670174208.ingest.us.sentry.io/4510450824577024"
 )
 
 
