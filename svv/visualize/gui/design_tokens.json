@@ -1,0 +1,157 @@
+{
+  "name": "svVascularize CAD Theme",
+  "version": "3.0.0",
+  "description": "FreeCAD-inspired dark theme with WCAG AA compliance for professional CAD applications",
+  "color": {
+    "background": {
+      "primary": "#1E1E1E",
+      "secondary": "#252526",
+      "tertiary": "#2D2D2D",
+      "surface": "#333333",
+      "elevated": "#3C3C3C"
+    },
+    "text": {
+      "primary": "#CCCCCC",
+      "secondary": "#8C8C8C",
+      "accent": "#569CD6",
+      "disabled": "#6B6B6B",
+      "inverse": "#1E1E1E",
+      "heading": "#FFFFFF"
+    },
+    "action": {
+      "primary": "#0078D4",
+      "primary-hover": "#1C8AE6",
+      "primary-pressed": "#005A9E",
+      "primary-text": "#FFFFFF",
+      "secondary": "#3C3C3C",
+      "secondary-hover": "#505050",
+      "secondary-pressed": "#2D2D2D",
+      "danger": "#D32F2F",
+      "danger-hover": "#E57373",
+      "danger-pressed": "#B71C1C",
+      "success": "#388E3C",
+      "success-hover": "#4CAF50"
+    },
+    "status": {
+      "success": "#4CAF50",
+      "warning": "#FF9800",
+      "error": "#F44336",
+      "info": "#2196F3"
+    },
+    "border": {
+      "subtle": "#6E6E6E",
+      "strong": "#808080",
+      "focus": "#0078D4",
+      "divider": "#404040",
+      "hover": "#909090"
+    },
+    "accent": {
+      "orange": "#FF9800",
+      "blue": "#2196F3",
+      "green": "#4CAF50",
+      "red": "#F44336",
+      "cyan": "#00BCD4",
+      "purple": "#9C27B0"
+    },
+    "viewport": {
+      "background-top": "#B8D4E8",
+      "background-bottom": "#5A8DB8",
+      "grid": "#7BA3C4",
+      "selection": "#FF9800",
+      "hover": "#0078D4",
+      "axis-x": "#F44336",
+      "axis-y": "#4CAF50",
+      "axis-z": "#2196F3",
+      "domain-surface": "#E8C4A2",
+      "domain-edge": "#C49A6C"
+    },
+    "selection": {
+      "background": "#094771",
+      "text": "#FFFFFF",
+      "border": "#0078D4"
+    }
+  },
+  "spacing": {
+    "xs": "2px",
+    "sm": "4px",
+    "md": "6px",
+    "lg": "8px",
+    "xl": "12px",
+    "2xl": "16px",
+    "3xl": "24px"
+  },
+  "typography": {
+    "family": {
+      "primary": "Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif",
+      "monospace": "Consolas, Monaco, Courier New, monospace"
+    },
+    "size": {
+      "caption": "9px",
+      "body-small": "10px",
+      "body": "11px",
+      "body-large": "12px",
+      "heading": "12px",
+      "title": "13px",
+      "display": "16px"
+    },
+    "weight": {
+      "normal": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700"
+    },
+    "lineHeight": {
+      "tight": "1.2",
+      "normal": "1.4",
+      "relaxed": "1.6"
+    }
+  },
+  "borderRadius": {
+    "none": "0px",
+    "xs": "2px",
+    "sm": "3px",
+    "md": "4px",
+    "lg": "6px"
+  },
+  "elevation": {
+    "0": "none",
+    "1": "0 1px 2px rgba(0, 0, 0, 0.3)",
+    "2": "0 2px 6px rgba(0, 0, 0, 0.4)",
+    "3": "0 4px 12px rgba(0, 0, 0, 0.5)"
+  },
+  "animation": {
+    "duration": {
+      "instant": "50ms",
+      "fast": "100ms",
+      "normal": "150ms",
+      "slow": "250ms"
+    },
+    "easing": {
+      "standard": "ease",
+      "decelerate": "ease-out",
+      "accelerate": "ease-in"
+    }
+  },
+  "size": {
+    "icon": {
+      "small": "14px",
+      "medium": "16px",
+      "large": "20px",
+      "xlarge": "24px"
+    },
+    "button": {
+      "height": "24px",
+      "min-width": "64px"
+    },
+    "input": {
+      "height": "22px"
+    },
+    "toolbar": {
+      "height": "32px",
+      "icon-size": "16px"
+    },
+    "dock-title": {
+      "height": "24px"
+    }
+  }
+}

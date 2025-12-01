@@ -46,9 +46,7 @@ if sys.platform.startswith('linux'):
         if 'WAYLAND_DISPLAY' in os.environ:
             os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
-from svv.visualize.gui import VascularizeGUI
+from svv.visualize.gui import launch_gui
 
 
 def main():
@@ -65,16 +63,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure Qt software OpenGL on Linux unless opting into system GL
-    if sys.platform.startswith('linux') and os.environ.get('SVV_GUI_GL_MODE', 'software') != 'system':
-        try:
-            QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
-        except Exception:
-            pass
-
-    # Create Qt application
-    app = QApplication(sys.argv)
-
     # Load domain if specified
     domain = None
     if args.domain:
@@ -87,16 +75,8 @@ def main():
             print(f"Error loading domain: {e}")
             print("Starting with empty GUI...")
 
-    # Create and show GUI
-    gui = VascularizeGUI(domain=domain)
-    gui.show()
-
-    # Run application (Qt5/Qt6 compatible)
-    try:
-        exit_code = app.exec()
-    except AttributeError:
-        exit_code = app.exec_()
-    sys.exit(exit_code)
+    # Delegate GUI creation and telemetry setup to the shared launcher
+    launch_gui(domain=domain, block=True)
 
 
 if __name__ == '__main__':

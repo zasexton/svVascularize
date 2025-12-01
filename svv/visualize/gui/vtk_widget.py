@@ -7,14 +7,43 @@ import sys
 # Configure software rendering only on Linux to ensure in-window rendering
 # without imposing Mesa settings on Windows/macOS.
 if sys.platform.startswith('linux'):
-    # Allow users to opt out of software GL and use system drivers
-    gl_mode = os.environ.get('SVV_GUI_GL_MODE', 'software')  # 'software' or 'system'
+    def _find_dri_path():
+        override_dri = os.environ.get('SVV_LIBGL_DRIVERS_PATH')
+        if override_dri and os.path.isdir(override_dri):
+            return override_dri
+        conda_prefix = os.environ.get('CONDA_PREFIX', '')
+        candidates = []
+        if conda_prefix:
+            candidates.extend([
+                os.path.join(conda_prefix, 'lib', 'dri'),
+                os.path.join(conda_prefix, 'x86_64-conda-linux-gnu', 'sysroot', 'usr', 'lib64', 'dri'),
+            ])
+        candidates.extend([
+            '/usr/lib/x86_64-linux-gnu/dri',
+            '/usr/lib64/dri',
+            '/usr/lib/dri'
+        ])
+        for dri_path in candidates:
+            if not os.path.isdir(dri_path):
+                continue
+            if (os.path.isfile(os.path.join(dri_path, 'swrast_dri.so')) or
+                    os.path.isfile(os.path.join(dri_path, 'llvmpipe_dri.so'))):
+                return dri_path
+        return None
+
+    # Default to system GL unless explicitly opting into software
+    gl_mode = os.environ.get('SVV_GUI_GL_MODE', 'system').strip().lower()  # 'software' or 'system'
+    dri_path = _find_dri_path() if gl_mode != 'system' else None
+    if gl_mode != 'system' and not dri_path:
+        # No software driver found; fall back to system GL
+        os.environ['SVV_GUI_GL_MODE'] = 'system'
+        gl_mode = 'system'
+
     if gl_mode != 'system':
         # Prefer software rendering to avoid GPU/driver issues on varied Linux setups
         os.environ.setdefault('LIBGL_ALWAYS_SOFTWARE', '1')
         os.environ.setdefault('GALLIUM_DRIVER', 'llvmpipe')
         os.environ.setdefault('MESA_GL_VERSION_OVERRIDE', '3.3')
-        # Allow overriding the Mesa software driver
         sw_driver = os.environ.get('SVV_GUI_SOFTWARE_DRIVER', 'llvmpipe')
         os.environ.setdefault('MESA_LOADER_DRIVER_OVERRIDE', sw_driver)
 
@@ -23,23 +52,16 @@ if sys.platform.startswith('linux'):
         if 'WAYLAND_DISPLAY' in os.environ:
             os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
 
-        # Allow explicit override of the DRI drivers path
-        override_dri = os.environ.get('SVV_LIBGL_DRIVERS_PATH')
-        if override_dri and os.path.isdir(override_dri):
-            os.environ.setdefault('LIBGL_DRIVERS_PATH', override_dri)
-        else:
-            # Common conda‑forge location
-            conda_prefix = os.environ.get('CONDA_PREFIX', '')
-            candidates = []
-            if conda_prefix:
-                candidates.extend([
-                    os.path.join(conda_prefix, 'lib', 'dri'),
-                    os.path.join(conda_prefix, 'x86_64-conda-linux-gnu', 'sysroot', 'usr', 'lib64', 'dri'),
-                ])
-            for dri_path in candidates:
-                if os.path.isdir(dri_path):
-                    os.environ.setdefault('LIBGL_DRIVERS_PATH', dri_path)
-                    break
+        # Set DRI drivers path when present
+        if dri_path:
+            os.environ.setdefault('LIBGL_DRIVERS_PATH', dri_path)
+            os.environ.setdefault('SVV_LIBGL_DRIVERS_PATH', dri_path)
+    else:
+        for var in ("LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER", "MESA_GL_VERSION_OVERRIDE",
+                    "MESA_LOADER_DRIVER_OVERRIDE", "LIBGL_DRIVERS_PATH", "SVV_LIBGL_DRIVERS_PATH",
+                    "QT_OPENGL"):
+            os.environ.pop(var, None)
+        os.environ.setdefault('QT_OPENGL', 'desktop')
 
     # Optional debug output for GL setup
     if os.environ.get('SVV_GUI_DEBUG_GL') == '1':
@@ -55,8 +77,143 @@ if sys.platform.startswith('linux'):
         print('[svv.gui] GL debug config:', debug_state)
 
 import numpy as np
-from PySide6.QtWidgets import QVBoxLayout, QWidget
-from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QVBoxLayout, QWidget, QLabel, QApplication, QFrame
+from PySide6.QtCore import Signal, QTimer, Qt, QRectF
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QPalette
+from svv.visualize.gui.theme import CADTheme
+
+
+class ScaleBarWidget(QLabel):
+    """
+    A minimal scale bar widget using QLabel for reliable rendering over VTK.
+
+    Displays a scale bar with measurement value and unit using HTML/CSS
+    which renders reliably over OpenGL surfaces.
+    """
+
+    def __init__(self, parent=None, unit_label="cm"):
+        """
+        Initialize the scale bar widget.
+
+        Parameters
+        ----------
+        parent : QWidget, optional
+            Parent widget (typically VTKWidget)
+        unit_label : str
+            The unit label to display (e.g., "mm", "cm", "m")
+        """
+        super().__init__(parent)
+        self._unit_label = unit_label
+        self._pixels_per_unit = 100.0
+        self._min_bar_width = 40
+        self._max_bar_width = 100
+        self._current_bar_width = 60
+
+        # Allow mouse events to pass through
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+        # Style the label with a visible background
+        self.setStyleSheet("""
+            QLabel {
+                background-color: rgba(255, 255, 255, 220);
+                border: 1px solid rgba(100, 100, 100, 150);
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #1a1a1a;
+                font-family: Arial, sans-serif;
+                font-size: 9pt;
+            }
+        """)
+
+        self._update_display()
+
+    def set_unit_label(self, label: str):
+        """Set the unit label (e.g., 'mm', 'cm')."""
+        self._unit_label = label
+        self._update_display()
+
+    def set_pixels_per_unit(self, pixels: float):
+        """Set the number of pixels per world unit."""
+        self._pixels_per_unit = max(0.1, pixels)
+        self._update_display()
+
+    def _calculate_nice_length(self) -> tuple:
+        """Calculate a nice rounded reference length and its pixel width."""
+        target_pixels = 60
+        raw_length = target_pixels / self._pixels_per_unit
+
+        # Nice values: 1, 2, 5, 10, 20, 50, 100, etc.
+        nice_values = []
+        for exp in range(-4, 5):
+            base = 10 ** exp
+            nice_values.extend([base, 2 * base, 5 * base])
+        nice_values.sort()
+
+        # Find closest nice value
+        best_length = 1.0
+        best_diff = float('inf')
+        for nv in nice_values:
+            diff = abs(nv - raw_length)
+            if diff < best_diff:
+                best_diff = diff
+                best_length = nv
+
+        pixel_width = best_length * self._pixels_per_unit
+
+        # Clamp to reasonable range
+        if pixel_width < self._min_bar_width:
+            for nv in nice_values:
+                if nv > best_length:
+                    test_pixels = nv * self._pixels_per_unit
+                    if test_pixels >= self._min_bar_width:
+                        best_length = nv
+                        pixel_width = test_pixels
+                        break
+        elif pixel_width > self._max_bar_width:
+            for nv in reversed(nice_values):
+                if nv < best_length:
+                    test_pixels = nv * self._pixels_per_unit
+                    if test_pixels <= self._max_bar_width:
+                        best_length = nv
+                        pixel_width = test_pixels
+                        break
+
+        # Format label: "10 mm" style
+        if best_length >= 1:
+            if best_length == int(best_length):
+                label = f"{int(best_length)} {self._unit_label}"
+            else:
+                label = f"{best_length:.1f} {self._unit_label}"
+        elif best_length >= 0.01:
+            label = f"{best_length:.2f} {self._unit_label}"
+        else:
+            label = f"{best_length:.3f} {self._unit_label}"
+
+        return best_length, pixel_width, label
+
+    def _update_display(self):
+        """Update the scale bar display with current values."""
+        ref_length, bar_width, label_text = self._calculate_nice_length()
+        bar_width = int(max(self._min_bar_width, min(self._max_bar_width, bar_width)))
+
+        # Only update if something actually changed
+        new_text = label_text
+        if hasattr(self, '_last_label') and self._last_label == new_text:
+            return
+        self._last_label = new_text
+        self._current_bar_width = bar_width
+
+        # Use a fixed-width bar representation for consistent display
+        # This avoids visual artifacts from changing character counts
+        bar_chars = "─" * 8  # Fixed 8 characters
+        display_text = f"├{bar_chars}┤\n{label_text}"
+
+        # Clear and update
+        self.clear()
+        self.setText(display_text)
+        self.setAlignment(Qt.AlignCenter)
+        self.adjustSize()
+        self.repaint()  # Force immediate repaint
 
 
 class VTKWidget(QWidget):
@@ -82,6 +239,18 @@ class VTKWidget(QWidget):
         self.points_actors = []
         self.direction_actors = []
         self.tree_actors = []
+        self.connection_actors = []
+        # Grouped actor mappings for visibility toggles
+        self.tree_actor_groups = {}
+        self.connection_actor_groups = {}
+        # Scale bar actor
+        self._scale_bar_actor = None
+        self._scale_bar_visible = True
+        # Domain edge visibility state
+        self._domain_edges_visible = True
+        # Grid visibility state
+        self._grid_visible = False
+        self._grid_actor = None
 
         # Attempt to import PyVista and PyVistaQt lazily with helpful errors
         try:
@@ -118,7 +287,6 @@ class VTKWidget(QWidget):
             layout.addWidget(self.plotter.interactor)
         except Exception as e:
             # If plotter creation fails, create a fallback widget
-            from PySide6.QtWidgets import QLabel
             error_label = QLabel(
                 f"3D Visualization unavailable:\n{str(e)}\n\n"
                 "This may be due to missing OpenGL libraries.\n"
@@ -133,23 +301,265 @@ class VTKWidget(QWidget):
             return
 
         # Enable point picking
+        selection_color = CADTheme.get_color('viewport', 'selection')
         self.plotter.enable_point_picking(
             callback=self._on_point_picked,
-            show_message=True,
-            color='#FFD700',  # Gold selection color
-            point_size=12
+            show_message=False,
+            color=selection_color,
+            point_size=14
         )
 
-        # Set Fusion360-inspired gradient background
-        # Dark gray gradient for professional CAD look
-        self.plotter.set_background('#2F3136', top='#37393E')
+        # Apply CAD-theme gradient background
+        bg_bottom = CADTheme.get_color('viewport', 'background-bottom')
+        bg_top = CADTheme.get_color('viewport', 'background-top')
+        self.plotter.set_background(bg_bottom, top=bg_top)
+        # Note: show_grid adds axis labels which can interfere with scale bar
+        # Disabled to avoid duplicate scale indicators
+        # try:
+        #     self.plotter.show_grid(color=CADTheme.get_color('viewport', 'grid'),
+        #                            location='back')
+        # except Exception:
+        #     pass
+        try:
+            self.plotter.enable_eye_dome_lighting()
+        except Exception:
+            pass
+        self.plotter.enable_anti_aliasing()
+        self.plotter.show_axes()
 
         # Initial camera setup
         self.plotter.camera_position = 'iso'
 
+        # Lightweight HUD overlay
+        self._hud = QLabel(self)
+        self._hud.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._hud.setStyleSheet(
+            "color: #E0E0E0; background-color: rgba(30,30,30,180);"
+            "border: 1px solid rgba(122,155,192,180); padding: 6px 10px; border-radius: 6px;"
+        )
+        self._hud.hide()
+
+        # Add scale bar/ruler for real-world dimensions
+        self._init_scale_bar()
+
         # Add subtle grid for better spatial reference (optional)
         # Can be toggled in future versions
         # self.plotter.show_grid(color='#505050')
+
+    def shutdown(self):
+        """
+        Release VTK/PyVista resources to help the application exit cleanly.
+
+        This clears all actors and closes the underlying QtInteractor so that
+        GPU/CPU memory is returned promptly.
+        """
+        # Stop scale bar update timer
+        if hasattr(self, '_scale_bar_timer') and self._scale_bar_timer:
+            try:
+                self._scale_bar_timer.stop()
+            except Exception:
+                pass
+            self._scale_bar_timer = None
+
+        try:
+            self.clear()
+        except Exception:
+            pass
+        if getattr(self, "plotter", None) is not None:
+            try:
+                # Clear all meshes and close the interactor window
+                self.plotter.clear()
+            except Exception:
+                pass
+            try:
+                self.plotter.close()
+            except Exception:
+                pass
+            self.plotter = None
+
+    def _init_scale_bar(self):
+        """
+        Initialize the scale bar/ruler widget in the viewport.
+
+        Uses a custom Qt widget positioned in the lower-right corner
+        that displays a reference length based on the current zoom level.
+        """
+        if not self.plotter:
+            return
+
+        try:
+            # Get unit label from domain if available
+            # Default to 'cm' to match UnitSystem default (cm, g, s)
+            unit_label = "cm"
+            if self.domain is not None and hasattr(self.domain, 'unit'):
+                unit_label = self.domain.unit or "cm"
+
+            # Create the custom scale bar widget as a child of this widget
+            self._scale_bar_widget = ScaleBarWidget(self, unit_label=unit_label)
+            self._scale_bar_widget.show()
+
+            # Position the scale bar in the lower-right corner
+            self._position_scale_bar()
+
+            # Connect to plotter's render callback to update scale bar
+            self._setup_camera_callback()
+
+            self._scale_bar_visible = True
+            # Keep reference for toggle methods (backward compatibility)
+            self._scale_bar_actor = self._scale_bar_widget
+
+        except Exception as e:
+            # Scale bar is non-critical - don't fail if it can't be created
+            self._scale_bar_widget = None
+            self._scale_bar_actor = None
+            print(f"[VTKWidget] Scale bar initialization failed: {e}")
+
+    def _position_scale_bar(self):
+        """Position the scale bar widget in the lower-right corner."""
+        if not hasattr(self, '_scale_bar_widget') or not self._scale_bar_widget:
+            return
+
+        # Ensure the widget is sized correctly first
+        self._scale_bar_widget.adjustSize()
+
+        margin = 12
+        widget_width = self._scale_bar_widget.width()
+        widget_height = self._scale_bar_widget.height()
+
+        x = self.width() - widget_width - margin
+        y = self.height() - widget_height - margin
+
+        self._scale_bar_widget.move(max(0, x), max(0, y))
+        self._scale_bar_widget.raise_()  # Ensure it's on top
+
+    def _setup_camera_callback(self):
+        """Set up callback to update scale bar when camera changes."""
+        if not self.plotter:
+            return
+
+        try:
+            # Add an observer to the renderer's camera
+            renderer = self.plotter.renderer
+            if renderer and renderer.GetActiveCamera():
+                # Use a timer to periodically update (VTK camera callbacks can be tricky)
+                # 250ms is enough for smooth updates without causing visual artifacts
+                self._scale_bar_timer = QTimer(self)
+                self._scale_bar_timer.timeout.connect(self._update_scale_bar)
+                self._scale_bar_timer.start(250)
+        except Exception:
+            pass
+
+    def _update_scale_bar(self):
+        """Update the scale bar based on current camera/view settings."""
+        if not hasattr(self, '_scale_bar_widget') or not self._scale_bar_widget:
+            return
+        if not self._scale_bar_visible:
+            return
+        if not self.plotter:
+            return
+
+        try:
+            renderer = self.plotter.renderer
+            if not renderer:
+                return
+
+            camera = renderer.GetActiveCamera()
+            if not camera:
+                return
+
+            # Calculate pixels per world unit based on camera settings
+            # Get the view size in pixels
+            view_width, view_height = renderer.GetSize()
+            if view_width <= 0 or view_height <= 0:
+                return
+
+            # Get the parallel scale (for parallel projection) or calculate from perspective
+            if camera.GetParallelProjection():
+                # Parallel projection: parallel scale is half the height in world units
+                parallel_scale = camera.GetParallelScale()
+                if parallel_scale > 0:
+                    pixels_per_unit = view_height / (2.0 * parallel_scale)
+                else:
+                    pixels_per_unit = 100.0
+            else:
+                # Perspective projection: estimate from camera distance and view angle
+                distance = camera.GetDistance()
+                view_angle = camera.GetViewAngle()
+
+                if distance > 0 and view_angle > 0:
+                    import math
+                    # Height in world units at the focal point
+                    world_height = 2.0 * distance * math.tan(math.radians(view_angle / 2.0))
+                    if world_height > 0:
+                        pixels_per_unit = view_height / world_height
+                    else:
+                        pixels_per_unit = 100.0
+                else:
+                    pixels_per_unit = 100.0
+
+            self._scale_bar_widget.set_pixels_per_unit(pixels_per_unit)
+            # Reposition after size may have changed
+            self._position_scale_bar()
+
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):
+        """Handle resize to reposition scale bar."""
+        super().resizeEvent(event)
+        self._position_scale_bar()
+
+    def toggle_scale_bar(self):
+        """Toggle visibility of the scale bar."""
+        if not hasattr(self, '_scale_bar_widget') or not self._scale_bar_widget:
+            return
+
+        self._scale_bar_visible = not self._scale_bar_visible
+        if self._scale_bar_visible:
+            self._scale_bar_widget.show()
+        else:
+            self._scale_bar_widget.hide()
+
+    def set_scale_bar_visible(self, visible: bool):
+        """
+        Set scale bar visibility.
+
+        Parameters
+        ----------
+        visible : bool
+            True to show, False to hide
+        """
+        if not hasattr(self, '_scale_bar_widget') or not self._scale_bar_widget:
+            return
+
+        self._scale_bar_visible = visible
+        if visible:
+            self._scale_bar_widget.show()
+        else:
+            self._scale_bar_widget.hide()
+
+    def is_scale_bar_visible(self) -> bool:
+        """
+        Check if scale bar is currently visible.
+
+        Returns
+        -------
+        bool
+            True if visible, False otherwise
+        """
+        return self._scale_bar_visible
+
+    def set_scale_bar_unit(self, unit_label: str):
+        """
+        Set the unit label for the scale bar.
+
+        Parameters
+        ----------
+        unit_label : str
+            Unit label (e.g., 'mm', 'cm', 'm')
+        """
+        if hasattr(self, '_scale_bar_widget') and self._scale_bar_widget:
+            self._scale_bar_widget.set_unit_label(unit_label)
 
     def set_domain(self, domain):
         """
@@ -167,21 +577,62 @@ class VTKWidget(QWidget):
         self.clear()
 
         # Add domain boundary if available
-        # Use Fusion360-inspired colors for better visibility
         if hasattr(domain, 'boundary') and domain.boundary is not None:
+            surface_color = CADTheme.get_color('viewport', 'domain-surface')
+            edge_color = CADTheme.get_color('viewport', 'domain-edge')
             self.domain_actor = self.plotter.add_mesh(
                 domain.boundary,
-                color='#4FC3F7',  # Cyan-blue for domain surface
-                opacity=0.25,
-                show_edges=True,
-                edge_color='#7A9BC0',  # Subtle blue-gray edges
+                color=surface_color,
+                opacity=0.35,
+                show_edges=self._domain_edges_visible,
+                edge_color=edge_color,
                 line_width=1,
+                specular=0.15,
+                smooth_shading=True,
                 name='domain'
             )
+
+        # Update scale bar unit if domain has unit info
+        if hasattr(domain, 'unit') and domain.unit:
+            self.set_scale_bar_unit(domain.unit)
 
         # Reset camera to show full domain
         self.plotter.reset_camera()
         self.plotter.render()
+
+    def _show_hud(self, message: str, duration_ms: int = 1400):
+        """Show a transient HUD message in the viewport."""
+        if not self.plotter:
+            return
+        self._hud.setText(message)
+        self._hud.adjustSize()
+        self._hud.move(16, 16)
+        self._hud.show()
+        QTimer.singleShot(duration_ms, self._hud.hide)
+
+    def view_iso(self):
+        if self.plotter:
+            self.plotter.view_isometric()
+            self.plotter.render()
+            self._show_hud("Isometric")
+
+    def view_top(self):
+        if self.plotter:
+            self.plotter.view_xy()
+            self.plotter.render()
+            self._show_hud("Top")
+
+    def view_front(self):
+        if self.plotter:
+            self.plotter.view_yz()
+            self.plotter.render()
+            self._show_hud("Front")
+
+    def view_right(self):
+        if self.plotter:
+            self.plotter.view_xz()
+            self.plotter.render()
+            self._show_hud("Right")
 
     def add_start_point(self, point, index=None, color='red'):
         """
@@ -207,10 +658,12 @@ class VTKWidget(QWidget):
         point = np.asarray(point).flatten()
 
         # Create sphere marker
-        sphere = self._pv.Sphere(radius=self._get_marker_size(), center=point)
+        sphere = self._pv.Sphere(radius=self._get_marker_size() * 1.2, center=point)
         actor = self.plotter.add_mesh(
             sphere,
             color=color,
+            specular=0.2,
+            smooth_shading=True,
             name=f'start_point_{len(self.points_actors)}'
         )
 
@@ -285,7 +738,7 @@ class VTKWidget(QWidget):
         self.plotter.render()
         return actor
 
-    def add_tree(self, tree, color='red'):
+    def add_tree(self, tree, color='red', label=None, group_id=None):
         """
         Add a Tree visualization.
 
@@ -295,6 +748,8 @@ class VTKWidget(QWidget):
             Tree object to visualize
         color : str, optional
             Color for the tree vessels
+        label : str, optional
+            Base label for actor naming; ensures unique actor names.
 
         Returns
         -------
@@ -302,6 +757,7 @@ class VTKWidget(QWidget):
             List of actors for the tree vessels
         """
         actors = []
+        base = label or f"tree_{len(self.tree_actors)}"
         for i in range(tree.data.shape[0]):
             center = (tree.data[i, 0:3] + tree.data[i, 3:6]) / 2
             direction = tree.data.get('w_basis', i)
@@ -317,11 +773,58 @@ class VTKWidget(QWidget):
             actor = self.plotter.add_mesh(
                 vessel,
                 color=color,
-                name=f'tree_vessel_{i}'
+                name=f'{base}_vessel_{i}'
             )
             actors.append(actor)
+            # Periodically process Qt events to keep the GUI responsive
+            if i % 100 == 0:
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
 
         self.tree_actors.extend(actors)
+        if group_id is not None:
+            self.tree_actor_groups[group_id] = actors
+        self.plotter.render()
+        return actors
+
+    def add_connection_vessels(self, vessels, color='red', label=None, group_id=None):
+        """
+        Add connecting vessels (array of segments with radius).
+
+        Parameters
+        ----------
+        vessels : ndarray (n, 7)
+            Each row: [x0,y0,z0,x1,y1,z1,radius]
+        color : str
+            Color of the vessels
+        """
+        if vessels is None or vessels.size == 0:
+            return []
+        actors = []
+        base = label or f"connection_{len(self.connection_actors)}"
+        for idx, seg in enumerate(vessels):
+            p0 = seg[0:3]
+            p1 = seg[3:6]
+            radius = seg[6]
+            direction = p1 - p0
+            length = np.linalg.norm(direction)
+            if length <= 0:
+                continue
+            direction = direction / length
+            center = (p0 + p1) / 2
+            cyl = self._pv.Cylinder(center=center, direction=direction, radius=radius, height=length)
+            actor = self.plotter.add_mesh(cyl, color=color, name=f"{base}_seg_{idx}")
+            actors.append(actor)
+            if idx % 200 == 0:
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+        self.connection_actors.extend(actors)
+        if group_id is not None:
+            self.connection_actor_groups[group_id] = actors
         self.plotter.render()
         return actors
 
@@ -351,6 +854,20 @@ class VTKWidget(QWidget):
         for actor in self.tree_actors:
             self.plotter.remove_actor(actor)
         self.tree_actors.clear()
+        self.tree_actor_groups.clear()
+        self.plotter.render()
+
+    def clear_connections(self):
+        """Clear all connection visualizations."""
+        if not self.plotter:
+            return
+        for actor in list(self.connection_actors):
+            try:
+                self.plotter.remove_actor(actor)
+            except Exception:
+                pass
+        self.connection_actors.clear()
+        self.connection_actor_groups.clear()
         self.plotter.render()
 
     def clear(self):
@@ -358,6 +875,7 @@ class VTKWidget(QWidget):
         self.clear_points()
         self.clear_directions()
         self.clear_trees()
+        self.clear_connections()
 
     def reset_camera(self):
         """Reset the camera to show the full domain."""
@@ -372,6 +890,134 @@ class VTKWidget(QWidget):
             return
         self.domain_actor.SetVisibility(not self.domain_actor.GetVisibility())
         self.plotter.render()
+
+    def set_domain_edges_visible(self, visible: bool):
+        """
+        Show or hide mesh edges on the domain surface.
+
+        Parameters
+        ----------
+        visible : bool
+            True to show edges, False to hide them.
+        """
+        self._domain_edges_visible = bool(visible)
+        if not self.plotter or self.domain_actor is None:
+            return
+        try:
+            prop = self.domain_actor.GetProperty()
+            if self._domain_edges_visible:
+                prop.EdgeVisibilityOn()
+            else:
+                prop.EdgeVisibilityOff()
+        except Exception:
+            # Fallback for any backend that lacks EdgeVisibility helpers
+            try:
+                self.domain_actor.GetProperty().SetEdgeVisibility(1 if self._domain_edges_visible else 0)
+            except Exception:
+                pass
+        self.plotter.render()
+
+    def toggle_grid(self):
+        """Toggle the visibility of the 3D grid."""
+        self._grid_visible = not self._grid_visible
+        self.set_grid_visible(self._grid_visible)
+
+    def set_grid_visible(self, visible: bool):
+        """
+        Show or hide the 3D grid in the viewport.
+
+        Parameters
+        ----------
+        visible : bool
+            True to show grid, False to hide it.
+        """
+        self._grid_visible = bool(visible)
+        if not self.plotter:
+            return
+
+        try:
+            if self._grid_visible:
+                # Show grid with theme colors
+                grid_color = CADTheme.get_color('viewport', 'grid')
+                self.plotter.show_grid(
+                    color=grid_color,
+                    location='back',
+                    grid='back',
+                    show_xaxis=True,
+                    show_yaxis=True,
+                    show_zaxis=True,
+                    font_size=8
+                )
+            else:
+                # Remove the grid
+                self.plotter.remove_bounds_axes()
+        except Exception:
+            pass
+
+        self.plotter.render()
+
+    def is_grid_visible(self) -> bool:
+        """
+        Check if the grid is currently visible.
+
+        Returns
+        -------
+        bool
+            True if visible, False otherwise
+        """
+        return self._grid_visible
+
+    def draw_forest(self, forest):
+        """
+        Render a forest with optional connections.
+
+        Parameters
+        ----------
+        forest : svv.forest.forest.Forest
+            Forest to render
+        """
+        if not self.plotter:
+            return
+
+        self.clear_trees()
+        self.clear_connections()
+
+        colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'cyan', 'magenta']
+
+        has_conn = getattr(forest, 'connections', None) is not None and \
+            getattr(forest.connections, 'tree_connections', None)
+
+        if has_conn:
+            for net_idx, tree_conn in enumerate(forest.connections.tree_connections):
+                # Trees within this network
+                for tree_idx, tree in enumerate(tree_conn.connected_network):
+                    color = colors[(net_idx + tree_idx) % len(colors)]
+                    self.add_tree(
+                        tree,
+                        color=color,
+                        label=f"forest_{net_idx}_{tree_idx}",
+                        group_id=("forest", net_idx, tree_idx),
+                    )
+                # Connection vessels between trees in this network
+                for tree_idx, vessel_list in enumerate(tree_conn.vessels):
+                    color = colors[tree_idx % len(colors)]
+                    for conn_idx, vessel in enumerate(vessel_list):
+                        self.add_connection_vessels(
+                            vessel,
+                            color=color,
+                            label=f"conn_{net_idx}_{tree_idx}_{conn_idx}",
+                            group_id=("conn", net_idx, tree_idx, conn_idx),
+                        )
+        else:
+            for net_idx, network in enumerate(forest.networks):
+                for tree_idx, tree in enumerate(network):
+                    color = colors[(net_idx + tree_idx) % len(colors)]
+                    self.add_tree(
+                        tree,
+                        color=color,
+                        label=f"forest_{net_idx}_{tree_idx}",
+                        group_id=("forest", net_idx, tree_idx),
+                    )
 
     def _on_point_picked(self, point):
         """
@@ -409,3 +1055,63 @@ class VTKWidget(QWidget):
         if self.domain is not None and hasattr(self.domain, 'characteristic_length'):
             return self.domain.characteristic_length * 0.2
         return 1.0
+
+    # ---- Visibility helpers for Model Tree ----
+    def set_tree_visibility(self, mode, net_idx, tree_idx, visible: bool):
+        """
+        Toggle visibility of a single tree.
+
+        Parameters
+        ----------
+        mode : str
+            'single' for standalone tree, 'forest' for forest trees.
+        net_idx : int
+            Network index (0 for single tree).
+        tree_idx : int
+            Tree index within the network.
+        visible : bool
+            True to show, False to hide.
+        """
+        if not self.plotter:
+            return
+        key = ("single", tree_idx) if mode == "single" else ("forest", net_idx, tree_idx)
+        actors = self.tree_actor_groups.get(key)
+        if not actors:
+            return
+        for actor in actors:
+            try:
+                actor.SetVisibility(bool(visible))
+            except Exception:
+                pass
+        self.plotter.render()
+
+    def set_network_visibility(self, net_idx: int, visible: bool):
+        """
+        Toggle visibility for all trees and connection vessels within a network.
+
+        Parameters
+        ----------
+        net_idx : int
+            Network index
+        visible : bool
+            True to show, False to hide.
+        """
+        if not self.plotter:
+            return
+        # Trees in this network
+        for key, actors in list(self.tree_actor_groups.items()):
+            if isinstance(key, tuple) and len(key) >= 3 and key[0] == "forest" and key[1] == net_idx:
+                for actor in actors:
+                    try:
+                        actor.SetVisibility(bool(visible))
+                    except Exception:
+                        pass
+        # Connection vessels in this network
+        for key, actors in list(self.connection_actor_groups.items()):
+            if isinstance(key, tuple) and len(key) >= 2 and key[0] == "conn" and key[1] == net_idx:
+                for actor in actors:
+                    try:
+                        actor.SetVisibility(bool(visible))
+                    except Exception:
+                        pass
+        self.plotter.render()
