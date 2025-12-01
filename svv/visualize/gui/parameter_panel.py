@@ -16,7 +16,7 @@ from svv.visualize.gui.theme import CADTheme, CADIcons
 from svv.tree.data.data import TreeParameters
 from svv.tree.data.units import UnitSystem, _LENGTH_UNITS, _MASS_UNITS, _TIME_UNITS
 import traceback
-from svv.telemetry import capture_exception
+from svv.telemetry import capture_exception, capture_message
 
 
 class ParameterPanel(QWidget):
@@ -55,6 +55,25 @@ class ParameterPanel(QWidget):
         self._generation_cancel_event = None
 
         self._init_ui()
+
+    def _record_telemetry(self, exc=None, message=None, level="error", **tags):
+        """Send GUI warnings/errors to telemetry without impacting the UI."""
+        try:
+            if exc is not None:
+                try:
+                    import sentry_sdk  # type: ignore[import]
+
+                    with sentry_sdk.push_scope() as scope:
+                        for key, value in tags.items():
+                            scope.set_tag(key, value)
+                        sentry_sdk.capture_exception(exc)
+                except Exception:
+                    capture_exception(exc)
+                return
+            if message:
+                capture_message(message, level=level, **tags)
+        except Exception:
+            pass
 
     def shutdown(self):
         """
@@ -734,6 +753,11 @@ class ParameterPanel(QWidget):
                 "Please load a domain file before generating trees.\n\n"
                 "Use File > Load Domain to get started."
             )
+            self._record_telemetry(
+                message="Generation requested without a loaded domain",
+                level="warning",
+                action="generate_without_domain",
+            )
             return
 
         mode = self.mode_combo.currentIndex()
@@ -795,7 +819,14 @@ class ParameterPanel(QWidget):
             # Report the exception to telemetry (if enabled) so background
             # connect failures are visible even when handled gracefully.
             try:
-                capture_exception(exc)
+                try:
+                    import sentry_sdk  # type: ignore[import]
+
+                    with sentry_sdk.push_scope() as scope:
+                        scope.set_tag("action", "forest_connect_worker")
+                        sentry_sdk.capture_exception(exc)
+                except Exception:
+                    capture_exception(exc)
             except Exception:
                 pass
             return exc
@@ -874,10 +905,6 @@ class ParameterPanel(QWidget):
             exc = future.result()
         except Exception as e:
             exc = e
-            try:
-                capture_exception(e)
-            except Exception:
-                pass
 
         if exc:
             # Reset last_action now that connect has completed (even if it
@@ -892,10 +919,7 @@ class ParameterPanel(QWidget):
                 pass
             # Ensure connect failures are visible in telemetry even though the
             # GUI handles them with a warning dialog.
-            try:
-                capture_exception(exc)
-            except Exception:
-                pass
+            self._record_telemetry(exc, action="forest_connect")
             QMessageBox.warning(
                 self,
                 "Forest Connect Warning",
@@ -997,10 +1021,7 @@ class ParameterPanel(QWidget):
                     self.parent_gui.log_output(tb)
                 except Exception:
                     pass
-            try:
-                capture_exception(exc)
-            except Exception:
-                pass
+            self._record_telemetry(exc, action="generation_worker")
             QMessageBox.critical(self, "Generation Error", f"Failed to complete operation:\n\n{exc}")
             if self.parent_gui:
                 self.parent_gui.update_status("Generation failed")
@@ -1014,10 +1035,7 @@ class ParameterPanel(QWidget):
         try:
             on_success(result)
         except Exception as exc:
-            try:
-                capture_exception(exc)
-            except Exception:
-                pass
+            self._record_telemetry(exc, action="generation_finalize")
             QMessageBox.critical(self, "Generation Error", f"Failed to finalize results:\n\n{exc}")
             if self.parent_gui:
                 self.parent_gui.update_status("Generation failed")

@@ -1,6 +1,8 @@
 """
 Unified CAD-style main GUI window for svVascularize.
 """
+from __future__ import annotations
+
 from pathlib import Path
 import os
 from PySide6.QtWidgets import (
@@ -20,7 +22,7 @@ from svv.visualize.gui.parameter_panel import ParameterPanel
 from svv.visualize.gui.theme import CADTheme, CADIcons
 import svv.tree.tree as _svv_tree_mod
 import svv.forest.forest as _svv_forest_mod
-from svv.telemetry import capture_exception
+from svv.telemetry import capture_exception, capture_message
 
 
 class SystemMonitorWidget(QFrame):
@@ -869,6 +871,7 @@ class VascularizeGUI(QMainWindow):
                     json.dump(config, f, indent=2)
                 self.update_status("Configuration saved")
             except Exception as e:
+                self._record_telemetry(e, action="save_configuration")
                 self.update_status("Save failed")
                 QMessageBox.critical(
                     self,
@@ -897,6 +900,11 @@ class VascularizeGUI(QMainWindow):
                 "No Vascular Network",
                 "No generated Tree or Forest was found.\n\n"
                 "Generate a network first using the Generate menu or panel."
+            )
+            self._record_telemetry(
+                message="Operation requested without a generated Tree/Forest",
+                level="warning",
+                action="require_synthetic_object",
             )
         return obj
 
@@ -953,6 +961,7 @@ class VascularizeGUI(QMainWindow):
                 raise ValueError("Centerline export did not return a PyVista PolyData object.")
             self.update_status(f"Centerlines exported to {file_path}")
         except Exception as e:
+            self._record_telemetry(e, action="export_centerlines")
             QMessageBox.critical(
                 self,
                 "Export Centerlines Failed",
@@ -1028,6 +1037,7 @@ class VascularizeGUI(QMainWindow):
                 raise ValueError("Selected object does not support solid export.")
             self.update_status(f"Solids exported to {out_dir}")
         except Exception as e:
+            self._record_telemetry(e, action="export_solids")
             QMessageBox.critical(
                 self,
                 "Export Solids Failed",
@@ -1204,6 +1214,11 @@ class VascularizeGUI(QMainWindow):
                         "Invalid Inlets",
                         "Inlet list must be a comma-separated list of integers (tree indices)."
                     )
+                    self._record_telemetry(
+                        message="Invalid inlet list format for 0D export dialog",
+                        level="warning",
+                        action="export_0d_invalid_inlets",
+                    )
                     return
 
         out_dir = QFileDialog.getExistingDirectory(
@@ -1213,6 +1228,38 @@ class VascularizeGUI(QMainWindow):
         )
         if not out_dir:
             return
+
+        # Find a non-conflicting subfolder name (e.g., "0d_tmp (1)") inside the
+        # selected output directory and create it up front.
+        base_folder_name = folder
+        candidate = base_folder_name
+        suffix = 1
+        while os.path.exists(os.path.join(out_dir, candidate)):
+            candidate = f"{base_folder_name} ({suffix})"
+            suffix += 1
+        target_path = os.path.join(out_dir, candidate)
+        try:
+            os.makedirs(target_path, exist_ok=True)
+        except Exception as exc:
+            self._record_telemetry(exc, action="export_0d_output_folder")
+            QMessageBox.critical(
+                self,
+                "Output Folder Error",
+                f"Could not create output folder for 0D export:\n\n{exc}"
+            )
+            return
+
+        if candidate != base_folder_name:
+            QMessageBox.information(
+                self,
+                "Output Folder Renamed",
+                f"The folder '{base_folder_name}' already exists in the selected directory.\n"
+                f"Using '{candidate}' instead.\n\nFiles will be written to:\n{target_path}"
+            )
+
+        folder = candidate
+
+        export_path = target_path
 
         try:
             if is_tree:
@@ -1261,8 +1308,9 @@ class VascularizeGUI(QMainWindow):
                 )
             else:
                 raise ValueError("Unsupported object type for 0D export.")
-            self.update_status(f"0D simulation files exported to {out_dir}")
+            self.update_status(f"0D simulation files exported to {export_path}")
         except Exception as e:
+            self._record_telemetry(e, action="export_0d")
             QMessageBox.critical(
                 self,
                 "Export 0D Simulation Failed",
@@ -1294,6 +1342,7 @@ class VascularizeGUI(QMainWindow):
             # here we just ensure meshes/faces exist in the chosen directory.
             self.update_status(f"3D simulation meshes prepared in {out_dir}")
         except Exception as e:
+            self._record_telemetry(e, action="export_3d")
             QMessageBox.critical(
                 self,
                 "Export 3D Simulation Failed",
@@ -1320,6 +1369,11 @@ class VascularizeGUI(QMainWindow):
                 "Splines Not Available",
                 "Spline export is only available for connected Forest objects.\n\n"
                 "Generate a forest and use the Connect Forest option first."
+            )
+            self._record_telemetry(
+                message="Spline export requested without a connected Forest",
+                level="warning",
+                action="export_splines_unconnected",
             )
             return
 
@@ -1393,6 +1447,7 @@ class VascularizeGUI(QMainWindow):
 
             self.update_status(f"Splines exported to {file_path}")
         except Exception as e:
+            self._record_telemetry(e, action="export_splines")
             QMessageBox.critical(
                 self,
                 "Export Splines Failed",
@@ -1410,6 +1465,28 @@ class VascularizeGUI(QMainWindow):
             "Built with PySide6 and PyVista<br>"
             "© SimVascular"
         )
+
+    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", **tags):
+        """
+        Send errors or warnings to telemetry without interrupting the GUI.
+        """
+        try:
+            if exc is not None:
+                try:
+                    import sentry_sdk  # type: ignore[import]
+
+                    with sentry_sdk.push_scope() as scope:
+                        for key, value in tags.items():
+                            scope.set_tag(key, value)
+                        sentry_sdk.capture_exception(exc)
+                except Exception:
+                    capture_exception(exc)
+                return
+            if message:
+                capture_message(message, level=level, **tags)
+        except Exception:
+            # Telemetry should never break the UI
+            pass
 
     def update_status(self, message):
         """Update status bar message."""
@@ -1804,6 +1881,7 @@ class VascularizeGUI(QMainWindow):
 
         if isinstance(result, Exception):
             self.update_status("Failed to load domain")
+            self._record_telemetry(result, action="load_domain_async")
             QMessageBox.critical(
                 self,
                 "Error Loading Domain",
