@@ -1,0 +1,103 @@
+name: Telemetry Badge
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # daily at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate telemetry badge
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          BADGE_PATH: docs/badges/telemetry.json
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import json
+import os
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+token = os.environ.get("SENTRY_AUTH_TOKEN", "").strip()
+org = os.environ.get("SENTRY_ORG", "").strip()
+project = os.environ.get("SENTRY_PROJECT", "").strip()
+badge_path = Path(os.environ.get("BADGE_PATH", "docs/badges/telemetry.json"))
+
+if not token or not org or not project:
+    sys.exit("Sentry credentials (SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT) are required.")
+
+def api_get(url: str):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "svv-telemetry-badge",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = resp.read()
+        return json.loads(data.decode()), resp.headers
+
+def latest_release_version():
+    url = f"https://sentry.io/api/0/projects/{org}/{project}/releases/?per_page=1"
+    payload, _ = api_get(url)
+    if not payload:
+        return None
+    return payload[0].get("version")
+
+def unresolved_count(version: str | None):
+    query = f"is:unresolved release:{version}" if version else "is:unresolved"
+    params = urllib.parse.urlencode({"query": query, "statsPeriod": "90d", "limit": 1})
+    url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/?{params}"
+    payload, headers = api_get(url)
+    hits = headers.get("X-Hits")
+    if hits is not None:
+        try:
+            return int(hits)
+        except Exception:
+            pass
+    return len(payload)
+
+version = latest_release_version()
+count = unresolved_count(version)
+
+if count == 0:
+    color = "brightgreen"
+elif count < 5:
+    color = "yellow"
+elif count < 15:
+    color = "orange"
+else:
+    color = "red"
+
+message_suffix = version if version else "no release"
+badge = {
+    "schemaVersion": 1,
+    "label": "telemetry",
+    "message": f"{count} unresolved | {message_suffix}",
+    "color": color,
+}
+
+badge_path.parent.mkdir(parents=True, exist_ok=True)
+badge_path.write_text(json.dumps(badge), encoding="utf-8")
+print(f"Wrote badge to {badge_path} with count={count}, version={message_suffix}")
+PY
+
+      - name: Commit badge update
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update telemetry badge"
+          file_pattern: docs/badges/telemetry.json
