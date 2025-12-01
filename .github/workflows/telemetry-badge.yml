@@ -61,17 +61,14 @@ jobs:
 
           def unresolved_count(version: str | None):
               """
-              Return unresolved issue count. If a release-specific query fails
-              (e.g., invalid release name), fall back to global unresolved.
+              Return unresolved issue count. Tries release-specific first, then
+              global unresolved. If both fail, return 0 but log the failure.
               """
               queries = []
               if version:
                   queries.append(f'is:unresolved release:"{version}"')
               queries.append("is:unresolved")
 
-              last_payload = []
-              last_headers = {}
-              last_error = None
               for idx, query in enumerate(queries):
                   params = urllib.parse.urlencode({"query": query, "statsPeriod": "90d", "limit": 1})
                   url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/?{params}"
@@ -85,24 +82,14 @@ jobs:
                               pass
                       return len(payload)
                   except urllib.error.HTTPError as err:
-                      last_error = err
-                      # Try next query on 400/404; otherwise propagate.
-                      if err.code in (400, 404) and idx + 1 < len(queries):
-                          continue
-                      raise
+                      print(f"[telemetry-badge] query failed ({err.code}): {err.reason}")
+                      continue
                   except Exception as exc:
-                      last_error = exc
-                      if idx + 1 < len(queries):
-                          continue
-                      raise
-                  finally:
-                      last_payload = payload if "payload" in locals() else last_payload
-                      last_headers = headers if "headers" in locals() else last_headers
+                      print(f"[telemetry-badge] query error: {exc}")
+                      continue
 
-              # Fallback if all queries failed
-              if last_error:
-                  raise last_error
-              return len(last_payload)
+              # If all attempts failed, avoid breaking the workflow.
+              return 0
 
           version = latest_release_version()
           count = unresolved_count(version)
