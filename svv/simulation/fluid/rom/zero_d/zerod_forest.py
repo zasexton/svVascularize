@@ -3,7 +3,7 @@ import numpy as np
 import json
 import platform
 import svv
-from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data
+from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data, collate_timeseries_to_pvd
 from svv.simulation.fluid.rom.zero_d.process import run_0d_script, run_0d_cmdline
 from pathlib import Path
 
@@ -289,6 +289,10 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
 
     with open(outdir + os.sep + "post_process.py", "w") as file:
         file.write(post_data)
+    file.close()
+
+    with open(outdir + os.sep + "collate_timeseries_to_pvd.py", "w") as file:
+        file.write(collate_timeseries_to_pvd)
     file.close()
 
     with open(outdir + os.sep + "run.py", "w") as file:

@@ -297,8 +297,25 @@ class Tree(object):
         return model
 
 
-    def export_centerlines(self, outdir=None, **kwargs):
-        centerlines, polys = build_centerlines(self)
+    def export_centerlines(self, points_per_unit_length: int = 100, **kwargs):
+        """
+        Export centerline geometry for this tree.
+
+        Parameters
+        ----------
+        points_per_unit_length : int, optional
+            Sampling density along each spline, in points per unit length of
+            centerline. Higher values yield smoother centerlines at increased
+            file size. Default is 100.
+
+        Returns
+        -------
+        centerlines : pyvista.PolyData
+            Centerline polydata with radius and section-area arrays.
+        polys : list[pyvista.PolyData]
+            Per-branch polylines used to construct the merged centerline set.
+        """
+        centerlines, polys = build_centerlines(self, points_per_unit_length=points_per_unit_length)
         return centerlines, polys
 
 
