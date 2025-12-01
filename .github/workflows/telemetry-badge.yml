@@ -70,7 +70,7 @@ jobs:
               queries.append("is:unresolved")
 
               for query in queries:
-              params_dict = {"query": query, "statsPeriod": "24h", "limit": 1}
+                  params_dict = {"query": query, "statsPeriod": "24h", "limit": 1}
                   params = urllib.parse.urlencode(params_dict)
                   url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/?{params}"
                   try:
