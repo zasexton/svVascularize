@@ -59,7 +59,12 @@ jobs:
                   return None
               return payload[0].get("version")
 
-          def unresolved_count(version: str | None):
+          def project_id():
+              url = f"https://sentry.io/api/0/projects/{org}/{project}/"
+              payload, _ = api_get(url)
+              return payload.get("id")
+
+          def unresolved_count(version: str | None, proj_id: str | None):
               """
               Return unresolved issue count. Tries release-specific first, then
               global unresolved. If both fail, return 0 but log the failure.
@@ -69,9 +74,12 @@ jobs:
                   queries.append(f'is:unresolved release:"{version}"')
               queries.append("is:unresolved")
 
-              for idx, query in enumerate(queries):
-                  params = urllib.parse.urlencode({"query": query, "statsPeriod": "90d", "limit": 1})
-                  url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/?{params}"
+              for query in queries:
+                  params_dict = {"query": query, "statsPeriod": "90d", "limit": 1}
+                  if proj_id:
+                      params_dict["project"] = proj_id
+                  params = urllib.parse.urlencode(params_dict)
+                  url = f"https://sentry.io/api/0/organizations/{org}/issues/?{params}"
                   try:
                       payload, headers = api_get(url)
                       hits = headers.get("X-Hits")
@@ -82,7 +90,8 @@ jobs:
                               pass
                       return len(payload)
                   except urllib.error.HTTPError as err:
-                      print(f"[telemetry-badge] query failed ({err.code}): {err.reason}")
+                      body = err.read().decode(errors="ignore")
+                      print(f"[telemetry-badge] query failed ({err.code}): {err.reason} | body={body}")
                       continue
                   except Exception as exc:
                       print(f"[telemetry-badge] query error: {exc}")
@@ -92,7 +101,8 @@ jobs:
               return 0
 
           version = latest_release_version()
-          count = unresolved_count(version)
+          proj_id = project_id()
+          count = unresolved_count(version, proj_id)
 
           if count == 0:
               color = "brightgreen"
