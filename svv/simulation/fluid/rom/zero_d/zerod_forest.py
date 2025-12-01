@@ -100,11 +100,12 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
                 None
     """
     if outdir is None:
-        outdir = os.getcwd() + os.sep + folder
+        outdir = os.path.join(os.getcwd(), folder)
     else:
-        outdir = outdir + os.sep + folder
-    if not os.path.isdir(outdir):
-        os.mkdir(folder)
+        outdir = os.path.join(outdir, folder)
+
+    # Ensure the target directory exists without failing if it already does.
+    os.makedirs(outdir, exist_ok=True)
     path_to_0d_solver = None
     input_file = {'description': {'description of case': None,
                                   'analytical results': None},
