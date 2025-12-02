@@ -199,8 +199,9 @@ class BaseConnection:
             self.y_min, self.y_max = 0, 1
             self.z_min, self.z_max = 0, 1
 
-        # Keep track of control points and curves for debugging/analysis
-        self.history_ctrlpts = []
+        # Keep track of curves for optional debugging/plotting.
+        # In production we only retain the final curve to avoid
+        # unbounded memory growth during optimization.
         self.history_curves = []
 
     def _build_control_points(self, ctrlpts_flat, mid, n_pts):
@@ -257,9 +258,9 @@ class BaseConnection:
             control_points = self._build_control_points(control_points_flat, mid, n_pts)
             curve = Curve(control_points, curve_type=self.curve_type)
 
-            # For debugging/analysis
-            self.history_ctrlpts.append(control_points)
-            self.history_curves.append(curve)
+            # Only track the most recent curve for optional debugging/plotting.
+            # This avoids unbounded history growth during optimization.
+            self.history_curves = [curve]
 
             # Example objective: difference between curve length and some nominal length
             # length = np.linalg.norm(self.B - self.A) + np.linalg.norm(self.D - self.C)
@@ -571,9 +572,10 @@ class BaseConnection:
         else:
             control_points = np.vstack([P0, control_points, P3])
 
-        # 8) Build final curve and return
+        # 8) Build final curve and return. Overwrite history_curves so
+        # that only the final optimized curve is retained.
         curve = Curve(control_points, curve_type=self.curve_type)
-        self.history_curves.append(curve)
+        self.history_curves = [curve]
         return result, curve, objective, constraints
 
     def set_collision_vessels(self, collision_vessels):
