@@ -76,8 +76,29 @@ class Forest(object):
             The tolerance for the convexity of the domain.
         """
         self.domain = domain
-        self.geodesic = geodesic_constructor(domain)
-        self.convex = numpy.isclose(domain.convexity, 1.0, atol=convexity_tolerance)
+
+        # Determine convexity when available; when missing, treat as effectively
+        # convex so algorithms fall back to simpler distance-based paths.
+        domain_convexity = getattr(domain, "convexity", None)
+        if domain_convexity is not None:
+            self.convex = numpy.isclose(domain_convexity, 1.0, atol=convexity_tolerance)
+        else:
+            self.convex = True
+
+        # Geodesic paths require an interior tetrahedral mesh. When the Domain
+        # was loaded from a .dmn file without mesh data, or when tetrahedralize
+        # previously failed, `domain.mesh` will be None. In that case we skip
+        # geodesic construction and rely on the convex-distance paths.
+        self.geodesic = None
+        if getattr(domain, "mesh", None) is not None:
+            try:
+                self.geodesic = geodesic_constructor(domain)
+            except Exception:
+                # If geodesic construction fails for any reason, fall back to
+                # convex handling so forest generation can still proceed.
+                self.geodesic = None
+                self.convex = True
+
         for network in self.networks:
             for tree in network:
                 tree.set_domain(domain, convexity_tolerance)

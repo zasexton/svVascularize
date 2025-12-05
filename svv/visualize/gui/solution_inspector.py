@@ -34,6 +34,7 @@ from PySide6.QtGui import QAction, QIcon
 
 from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.theme import CADTheme, CADIcons
+from svv.telemetry import capture_exception, capture_message
 
 
 class CollapsibleGroupBox(QGroupBox):
@@ -122,6 +123,32 @@ class SolutionInspectorWidget(QWidget):
 
         self._try_import_pyvista()
         self._build_ui()
+
+    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", **tags) -> None:
+        """
+        Send errors or warnings to telemetry without impacting the UI.
+
+        This mirrors the lightweight helpers used elsewhere in the GUI so
+        that any error which results in a popup can also be surfaced to
+        Sentry when telemetry is enabled.
+        """
+        try:
+            if exc is not None:
+                try:
+                    import sentry_sdk  # type: ignore[import]
+
+                    with sentry_sdk.push_scope() as scope:
+                        for key, value in tags.items():
+                            scope.set_tag(key, value)
+                        sentry_sdk.capture_exception(exc)
+                except Exception:
+                    capture_exception(exc)
+                return
+            if message:
+                capture_message(message, level=level, **tags)
+        except Exception:
+            # Telemetry must never break the inspector UI
+            pass
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -1325,6 +1352,7 @@ class SolutionInspectorWidget(QWidget):
         try:
             self._current_mesh.save(path)
         except Exception as e:
+            self._record_telemetry(e, action="solution_export_mesh")
             QMessageBox.critical(self, "Export Failed", f"Failed to export mesh:\n{e}")
 
     def _export_csv(self) -> None:
@@ -1368,6 +1396,7 @@ class SolutionInspectorWidget(QWidget):
                         f.write(f"{pt[0]},{pt[1]},{pt[2]},{','.join(map(str, val))}\n")
 
         except Exception as e:
+            self._record_telemetry(e, action="solution_export_csv")
             QMessageBox.critical(self, "Export Failed", f"Failed to export CSV:\n{e}")
 
     def _export_animation(self) -> None:
@@ -1463,7 +1492,14 @@ class SolutionInspectorWidget(QWidget):
 
         except Exception as e:
             import traceback
-            QMessageBox.critical(self, "Export Failed", f"Failed to export animation:\n{e}\n\n{traceback.format_exc()}")
+            # Record the failure (including full traceback) so export issues
+            # are visible to developers in telemetry as well as in the UI.
+            self._record_telemetry(e, action="solution_export_animation")
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to export animation:\n{e}\n\n{traceback.format_exc()}"
+            )
 
     def _save_plotter_state(self, plotter) -> dict:
         """Save all relevant plotter state for animation consistency."""
@@ -1720,6 +1756,7 @@ class SolutionInspectorWidget(QWidget):
                     "Install with: pip install imageio"
                 )
             except Exception as e:
+                self._record_telemetry(e, action="solution_export_gif")
                 QMessageBox.critical(self, "GIF Export Failed", f"Error: {e}")
 
     def _get_colormap_colors(self, cmap_name: str, n_colors: int = 64) -> list:
@@ -1807,6 +1844,7 @@ class SolutionInspectorWidget(QWidget):
                     "Install with: pip install imageio imageio-ffmpeg"
                 )
             except Exception as e:
+                self._record_telemetry(e, action="solution_export_mp4")
                 QMessageBox.critical(self, "Export Failed", f"Failed to save MP4:\n{e}")
 
     def _export_time_series(self) -> None:
@@ -1834,6 +1872,7 @@ class SolutionInspectorWidget(QWidget):
                     for time, value in data:
                         f.write(f"{px},{py},{pz},{time},{value}\n")
         except Exception as e:
+            self._record_telemetry(e, action="solution_export_time_series")
             QMessageBox.critical(self, "Export Failed", f"Failed to export time series:\n{e}")
 
     # ------------------------------------------------------------------

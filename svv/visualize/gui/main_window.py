@@ -1756,9 +1756,14 @@ class VascularizeGUI(QMainWindow):
                         domain.build(resolution=build_resolution)
                     else:
                         domain.build()
-                except Exception:
-                    # If build fails, continue with loaded fast-eval structures only
-                    pass
+                except Exception as exc:
+                    # If build fails (e.g., TetGen errors) continue with loaded
+                    # fast-eval structures only so tree/forest generation still
+                    # works, but record the failure in telemetry for diagnosis.
+                    try:
+                        self._record_telemetry(exc, action="load_domain_build")
+                    except Exception:
+                        pass
                 if cancel_event.is_set():
                     return None
                 report_progress(60)
