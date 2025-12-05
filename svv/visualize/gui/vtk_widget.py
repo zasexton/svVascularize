@@ -361,11 +361,20 @@ class VTKWidget(QWidget):
                 pass
             self._scale_bar_timer = None
 
-        try:
-            self.clear()
-        except Exception:
-            pass
         if getattr(self, "plotter", None) is not None:
+            # Fast shutdown path: avoid per-actor removals which can be slow
+            # when many vessel actors are present. Instead, drop references to
+            # actors and let the plotter clear everything in one call.
+            try:
+                self.points_actors.clear()
+                self.direction_actors.clear()
+                self.tree_actors.clear()
+                self.connection_actors.clear()
+                self.tree_actor_groups.clear()
+                self.connection_actor_groups.clear()
+            except Exception:
+                pass
+
             try:
                 # Clear all meshes and close the interactor window
                 self.plotter.clear()

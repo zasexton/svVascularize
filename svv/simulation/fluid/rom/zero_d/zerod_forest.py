@@ -5,6 +5,7 @@ import platform
 import svv
 from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data, collate_timeseries_to_pvd
 from svv.simulation.fluid.rom.zero_d.process import run_0d_script, run_0d_cmdline
+from svv.simulation.fluid.inflow.waveform import generate_physiologic_wave
 from pathlib import Path
 
 def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, folder="0d_tmp", number_cardiac_cycles=1,
@@ -200,18 +201,18 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
                             for i in range(len(bc_values["t"])):
                                 file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
                         file.close()
-                    #else:
-                    #    time, flow = wave(self.networks[network_id][tree_id].data[vessel, 22],
-                    #                      self.networks[network_id][tree_id].data[
-                    #                          vessel, 21] * 2)  # changed wave function
-                    #    bc_values["Q"] = flow.tolist()
-                    #    bc_values["t"] = time.tolist()
-                    #    bc_values["Q"][-1] = bc_values["Q"][0]
-                    #    simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
-                    #    with open(outdir + os.sep + "inflow.flow", "w") as file:
-                    #        for i in range(len(bc_values["t"])):
-                    #            file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
-                    #    file.close()
+                    else:
+                        time, flow = generate_physiologic_wave(self.networks[network_id][tree_id].data[vessel, 22],
+                                          self.networks[network_id][tree_id].data[
+                                              vessel, 21] * 2)
+                        bc_values["Q"] = flow.tolist()
+                        bc_values["t"] = time.tolist()
+                        bc_values["Q"][-1] = bc_values["Q"][0]
+                        simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
+                        with open(outdir + os.sep + "inflow.flow", "w") as file:
+                            for i in range(len(bc_values["t"])):
+                                file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
+                        file.close()
                     bc['bc_values'] = bc_values
                     input_file['boundary_conditions'].append(bc)
                     vessel_segment['boundary_conditions'] = {'inlet': 'INFLOW'}
