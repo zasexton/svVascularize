@@ -169,6 +169,8 @@ def capture_exception(exc: BaseException) -> None:
         import sentry_sdk  # type: ignore[import]
 
         sentry_sdk.capture_exception(exc)
+        # Flush to ensure the event is sent immediately
+        sentry_sdk.flush(timeout=2.0)
     except Exception:
         pass
 
@@ -195,6 +197,8 @@ def capture_message(message: str, level: str = "info", **tags) -> None:
             for key, value in tags.items():
                 scope.set_tag(key, value)
             sentry_sdk.capture_message(message, level=level)
+        # Flush to ensure the event is sent immediately
+        sentry_sdk.flush(timeout=2.0)
     except Exception:
         pass
 

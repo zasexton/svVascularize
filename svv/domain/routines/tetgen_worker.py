@@ -19,7 +19,16 @@ def main(surface_path: str, out_path: str, config_path: str):
 
     # Run TetGen
     tgen = tetgen.TetGen(surface)
-    nodes, elems = tgen.tetrahedralize(*args, **kwargs)
+    result = tgen.tetrahedralize(*args, **kwargs)
+
+    # Handle different return formats from tetgen versions
+    # Older versions return (nodes, elems), newer may return more values
+    if isinstance(result, tuple):
+        nodes, elems = result[0], result[1]
+    else:
+        # Some versions return a grid directly
+        nodes = tgen.node
+        elems = tgen.elem
 
     # Save result
     np.savez(out_path, nodes=nodes, elems=elems)

@@ -56,8 +56,22 @@ class ParameterPanel(QWidget):
 
         self._init_ui()
 
-    def _record_telemetry(self, exc=None, message=None, level="error", **tags):
-        """Send GUI warnings/errors to telemetry without impacting the UI."""
+    def _record_telemetry(self, exc=None, message=None, level="error", traceback_str=None, **tags):
+        """Send GUI warnings/errors to telemetry without impacting the UI.
+
+        Parameters
+        ----------
+        exc : Exception, optional
+            Exception to capture. If provided, captures as an exception event.
+        message : str, optional
+            Message to capture. Used when exc is None.
+        level : str
+            Sentry level ("error", "warning", "info").
+        traceback_str : str, optional
+            Full traceback string to include as extra context.
+        **tags
+            Additional tags to attach to the event.
+        """
         try:
             if exc is not None:
                 try:
@@ -66,7 +80,11 @@ class ParameterPanel(QWidget):
                     with sentry_sdk.push_scope() as scope:
                         for key, value in tags.items():
                             scope.set_tag(key, value)
+                        if traceback_str:
+                            scope.set_extra("full_traceback", traceback_str)
                         sentry_sdk.capture_exception(exc)
+                        # Flush to ensure the event is sent before the popup blocks
+                        sentry_sdk.flush(timeout=2.0)
                 except Exception:
                     capture_exception(exc)
                 return
@@ -834,6 +852,11 @@ class ParameterPanel(QWidget):
     def _connect_existing_forest(self):
         """Connect the currently generated forest if it is not already connected."""
         if not self.parent_gui or not getattr(self.parent_gui, 'forest', None):
+            self._record_telemetry(
+                message="Forest connect requested but no forest generated",
+                level="warning",
+                action="forest_connect_no_forest",
+            )
             QMessageBox.information(
                 self,
                 "No Forest",
@@ -844,6 +867,11 @@ class ParameterPanel(QWidget):
 
         forest = self.parent_gui.forest
         if getattr(forest, 'connections', None) is not None:
+            self._record_telemetry(
+                message="Forest connect requested but already connected",
+                level="info",
+                action="forest_connect_already_connected",
+            )
             QMessageBox.information(
                 self,
                 "Already Connected",
@@ -919,7 +947,8 @@ class ParameterPanel(QWidget):
                 pass
             # Ensure connect failures are visible in telemetry even though the
             # GUI handles them with a warning dialog.
-            self._record_telemetry(exc, action="forest_connect")
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            self._record_telemetry(exc, action="forest_connect", traceback_str=tb)
             QMessageBox.warning(
                 self,
                 "Forest Connect Warning",
@@ -951,9 +980,19 @@ class ParameterPanel(QWidget):
     # ---- Long-running task helpers ----
     def _start_generation_task(self, title, total_steps, task_fn, on_success):
         if self._generation_future is not None:
+            self._record_telemetry(
+                message="Generation requested while another generation is running",
+                level="info",
+                action="generation_already_running",
+            )
             QMessageBox.information(self, "Task Running", "Please wait for the current operation to finish.")
             return
         if self._connect_future is not None:
+            self._record_telemetry(
+                message="Generation requested while forest connection is running",
+                level="info",
+                action="generation_connect_running",
+            )
             QMessageBox.information(self, "Forest Connection Running", "Please wait for the forest connection to finish.")
             return
 
@@ -1021,7 +1060,7 @@ class ParameterPanel(QWidget):
                     self.parent_gui.log_output(tb)
                 except Exception:
                     pass
-            self._record_telemetry(exc, action="generation_worker")
+            self._record_telemetry(exc, action="generation_worker", traceback_str=tb)
             QMessageBox.critical(self, "Generation Error", f"Failed to complete operation:\n\n{exc}")
             if self.parent_gui:
                 self.parent_gui.update_status("Generation failed")
@@ -1035,7 +1074,8 @@ class ParameterPanel(QWidget):
         try:
             on_success(result)
         except Exception as exc:
-            self._record_telemetry(exc, action="generation_finalize")
+            tb = traceback.format_exc()
+            self._record_telemetry(exc, action="generation_finalize", traceback_str=tb)
             QMessageBox.critical(self, "Generation Error", f"Failed to finalize results:\n\n{exc}")
             if self.parent_gui:
                 self.parent_gui.update_status("Generation failed")

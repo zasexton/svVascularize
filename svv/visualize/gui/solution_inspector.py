@@ -124,13 +124,26 @@ class SolutionInspectorWidget(QWidget):
         self._try_import_pyvista()
         self._build_ui()
 
-    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", **tags) -> None:
+    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", traceback_str: str | None = None, **tags) -> None:
         """
         Send errors or warnings to telemetry without impacting the UI.
 
         This mirrors the lightweight helpers used elsewhere in the GUI so
         that any error which results in a popup can also be surfaced to
         Sentry when telemetry is enabled.
+
+        Parameters
+        ----------
+        exc : Exception, optional
+            Exception to capture. If provided, captures as an exception event.
+        message : str, optional
+            Message to capture. Used when exc is None.
+        level : str
+            Sentry level ("error", "warning", "info").
+        traceback_str : str, optional
+            Full traceback string to include as extra context.
+        **tags
+            Additional tags to attach to the event.
         """
         try:
             if exc is not None:
@@ -140,7 +153,11 @@ class SolutionInspectorWidget(QWidget):
                     with sentry_sdk.push_scope() as scope:
                         for key, value in tags.items():
                             scope.set_tag(key, value)
+                        if traceback_str:
+                            scope.set_extra("full_traceback", traceback_str)
                         sentry_sdk.capture_exception(exc)
+                        # Flush to ensure the event is sent before the popup blocks
+                        sentry_sdk.flush(timeout=2.0)
                 except Exception:
                     capture_exception(exc)
                 return
@@ -1337,6 +1354,11 @@ class SolutionInspectorWidget(QWidget):
     def _export_mesh(self) -> None:
         """Export current mesh to VTP/VTU file."""
         if self._current_mesh is None:
+            self._record_telemetry(
+                message="Mesh export requested but no mesh loaded",
+                level="warning",
+                action="solution_export_mesh_no_data",
+            )
             QMessageBox.warning(self, "No Data", "No mesh loaded to export.")
             return
 
@@ -1358,6 +1380,11 @@ class SolutionInspectorWidget(QWidget):
     def _export_csv(self) -> None:
         """Export current scalar data to CSV."""
         if self._current_mesh is None or self._current_scalar_name is None:
+            self._record_telemetry(
+                message="CSV export requested but no scalar data loaded",
+                level="warning",
+                action="solution_export_csv_no_data",
+            )
             QMessageBox.warning(self, "No Data", "No scalar data loaded to export.")
             return
 
@@ -1402,6 +1429,11 @@ class SolutionInspectorWidget(QWidget):
     def _export_animation(self) -> None:
         """Export animation as GIF or MP4."""
         if not self._time_values or len(self._time_values) < 2:
+            self._record_telemetry(
+                message="Animation export requested but insufficient time steps",
+                level="warning",
+                action="solution_export_animation_no_data",
+            )
             QMessageBox.warning(self, "No Animation", "Need multiple time steps for animation.")
             return
 
@@ -1750,6 +1782,11 @@ class SolutionInspectorWidget(QWidget):
                 imageio.mimsave(path, frames, format='GIF', duration=duration, loop=0)
                 QMessageBox.information(self, "Export Complete", f"Animation saved to:\n{path}")
             except ImportError:
+                self._record_telemetry(
+                    message="GIF export failed: imageio not installed",
+                    level="warning",
+                    action="solution_export_gif_missing_imageio",
+                )
                 QMessageBox.warning(
                     self, "Missing Dependency",
                     "imageio is required for GIF export.\n"
@@ -1838,6 +1875,11 @@ class SolutionInspectorWidget(QWidget):
                 QMessageBox.information(self, "Export Complete", f"Video saved to:\n{path}")
 
             except ImportError:
+                self._record_telemetry(
+                    message="MP4 export failed: imageio/ffmpeg not installed",
+                    level="warning",
+                    action="solution_export_mp4_missing_ffmpeg",
+                )
                 QMessageBox.warning(
                     self, "Missing Dependency",
                     "imageio with ffmpeg is required for MP4 export.\n"
@@ -1850,6 +1892,11 @@ class SolutionInspectorWidget(QWidget):
     def _export_time_series(self) -> None:
         """Export probed time series data to CSV."""
         if not self._time_series_data:
+            self._record_telemetry(
+                message="Time series export requested but no data collected",
+                level="warning",
+                action="solution_export_time_series_no_data",
+            )
             QMessageBox.warning(
                 self, "No Data",
                 "No time series data collected.\nEnable probe mode and click on points to collect data."

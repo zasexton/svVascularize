@@ -1466,9 +1466,22 @@ class VascularizeGUI(QMainWindow):
             "© SimVascular"
         )
 
-    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", **tags):
+    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", traceback_str: str | None = None, **tags):
         """
         Send errors or warnings to telemetry without interrupting the GUI.
+
+        Parameters
+        ----------
+        exc : Exception, optional
+            Exception to capture. If provided, captures as an exception event.
+        message : str, optional
+            Message to capture. Used when exc is None.
+        level : str
+            Sentry level ("error", "warning", "info").
+        traceback_str : str, optional
+            Full traceback string to include as extra context.
+        **tags
+            Additional tags to attach to the event.
         """
         try:
             if exc is not None:
@@ -1478,7 +1491,11 @@ class VascularizeGUI(QMainWindow):
                     with sentry_sdk.push_scope() as scope:
                         for key, value in tags.items():
                             scope.set_tag(key, value)
+                        if traceback_str:
+                            scope.set_extra("full_traceback", traceback_str)
                         sentry_sdk.capture_exception(exc)
+                        # Flush to ensure the event is sent before the popup blocks
+                        sentry_sdk.flush(timeout=2.0)
                 except Exception:
                     capture_exception(exc)
                 return
@@ -1572,13 +1589,43 @@ class VascularizeGUI(QMainWindow):
             import svv.telemetry as _telemetry_mod
 
             if not getattr(_telemetry_mod, "telemetry_enabled", lambda: False)():
+                # Diagnose why telemetry is not enabled
+                reasons = []
+
+                # Check if sentry_sdk is installed
+                try:
+                    import sentry_sdk
+                except ImportError:
+                    reasons.append("• sentry-sdk is not installed (run: pip install sentry-sdk)")
+
+                # Check user consent setting
+                try:
+                    settings = QSettings("svVascularize", "GUI")
+                    if settings.contains("telemetry/enabled"):
+                        if not settings.value("telemetry/enabled", False, type=bool):
+                            reasons.append("• Crash reporting was declined at startup")
+                    else:
+                        reasons.append("• Crash reporting consent has not been set yet")
+                except Exception:
+                    pass
+
+                # Check if disabled via environment
+                if os.environ.get("SVV_TELEMETRY_DISABLED", "").strip() == "1":
+                    reasons.append("• SVV_TELEMETRY_DISABLED=1 is set in environment")
+
+                if not reasons:
+                    reasons.append("• Unknown reason - telemetry initialization may have failed")
+
+                reason_text = "\n".join(reasons)
                 QMessageBox.warning(
                     self,
                     "Telemetry Not Enabled",
-                    "Telemetry/Sentry is currently disabled or not initialized.\n\n"
-                    "No test event was sent. Enable crash reporting on startup "
-                    "and ensure the 'SVV_SENTRY_DSN' environment variable is "
-                    "configured for your Sentry project."
+                    f"Telemetry is currently disabled or not initialized.\n\n"
+                    f"Possible reasons:\n{reason_text}\n\n"
+                    f"To enable telemetry:\n"
+                    f"1. Install sentry-sdk: pip install sentry-sdk\n"
+                    f"2. Delete ~/.config/svVascularize/GUI.conf to reset consent\n"
+                    f"3. Restart the GUI and click 'Yes' on the crash reporting dialog"
                 )
                 return
         except Exception:
@@ -1596,7 +1643,8 @@ class VascularizeGUI(QMainWindow):
         QMessageBox.information(
             self,
             "Telemetry Test",
-            "Sent a test error to the telemetry backend."
+            "Sent a test error to the telemetry backend.\n\n"
+            "Check your Sentry dashboard to verify the event was received."
         )
 
     def _open_github_issues(self):
@@ -1751,6 +1799,8 @@ class VascularizeGUI(QMainWindow):
                 if cancel_event.is_set():
                     return None
                 # Ensure boundary is available; allow caller to control resolution
+                build_failed = False
+                build_error_msg = None
                 try:
                     if build_resolution is not None:
                         domain.build(resolution=build_resolution)
@@ -1760,10 +1810,18 @@ class VascularizeGUI(QMainWindow):
                     # If build fails (e.g., TetGen errors) continue with loaded
                     # fast-eval structures only so tree/forest generation still
                     # works, but record the failure in telemetry for diagnosis.
+                    build_failed = True
+                    build_error_msg = str(exc)
                     try:
-                        self._record_telemetry(exc, action="load_domain_build")
+                        import traceback
+                        tb = traceback.format_exc()
+                        self._record_telemetry(exc, action="load_domain_build", traceback_str=tb)
                     except Exception:
                         pass
+
+                # Store build status on domain for later reference
+                domain._build_failed = build_failed
+                domain._build_error = build_error_msg
                 if cancel_event.is_set():
                     return None
                 report_progress(60)
@@ -1796,6 +1854,11 @@ class VascularizeGUI(QMainWindow):
 
     def _start_domain_load(self, file_path: str):
         if self._load_future is not None:
+            self._record_telemetry(
+                message="Domain load requested while another load is in progress",
+                level="info",
+                action="domain_load_already_running",
+            )
             QMessageBox.information(self, "Load In Progress", "Please wait for the current domain load to finish.")
             return
 
@@ -1902,6 +1965,22 @@ class VascularizeGUI(QMainWindow):
 
         self.load_domain(result)
         self._load_cancel_event = None
+
+        # Warn user if domain build failed (mesh not available)
+        if getattr(result, '_build_failed', False):
+            error_msg = getattr(result, '_build_error', 'Unknown error')
+            self._record_telemetry(
+                message=f"Domain build failed: {error_msg}",
+                level="warning",
+                action="domain_build_failed_warning",
+            )
+            QMessageBox.warning(
+                self,
+                "Domain Build Warning",
+                f"The domain was loaded but mesh building failed:\n\n{error_msg}\n\n"
+                f"Some features (like auto-selecting boundary start points) may not work.\n"
+                f"You can still use the domain by manually selecting start points."
+            )
 
 
 # Backwards compatibility alias
