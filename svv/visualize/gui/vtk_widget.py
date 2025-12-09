@@ -300,14 +300,37 @@ class VTKWidget(QWidget):
             self.plotter = None
             return
 
-        # Enable point picking
+        # Enable surface picking for accurate front-face point selection
+        # This uses hardware-based picking that respects depth/occlusion,
+        # ensuring users pick points on the visible surface, not the back side
         selection_color = CADTheme.get_color('viewport', 'selection')
-        self.plotter.enable_point_picking(
-            callback=self._on_point_picked,
-            show_message=False,
-            color=selection_color,
-            point_size=14
-        )
+        try:
+            self.plotter.enable_surface_point_picking(
+                callback=self._on_point_picked,
+                show_message=False,
+                color=selection_color,
+                point_size=14,
+                tolerance=0.025,  # Picking tolerance as fraction of viewport
+                pickable_window=False,  # Only pick from meshes, not window
+            )
+        except (AttributeError, TypeError):
+            # Fallback for older PyVista versions that don't have enable_surface_point_picking
+            # or have different signatures
+            try:
+                self.plotter.enable_surface_picking(
+                    callback=self._on_surface_picked,
+                    show_message=False,
+                    color=selection_color,
+                    point_size=14,
+                )
+            except (AttributeError, TypeError):
+                # Final fallback to basic point picking
+                self.plotter.enable_point_picking(
+                    callback=self._on_point_picked,
+                    show_message=False,
+                    color=selection_color,
+                    point_size=14
+                )
 
         # Apply CAD-theme gradient background
         bg_bottom = CADTheme.get_color('viewport', 'background-bottom')
@@ -1037,7 +1060,51 @@ class VTKWidget(QWidget):
         point : array-like
             Picked point coordinates
         """
-        self.point_picked.emit(np.asarray(point))
+        if point is not None:
+            arr = np.asarray(point)
+            # Ensure we have a single 1D point of 3 coordinates
+            if arr.ndim == 2:
+                # Multiple points or (1, 3) shaped - take first point
+                arr = arr[0]
+            self.point_picked.emit(arr.flatten())
+
+    def _on_surface_picked(self, *args):
+        """
+        Callback for surface picking (handles various PyVista versions).
+
+        Different PyVista versions pass different arguments:
+        - Some pass just the point coordinates
+        - Some pass (mesh, point_id)
+        - Some pass (point, mesh)
+        """
+        point = None
+
+        if len(args) == 1:
+            # Single argument - likely the point coordinates or a mesh
+            arg = args[0]
+            if hasattr(arg, 'points'):
+                # It's a mesh - get the picked point (usually first point of selection)
+                if arg.n_points > 0:
+                    point = arg.points[0]
+            else:
+                # Assume it's point coordinates
+                point = np.asarray(arg)
+        elif len(args) >= 2:
+            # Multiple arguments - check each one
+            for arg in args:
+                if isinstance(arg, np.ndarray) and arg.shape == (3,):
+                    point = arg
+                    break
+                elif hasattr(arg, '__len__') and len(arg) == 3:
+                    point = np.asarray(arg)
+                    break
+                elif hasattr(arg, 'points') and arg.n_points > 0:
+                    # It's a mesh
+                    point = arg.points[0]
+                    break
+
+        if point is not None:
+            self.point_picked.emit(np.asarray(point).flatten())
 
     def _get_marker_size(self):
         """

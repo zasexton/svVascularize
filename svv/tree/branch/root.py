@@ -13,6 +13,35 @@ def set_root(tree, **kwargs):
     """
     start = kwargs.get('start', None)
     direction = kwargs.get('direction', None)
+
+    # Validate and normalize start point shape
+    # Must be either None, 1D array of shape (d,), or 2D array of shape (1, d)
+    if start is not None:
+        start = numpy.asarray(start, dtype=float)
+        d = tree.domain.points.shape[1]
+        if start.ndim > 2 or (start.ndim == 2 and start.shape[0] != 1):
+            # Flatten and take first d elements
+            start = start.flatten()[:d]
+        if start.ndim == 1:
+            if start.size != d:
+                start = start[:d] if start.size > d else numpy.pad(start, (0, d - start.size))
+            start = start.reshape(1, d)
+        # Now start has shape (1, d)
+
+    # Validate and normalize direction shape
+    # Must be either None or 1D array of shape (d,)
+    if direction is not None:
+        direction = numpy.asarray(direction, dtype=float)
+        d = tree.domain.points.shape[1]
+        if direction.ndim > 1:
+            direction = direction.flatten()
+        if direction.size != d:
+            direction = direction[:d] if direction.size > d else numpy.pad(direction, (0, d - direction.size))
+        # Normalize direction to unit vector
+        norm = numpy.linalg.norm(direction)
+        if norm > 0:
+            direction = direction / norm
+
     homogeneous = kwargs.get('homogeneous', True)
     volume_fraction = kwargs.get('volume_fraction', 1.0)
     threshold_adjuster = kwargs.get('threshold_adjuster', 0.9)
@@ -74,7 +103,7 @@ def set_root(tree, **kwargs):
                         finished = True
                 else:
                     _end = _start + direction * threshold * numpy.linspace(0.75, 1.5, attempts).reshape(-1, 1)
-                    values = tree.domain.evaluate(_end[:, :tree.domain.points.shape[1]]).flatten()
+                    values = tree.domain(_end[:, :tree.domain.points.shape[1]]).flatten()
                     if len(values[values < interior_range[1]]) > 0:
                         _end = _end[values < interior_range[1], :]
                         _end_idx = tree.domain.random_generator.choice(numpy.arange(_end.shape[0]).tolist(), 1,
@@ -134,11 +163,11 @@ def set_root(tree, **kwargs):
                         else:
                             raise ValueError("Only 2D and 3D domains are supported.")
                         _end = _end[:, :tree.domain.points.shape[1]]
-                        values = tree.domain.evaluate(_end).flatten()
+                        values = tree.domain(_end).flatten()
                         _end = _end[values < interior_range[1], :]
                         scale = numpy.linspace(0.0, 1.0, nonconvex_sampling).reshape((1, -1, 1))
                         _mid = _start*(1-scale) + _end.reshape((_end.shape[0], 1, _end.shape[1]))*scale
-                        values = tree.domain.evaluate(_mid.reshape((-1, _mid.shape[2]))).reshape((-1, nonconvex_sampling))
+                        values = tree.domain(_mid.reshape((-1, _mid.shape[2]))).reshape((-1, nonconvex_sampling))
                         _end = _end[~numpy.any(values > 0.0, axis=1)]
                         values = values[~numpy.any(values > 0.0, axis=1), :]
                         _end = _end[~numpy.any(values[:, nonconvex_sampling//2:] > interior_range[1], axis=1)]
@@ -161,7 +190,7 @@ def set_root(tree, **kwargs):
                         finished = True
                 else:
                     _end = _start + direction * threshold * numpy.linspace(0.75, 1.5, attempts).reshape(-1, 1)
-                    values = tree.domain.evaluate(_end[:, :tree.domain.points.shape[1]]).flatten()
+                    values = tree.domain(_end[:, :tree.domain.points.shape[1]]).flatten()
                     if len(values[values < interior_range[1]]) > 0:
                         _end = _end[values < interior_range[1], :]
                         _end_idx = tree.domain.random_generator.choice(numpy.arange(_end.shape[0]).tolist(), 1,
@@ -177,16 +206,27 @@ def set_root(tree, **kwargs):
         _flow = tree.parameters.terminal_flow(_end[:, :tree.domain.points.shape[1]])
     else:
         _flow = tree.parameters.terminal_flow
+    # Ensure _start and _end are 2D with shape (1, d) for basis calculation
     if len(_start.shape) == 1:
         _start = _start.reshape((1, -1))
+    elif _start.shape[0] != 1:
+        # Take only the first row if multiple rows exist
+        _start = _start[0:1, :]
     if len(_end.shape) == 1:
         _end = _end.reshape((1, -1))
+    elif _end.shape[0] != 1:
+        # Take only the first row if multiple rows exist
+        _end = _end[0:1, :]
+
     u, v, w = basis(_start.astype(numpy.float64), _end.astype(numpy.float64))
-    root_vessel[0, 0:3] = _start
-    root_vessel[0, 3:6] = _end
-    root_vessel[0, 6:9] = u
-    root_vessel[0, 9:12] = v
-    root_vessel[0, 12:15] = w
+
+    # Flatten all arrays to 1D for assignment to root_vessel row
+    # This handles cases where arrays might be (1, 3) instead of (3,)
+    root_vessel[0, 0:3] = _start.flatten()[:3]
+    root_vessel[0, 3:6] = _end.flatten()[:3]
+    root_vessel[0, 6:9] = u.flatten()[:3]
+    root_vessel[0, 9:12] = v.flatten()[:3]
+    root_vessel[0, 12:15] = w.flatten()[:3]
     root_vessel[0, 18] = 0.0
     root_vessel[0, 19] = 1.0
     root_vessel[0, 20] = _length

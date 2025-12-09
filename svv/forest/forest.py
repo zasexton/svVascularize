@@ -45,6 +45,7 @@ class Forest(object):
         self.directions = kwargs.get('directions', None)
         self.physical_clearance = kwargs.get('physical_clearance', 0.0)
         self.compete = kwargs.get('compete', False)
+        self.preallocation_step = kwargs.get('preallocation_step', None)
         self.geodesic = None
         self.convex = None
         if isinstance(self.start_points, type(None)):
@@ -55,7 +56,10 @@ class Forest(object):
         for i in range(self.n_networks):
             network = []
             for j in range(self.n_trees_per_network[i]):
-                tree = Tree()
+                if self.preallocation_step is not None:
+                    tree = Tree(preallocation_step=self.preallocation_step)
+                else:
+                    tree = Tree()
                 tree.physical_clearance = self.physical_clearance
                 network.append(tree)
             networks.append(network)
@@ -304,3 +308,349 @@ class Forest(object):
         for i in range(self.n_networks):
             for j in range(self.n_trees_per_network[i]):
                 self.networks[i][j].export_solid(outdir=outdir, shell_thickness=shell_thickness)
+
+    def save(self, path: str, include_timing: bool = False):
+        """
+        Save this Forest to a .forest file.
+
+        The saved file contains all forest data, tree parameters, and connectivity
+        information needed to reconstruct the forest. The domain is NOT saved
+        and must be set separately after loading via :meth:`set_domain`.
+
+        Parameters
+        ----------
+        path : str
+            Output filename. If no extension is provided, ".forest" is appended.
+        include_timing : bool, optional
+            Include generation timing data for each tree (useful for profiling).
+            Default is False.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to the saved file.
+
+        Examples
+        --------
+        >>> forest.save("my_forest.forest")
+        >>> # Later...
+        >>> loaded_forest = Forest.load("my_forest.forest")
+        >>> loaded_forest.set_domain(domain)
+        """
+        from pathlib import Path
+        import numpy as np
+        from svv.tree.data.data import TreeData
+
+        path = Path(path)
+        if path.suffix.lower() != '.forest':
+            path = path.with_suffix('.forest')
+
+        # Forest-level metadata
+        metadata = {
+            'version': 1,
+            'n_networks': int(self.n_networks),
+            'n_trees_per_network': [int(n) for n in self.n_trees_per_network],
+            'physical_clearance': float(self.physical_clearance),
+            'compete': bool(self.compete),
+            'convex': bool(self.convex) if self.convex is not None else None,
+        }
+
+        # Serialize start_points and directions (nested lists of arrays or None)
+        start_points_serialized = []
+        for network_pts in self.start_points:
+            network_serialized = []
+            for pt in network_pts:
+                if pt is not None:
+                    network_serialized.append(numpy.asarray(pt).tolist())
+                else:
+                    network_serialized.append(None)
+            start_points_serialized.append(network_serialized)
+
+        directions_serialized = []
+        for network_dirs in self.directions:
+            network_serialized = []
+            for d in network_dirs:
+                if d is not None:
+                    network_serialized.append(numpy.asarray(d).tolist())
+                else:
+                    network_serialized.append(None)
+            directions_serialized.append(network_serialized)
+
+        metadata['start_points'] = start_points_serialized
+        metadata['directions'] = directions_serialized
+
+        # Save each tree's data
+        trees_data = []
+        for i in range(self.n_networks):
+            network_trees = []
+            for j in range(self.n_trees_per_network[i]):
+                tree = self.networks[i][j]
+                tree_dict = {
+                    'metadata': {
+                        'n_terminals': int(tree.n_terminals),
+                        'physical_clearance': float(tree.physical_clearance),
+                        'random_seed': tree.random_seed,
+                        'characteristic_length': float(tree.characteristic_length) if tree.characteristic_length is not None else None,
+                        'clamped_root': bool(tree.clamped_root),
+                        'nonconvex_count': int(tree.nonconvex_count),
+                        'convex': bool(tree.convex) if tree.convex is not None else None,
+                        'segment_count': int(tree.segment_count),
+                        'domain_clearance': float(tree.domain_clearance) if tree.domain_clearance is not None else None,
+                    },
+                    'parameters': {
+                        'kinematic_viscosity': float(tree.parameters.kinematic_viscosity),
+                        'fluid_density': float(tree.parameters.fluid_density),
+                        'terminal_flow': float(tree.parameters.terminal_flow) if tree.parameters.terminal_flow is not None else None,
+                        'root_flow': float(tree.parameters.root_flow) if tree.parameters.root_flow is not None else None,
+                        'terminal_pressure': float(tree.parameters.terminal_pressure),
+                        'root_pressure': float(tree.parameters.root_pressure),
+                        'murray_exponent': float(tree.parameters.murray_exponent),
+                        'radius_exponent': float(tree.parameters.radius_exponent),
+                        'length_exponent': float(tree.parameters.length_exponent),
+                        'max_nonconvex_count': int(tree.parameters.max_nonconvex_count),
+                        'unit_system': {
+                            'length': tree.parameters.unit_system.base.length.symbol,
+                            'time': tree.parameters.unit_system.base.time.symbol,
+                            'mass': tree.parameters.unit_system.base.mass.symbol,
+                            'pressure': tree.parameters.unit_system.pressure.symbol,
+                        }
+                    },
+                    'data': numpy.asarray(tree.data),
+                    'vessel_map': dict(tree.vessel_map),
+                }
+                if include_timing:
+                    tree_dict['times'] = tree.times
+                network_trees.append(tree_dict)
+            trees_data.append(network_trees)
+
+        # Save connections if present
+        connections_data = None
+        if self.connections is not None:
+            connections_data = {
+                'tree_connections': []
+            }
+            for tc in self.connections.tree_connections:
+                # Serialize vessels (list of lists of numpy arrays)
+                vessels_serialized = []
+                for tree_vessels in tc.vessels:
+                    tree_vessels_list = []
+                    for v in tree_vessels:
+                        tree_vessels_list.append(numpy.asarray(v))
+                    vessels_serialized.append(tree_vessels_list)
+
+                # Serialize connected_network data
+                connected_network_data = []
+                for net_tree in tc.connected_network:
+                    connected_network_data.append(numpy.asarray(net_tree.data))
+
+                tc_data = {
+                    'network_id': int(tc.network_id),
+                    'assignments': tc.assignments,
+                    'vessels': vessels_serialized,
+                    'lengths': tc.lengths,
+                    'curve_type': tc.curve_type,
+                    'connected_network': connected_network_data,
+                }
+                connections_data['tree_connections'].append(tc_data)
+
+        # Build save dict
+        save_dict = {
+            'metadata': numpy.array([metadata], dtype=object),
+            'trees': numpy.array([trees_data], dtype=object),
+        }
+        if connections_data is not None:
+            save_dict['connections'] = numpy.array([connections_data], dtype=object)
+
+        numpy.savez_compressed(path, **save_dict)
+        return path
+
+    @classmethod
+    def load(cls, path: str):
+        """
+        Load a Forest from a .forest file.
+
+        The loaded forest will NOT have a domain set. You must call
+        :meth:`set_domain` after loading to enable domain-dependent
+        operations like collision detection and further vessel generation.
+
+        Parameters
+        ----------
+        path : str
+            Path to a .forest file.
+
+        Returns
+        -------
+        Forest
+            Loaded forest instance.
+
+        Notes
+        -----
+        If the forest was saved with connections (after calling :meth:`connect`),
+        the connection results (vessels, assignments, connected_network) will be
+        restored. However, to re-solve connections or generate new vessels,
+        you must first call :meth:`set_domain`.
+
+        Examples
+        --------
+        >>> forest = Forest.load("my_forest.forest")
+        >>> forest.set_domain(domain)  # Required for domain operations
+        >>> forest.show()
+        """
+        import numpy as np
+        from svv.tree.data.data import TreeData, TreeParameters, TreeMap
+        from svv.tree.data.units import UnitSystem
+
+        with np.load(path, allow_pickle=True) as f:
+            metadata = f['metadata'][0]
+            trees_data = f['trees'][0]
+            connections_data = f['connections'][0] if 'connections' in f else None
+
+        # Check version
+        version = metadata.get('version', 1)
+        if version > 1:
+            raise ValueError(f"Unsupported .forest file version: {version}")
+
+        # Reconstruct start_points and directions
+        start_points = []
+        for network_pts in metadata.get('start_points', []):
+            network_list = []
+            for pt in network_pts:
+                if pt is not None:
+                    network_list.append(numpy.array(pt))
+                else:
+                    network_list.append(None)
+            start_points.append(network_list)
+
+        directions = []
+        for network_dirs in metadata.get('directions', []):
+            network_list = []
+            for d in network_dirs:
+                if d is not None:
+                    network_list.append(numpy.array(d))
+                else:
+                    network_list.append(None)
+            directions.append(network_list)
+
+        # Create forest with metadata
+        forest = cls(
+            n_networks=metadata['n_networks'],
+            n_trees_per_network=metadata['n_trees_per_network'],
+            start_points=start_points if start_points else None,
+            directions=directions if directions else None,
+            physical_clearance=metadata.get('physical_clearance', 0.0),
+            compete=metadata.get('compete', False),
+        )
+        forest.convex = metadata.get('convex', None)
+
+        # Restore each tree's data
+        for i in range(forest.n_networks):
+            for j in range(forest.n_trees_per_network[i]):
+                tree_dict = trees_data[i][j]
+                tree = forest.networks[i][j]
+
+                # Restore unit system
+                us_dict = tree_dict['parameters'].get('unit_system', {})
+                unit_system = UnitSystem(
+                    length=us_dict.get('length', 'cm'),
+                    time=us_dict.get('time', 's'),
+                    mass=us_dict.get('mass', 'g'),
+                    pressure=us_dict.get('pressure', 'Ba'),
+                )
+                tree.parameters.set_unit_system(unit_system)
+
+                # Restore parameters
+                params = tree_dict['parameters']
+                tree.parameters.kinematic_viscosity = params['kinematic_viscosity']
+                tree.parameters.fluid_density = params['fluid_density']
+                tree.parameters.terminal_flow = params['terminal_flow']
+                tree.parameters.root_flow = params['root_flow']
+                tree.parameters.terminal_pressure = params['terminal_pressure']
+                tree.parameters.root_pressure = params['root_pressure']
+                tree.parameters.murray_exponent = params['murray_exponent']
+                tree.parameters.radius_exponent = params['radius_exponent']
+                tree.parameters.length_exponent = params['length_exponent']
+                tree.parameters.max_nonconvex_count = params['max_nonconvex_count']
+
+                # Restore data
+                tree.data = TreeData.from_array(tree_dict['data'])
+
+                # Restore vessel map
+                tree.vessel_map = TreeMap(tree_dict['vessel_map'])
+
+                # Restore metadata
+                meta = tree_dict['metadata']
+                tree.n_terminals = meta.get('n_terminals', 0)
+                tree.physical_clearance = meta.get('physical_clearance', 0.0)
+                tree.random_seed = meta.get('random_seed', None)
+                tree.characteristic_length = meta.get('characteristic_length', None)
+                tree.clamped_root = meta.get('clamped_root', False)
+                tree.nonconvex_count = meta.get('nonconvex_count', 0)
+                tree.convex = meta.get('convex', None)
+                tree.segment_count = meta.get('segment_count', 0)
+                tree.domain_clearance = meta.get('domain_clearance', 0.0)
+
+                # Restore timing if present
+                if 'times' in tree_dict:
+                    tree.times = tree_dict['times']
+
+        # Restore connections if present
+        if connections_data is not None:
+            forest.connections = ForestConnection(forest)
+            forest.connections.tree_connections = []
+
+            for tc_data in connections_data['tree_connections']:
+                # Create a minimal TreeConnection-like object to hold the data
+                tc = _LoadedTreeConnection(
+                    forest=forest,
+                    network_id=tc_data['network_id'],
+                    assignments=tc_data['assignments'],
+                    vessels=tc_data['vessels'],
+                    lengths=tc_data['lengths'],
+                    curve_type=tc_data['curve_type'],
+                    connected_network_data=tc_data['connected_network'],
+                )
+                forest.connections.tree_connections.append(tc)
+
+        return forest
+
+
+class _LoadedTreeConnection:
+    """
+    Minimal container for loaded TreeConnection data.
+
+    This class holds the results of a previously solved tree connection
+    without requiring access to the original domain or solving infrastructure.
+    """
+
+    def __init__(self, forest, network_id, assignments, vessels, lengths,
+                 curve_type, connected_network_data):
+        from svv.tree.data.data import TreeData
+
+        self.forest = forest
+        self.network_id = network_id
+        self.assignments = assignments
+        self.vessels = vessels
+        self.lengths = lengths
+        self.curve_type = curve_type
+        self.other_vessels = []
+        self.meshes = []
+        self.plotting_vessels = None
+        self.connections = []
+
+        # Reconstruct connected_network as Tree objects with data
+        self.connected_network = []
+        for i, data_array in enumerate(connected_network_data):
+            tree = Tree()
+            tree.parameters = forest.networks[network_id][i].parameters
+            tree.data = TreeData.from_array(data_array)
+            tree.domain = None  # Will be set when forest.set_domain() is called
+            self.connected_network.append(tree)
+
+        # Build network reference (matches TreeConnection structure)
+        self.network = []
+        for i in range(forest.n_trees_per_network[network_id]):
+            tree = Tree()
+            tree.parameters = forest.networks[network_id][i].parameters
+            tree.data = forest.networks[network_id][i].data
+            tree.domain = None
+            self.network.append(tree)

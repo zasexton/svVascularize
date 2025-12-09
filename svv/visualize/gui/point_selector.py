@@ -90,6 +90,7 @@ class PointSelectorWidget(QWidget):
         self.network_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.network_combo.setMaxVisibleItems(100)
         self.network_combo.addItem("Network 0")
+        self.network_combo.currentIndexChanged.connect(self._on_network_selection_changed)
         selection_layout.addWidget(self.network_combo)
 
         selection_layout.addWidget(QLabel("Tree:"))
@@ -242,6 +243,16 @@ class PointSelectorWidget(QWidget):
         point : np.ndarray
             Picked point coordinates
         """
+        # Ensure point is a 1D array with exactly 3 coordinates
+        point = np.asarray(point).flatten()
+        if point.size != 3:
+            # If we got something unexpected, try to extract first 3 values
+            if point.size >= 3:
+                point = point[:3]
+            else:
+                # Invalid point, ignore
+                return
+
         network = self.network_combo.currentIndex()
         tree_idx = self.tree_combo.currentIndex()
 
@@ -410,6 +421,11 @@ class PointSelectorWidget(QWidget):
         self.network_combo.clear()
         for i in range(value):
             self.network_combo.addItem(f"Network {i}")
+        self._update_point_list()
+
+    def _on_network_selection_changed(self, value):
+        """Handle network selection change in the dropdown."""
+        # Refresh list to reflect points for the selected network
         self._update_point_list()
 
     def _on_tree_changed(self, value):

@@ -34,7 +34,9 @@ class TreeConnection:
             tree_object.data = forest.networks[network_id][i].data
             tree_object.domain = forest.networks[network_id][i].domain
             self.network.append(tree_object)
+            print(f"Setup tree: {i}")
         self.connected_network = deepcopy(self.network)
+        print("Finish TreeConnection initialization")
 
     def solve(self, *args, num_vessels=20, attempts=5):
         tree_0 = 0
@@ -46,12 +48,16 @@ class TreeConnection:
         self.vessels.append([])
         self.lengths.append([])
         self.lengths.append([])
-        self.connected_network = deepcopy(self.network)
-        for j in trange(len(self.ctrlpts_functions[0]), desc=f"Tree {tree_0} to Tree {tree_1}", leave=False):
+        #print("Network copy")
+        #self.connected_network = deepcopy(self.network)
+        #print("Network copy complete")
+        for j in trange(len(self.ctrlpts_functions[0]), desc=f"Tree {tree_0} to Tree {tree_1}", leave=True):
+            print(f"setup vessel connection: {j}")
             conn = VesselConnection(self.forest, self.network_id, tree_0, tree_1,
                                     self.assignments[tree_0][j], self.assignments[tree_1][j],
                                     ctrl_function=self.ctrlpts_functions[0][j],
                                     clamp_first=True, clamp_second=True, curve_type=self.curve_type)
+            print(f"setup vessel connection finished")
             collisions = []
             collisions.append(conn.connection.other_line_segments)
             if len(self.vessels) > 0:

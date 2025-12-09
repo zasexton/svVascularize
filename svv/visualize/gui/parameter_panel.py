@@ -341,6 +341,19 @@ class ParameterPanel(QWidget):
         seed_label.setToolTip("Set random seed for reproducible results")
         advanced_form.addRow(seed_label, self.random_seed_spin)
 
+        # Preallocation size (rows) for tree data
+        self.preallocation_spin = QSpinBox()
+        self.preallocation_spin.setRange(1000, 20000000)
+        self.preallocation_spin.setSingleStep(100000)
+        self.preallocation_spin.setValue(int(4e6))
+        self.preallocation_spin.setToolTip(
+            "Maximum number of rows preallocated for each tree's data array.\n"
+            "Lower values reduce memory usage but limit the maximum number of vessels."
+        )
+        prealloc_label = QLabel("Preallocation Size (rows):")
+        prealloc_label.setToolTip("Maximum number of rows preallocated for each tree's data array.")
+        advanced_form.addRow(prealloc_label, self.preallocation_spin)
+
         scroll_layout.addWidget(advanced_group)
 
         # Add stretch to push everything to top
@@ -782,6 +795,7 @@ class ParameterPanel(QWidget):
         n_vessels = self.n_vessels_spin.value()
         physical_clearance = self.physical_clearance_spin.value()
         convexity_tolerance = self.convexity_tolerance_spin.value()
+        preallocation_step = self.preallocation_spin.value()
         random_seed = self.random_seed_spin.value() if self.random_seed_spin.value() >= 0 else None
         point_config = self.parent_gui.point_selector.get_configuration()
 
@@ -792,6 +806,7 @@ class ParameterPanel(QWidget):
                 n_vessels,
                 physical_clearance,
                 convexity_tolerance,
+                preallocation_step,
                 random_seed,
                 point_config,
                 cancel,
@@ -810,6 +825,7 @@ class ParameterPanel(QWidget):
                 n_vessels,
                 physical_clearance,
                 convexity_tolerance,
+                preallocation_step,
                 random_seed,
                 compete,
                 decay_prob,
@@ -1080,12 +1096,13 @@ class ParameterPanel(QWidget):
             if self.parent_gui:
                 self.parent_gui.update_status("Generation failed")
 
-    def _generate_tree_task(self, n_vessels, physical_clearance, convexity_tolerance, random_seed, config, cancel_event, progress_queue):
+    def _generate_tree_task(self, n_vessels, physical_clearance, convexity_tolerance,
+                            preallocation_step, random_seed, config, cancel_event, progress_queue):
         """Generate a single tree in a worker thread."""
         from svv.tree.tree import Tree
 
         tree_params = self._build_tree_parameters(self.tree_base_params)
-        tree = Tree(parameters=tree_params)
+        tree = Tree(parameters=tree_params, preallocation_step=preallocation_step)
         tree.physical_clearance = physical_clearance
         if random_seed is not None:
             tree.random_seed = random_seed
@@ -1147,7 +1164,7 @@ class ParameterPanel(QWidget):
         }
 
     def _generate_forest_task(self, n_vessels, physical_clearance, convexity_tolerance,
-                        random_seed, compete, decay_prob, config, cancel_event, progress_queue):
+                        preallocation_step, random_seed, compete, decay_prob, config, cancel_event, progress_queue):
         """Generate a forest in a worker thread."""
         from svv.forest.forest import Forest
 
@@ -1160,27 +1177,29 @@ class ParameterPanel(QWidget):
         def _point_array(pt):
             if pt is None:
                 return None
-            arr = np.asarray(pt, dtype=float)
+            arr = np.asarray(pt, dtype=float).flatten()
             d = self.parent_gui.domain.points.shape[1]
             # Normalize forest start points to a single (1, d) row so
             # downstream Domain.within/evaluate_fast calls always see a
             # 2D array of points and never a 1D vector.
-            if arr.ndim == 1 and arr.size == d:
+            # Handle case where we might have gotten multiple points - take first d values
+            if arr.size >= d:
+                arr = arr[:d]
+            if arr.size == d:
                 return arr.reshape(1, d)
-            if arr.ndim == 2 and arr.shape[0] == 1 and arr.shape[1] == d:
-                return arr
-            raise ValueError(f"Invalid start point shape {arr.shape}; expected a single {d}-component coordinate.")
+            raise ValueError(f"Invalid start point: got {arr.size} values, expected {d}-component coordinate.")
 
         def _vec_array(vec):
             if vec is None:
                 return None
-            arr = np.asarray(vec, dtype=float)
+            arr = np.asarray(vec, dtype=float).flatten()
             d = self.parent_gui.domain.points.shape[1]
-            if arr.ndim == 1 and arr.size == d:
+            # Handle case where we might have gotten multiple directions - take first d values
+            if arr.size >= d:
+                arr = arr[:d]
+            if arr.size == d:
                 return arr
-            if arr.ndim == 2 and arr.shape[0] == 1 and arr.shape[1] == d:
-                return arr.reshape(-1)
-            raise ValueError(f"Invalid direction shape {arr.shape}; expected {d}-component vector.")
+            raise ValueError(f"Invalid direction: got {arr.size} values, expected {d}-component vector.")
 
         norm_points = []
         norm_dirs = []
@@ -1202,7 +1221,8 @@ class ParameterPanel(QWidget):
             start_points=start_points,
             directions=directions,
             physical_clearance=physical_clearance,
-            compete=compete
+            compete=compete,
+            preallocation_step=preallocation_step,
         )
 
         for net_idx, network in enumerate(forest.networks):
@@ -1341,6 +1361,7 @@ class ParameterPanel(QWidget):
             'n_vessels': self.n_vessels_spin.value(),
             'physical_clearance': self.physical_clearance_spin.value(),
             'convexity_tolerance': self.convexity_tolerance_spin.value(),
+            'preallocation_step': self.preallocation_spin.value(),
             'random_seed': self.random_seed_spin.value() if self.random_seed_spin.value() >= 0 else None,
             'compete': self.compete_cb.isChecked(),
             'decay_probability': self.decay_probability_spin.value(),

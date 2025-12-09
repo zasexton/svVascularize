@@ -293,8 +293,17 @@ class Domain(object):
             if self.random_generator is None:
                 self.set_random_generator()
             if not skip_boundary:
-                self.get_boundary(resolution)
-                self.get_interior()
+                # Check if boundary/mesh were already loaded from .dmn file
+                # If so, skip expensive regeneration
+                has_boundary = getattr(self, 'boundary', None) is not None
+                has_mesh = (
+                    getattr(self, 'mesh', None) is not None and
+                    getattr(self, 'mesh_tree', None) is not None
+                )
+                if not has_boundary:
+                    self.get_boundary(resolution)
+                if not has_mesh:
+                    self.get_interior()
             return None
         functions = []
         firsts = []
@@ -611,7 +620,7 @@ class Domain(object):
             _mesh, nodes, vertices = triangulate(self.boundary, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
             _mesh.cell_data['Normalized_Area'] = (_mesh.cell_data['Area'] / sum(_mesh.cell_data['Area']))
-            self.all_mesh_cells = list(range(_mesh.n_cells))
+            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
             self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Area'])
             self.characteristic_length = _mesh.area**(1/self.points.shape[1])
             self.area = _mesh.area
@@ -620,7 +629,7 @@ class Domain(object):
             _mesh, nodes, vertices = tetrahedralize(self.boundary, order=1, nobisect=True, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
             _mesh.cell_data['Normalized_Volume'] = (_mesh.cell_data['Volume'] / sum(_mesh.cell_data['Volume']))
-            self.all_mesh_cells = list(range(_mesh.n_cells))
+            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
             self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Volume'])
             self.characteristic_length = _mesh.volume**(1/self.points.shape[1])
             self.area = _mesh.area

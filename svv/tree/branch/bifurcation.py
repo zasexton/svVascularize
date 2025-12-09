@@ -1042,9 +1042,20 @@ def add_vessel(tree, **kwargs):
                         terminal_point = terminal_points[i, :]
                         dist = close_exact_point(data[bifurcation_vessel, :].reshape(1,data.shape[1]),
                                           terminal_point)
-                        if dist < data[bifurcation_vessel, 21]*4:
+                        if dist < data[bifurcation_vessel, 21]*6:
                             print('too close')
                             continue
+                        """    
+                        dist_bifurcation_to_proximal = np.linalg.norm(bifurcation_point.reshape(1,-1) - data[closest_vessels[j, i], 0:3].reshape(1, -1)).flatten()
+                        if dist_bifurcation_to_proximal < data[bifurcation_vessel,21]:
+                            print('too close to proximal')
+                            continue
+
+                        dist_bifurcation_to_distal = np.linalg.norm(bifurcation_point.reshape(1,-1) - data[closest_vessels[j, i], 3:6].reshape(1, -1)).flatten()
+                        if dist_bifurcation_to_distal < data[bifurcation_vessel,21]:
+                            print('too close to distal')
+                            continue
+                        """
                         line = numpy.linspace(0, 1, nonconvex_sampling).reshape(-1, 1)
                         interior_terminal = tree.domain(terminal_points[i, :].reshape(1, -1)) < interior_range[1]
                         interior_bifurcation = tree.domain(bifurcation_point.reshape(1, -1)) < interior_range[1]
@@ -1054,8 +1065,9 @@ def add_vessel(tree, **kwargs):
                             terminal_line = bifurcation_point * line + terminal_points[i, :] * (1 - line)
                             values = tree.domain(terminal_line)
                             count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values.flatten() > interior_range[1]):
-                            if count > 1:
+                            if count > 1 or numpy.sum(count_outside) > 0:
                                 nonconvex_outside = True
                                 #print('Vessel outside interior range (interior terminal)')
                                 continue
@@ -1072,8 +1084,9 @@ def add_vessel(tree, **kwargs):
                                              bifurcation_point * (1 - line))
                             values = tree.domain(proximal_line)
                             count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values > interior_range[1]):
-                            if count > 1:
+                            if count > 1 or numpy.sum(count_outside) > 0:
                                 nonconvex_outside = True
                                 #print('Vessel outside interior range (interior proximal)')
                                 continue
@@ -1091,8 +1104,9 @@ def add_vessel(tree, **kwargs):
                                            bifurcation_point * (1 - line))
                             values = tree.domain(distal_line)
                             count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]))))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values > interior_range[1]):
-                            if count > 1:
+                            if count > 1 or numpy.sum(count_outside) > 0:
                                 nonconvex_outside = True
                                 #print('Vessel outside interior range (interior distal)')
                                 continue
@@ -1864,7 +1878,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
             dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
                                  numpy.linalg.norm(lines[0, 3:6] - x),
                                  numpy.linalg.norm(lines[1, 3:6] - x)])
-            triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
+            #triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
             #connectivity = numpy.nan_to_num(tree.data[:, 15:18], nan=-1.0).astype(int)
             results = func(x, data, terminal, connectivity,
                            vessel, murray_exponent, kinematic_viscosity,
@@ -1873,8 +1887,8 @@ def construct_optimizer(tree, point, vessel, **kwargs):
             try:
                 #value = np.tanh((np.clip(numpy.nan_to_num(results, nan=scale),0,scale) + triad_penalty) / scale)
                 value = (((
-                    np.clip(numpy.nan_to_num(results - scale, nan=2 * scale + penalty), 0, 2 * scale + penalty))+triad_penalty) / (
-                                    scale + penalty))
+                    np.clip(numpy.nan_to_num(results - scale, nan=2 * scale + penalty), 0, 2 * scale + penalty))) / (
+                                    scale + penalty)) # used to have triad_penalty
             except RuntimeWarning as e:
                 print("RuntimeWarning caught:", e)
                 print("scale =", scale)
@@ -1948,7 +1962,10 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         #assert results > tree_scale, '{} results < {} tree_scale'.format(results, tree_scale)
         #return (((np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty) + triad_penalty))/(scale+penalty))# + 1.0
         #return -1/np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty)
-        return -1 / np.clip(numpy.nan_to_num(results + triad_penalty + angle_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        #return -1 / np.clip(numpy.nan_to_num(results + triad_penalty + angle_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        #return -1 / np.clip(numpy.nan_to_num(results, nan=2 * scale + penalty), 0,
+        #                    2 * scale + penalty)
+        return numpy.log(numpy.nan_to_num(results, nan=2 * scale + penalty)/(scale + penalty))
         #return results
         #return results
         #return value

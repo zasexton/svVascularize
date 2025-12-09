@@ -401,13 +401,29 @@ class VascularizeGUI(QMainWindow):
         self.action_open.triggered.connect(self.load_domain_dialog)
         self.file_toolbar.addAction(self.action_open)
 
-        # Save action
+        # Save action (configuration)
         self.action_save = QAction(CADIcons.get_icon('save'), "Save", self)
         self.action_save.setShortcut(QKeySequence.Save)
         self.action_save.setStatusTip("Save configuration")
         self.action_save.setToolTip("Save Configuration (Ctrl+S)")
         self.action_save.triggered.connect(self.save_configuration)
         self.file_toolbar.addAction(self.action_save)
+
+        # Save Domain action
+        self.action_save_domain = QAction(CADIcons.get_icon('mesh'), "Save Domain...", self)
+        self.action_save_domain.setShortcut("Ctrl+Shift+S")
+        self.action_save_domain.setStatusTip("Save current domain to .dmn file (preserves create/solve results)")
+        self.action_save_domain.setToolTip("Save Domain to .dmn (Ctrl+Shift+S)")
+        self.action_save_domain.triggered.connect(self.save_domain_dialog)
+        self.file_toolbar.addAction(self.action_save_domain)
+
+        # Save Vascular Object action (Tree or Forest)
+        self.action_save_vascular = QAction(CADIcons.get_icon('tree'), "Save Vascular Object...", self)
+        self.action_save_vascular.setShortcut("Ctrl+Alt+S")
+        self.action_save_vascular.setStatusTip("Save generated Tree (.tree) or Forest (.forest) to file")
+        self.action_save_vascular.setToolTip("Save Tree/Forest (Ctrl+Alt+S)")
+        self.action_save_vascular.triggered.connect(self.save_vascular_object_dialog)
+        self.file_toolbar.addAction(self.action_save_vascular)
 
         # Export action
         self.action_export = QAction(CADIcons.get_icon('export'), "Export", self)
@@ -624,6 +640,8 @@ class VascularizeGUI(QMainWindow):
 
         file_menu.addAction(self.action_open)
         file_menu.addAction(self.action_save)
+        file_menu.addAction(self.action_save_domain)
+        file_menu.addAction(self.action_save_vascular)
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
@@ -878,6 +896,250 @@ class VascularizeGUI(QMainWindow):
                     "Error Saving",
                     f"Failed to save:\n\n{str(e)}"
                 )
+
+    def save_domain_dialog(self):
+        """Save the current domain to a .dmn file."""
+        if self.domain is None:
+            self._record_telemetry(
+                message="Save domain requested but no domain loaded",
+                level="warning",
+                action="save_domain_no_domain",
+            )
+            QMessageBox.warning(
+                self,
+                "No Domain",
+                "No domain is currently loaded.\n\n"
+                "Load a domain first using File > Open."
+            )
+            return
+
+        # Options dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Save Domain Options")
+        form = QFormLayout()
+
+        # Include boundary checkbox
+        include_boundary_cb = QCheckBox()
+        include_boundary_cb.setChecked(True)
+        include_boundary_cb.setToolTip(
+            "Include boundary mesh data for faster visualization.\n"
+            "Increases file size but avoids recomputation on load."
+        )
+        form.addRow("Include boundary mesh:", include_boundary_cb)
+
+        # Include full mesh checkbox
+        include_mesh_cb = QCheckBox()
+        include_mesh_cb.setChecked(False)
+        include_mesh_cb.setToolTip(
+            "Include full tetrahedral mesh data.\n"
+            "Significantly increases file size. Only needed for advanced use cases."
+        )
+        form.addRow("Include full mesh:", include_mesh_cb)
+
+        # Info label
+        from PySide6.QtWidgets import QLabel
+        info_label = QLabel(
+            "<i>Saving to .dmn preserves create() and solve() results,<br>"
+            "allowing faster loading in future sessions.</i>"
+        )
+        info_label.setWordWrap(True)
+        form.addRow(info_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout = QVBoxLayout()
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        dlg.setLayout(layout)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        include_boundary = include_boundary_cb.isChecked()
+        include_mesh = include_mesh_cb.isChecked()
+
+        # File dialog
+        default_name = ""
+        if hasattr(self.domain, 'filename') and self.domain.filename:
+            # Suggest same name with .dmn extension
+            from pathlib import Path
+            default_name = str(Path(self.domain.filename).with_suffix('.dmn'))
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Domain",
+            default_name,
+            "Domain Files (*.dmn);;All Files (*)"
+        )
+
+        if not file_path:
+            return
+
+        # Ensure .dmn extension
+        if not file_path.lower().endswith('.dmn'):
+            file_path += '.dmn'
+
+        # Save with progress
+        self.update_status("Saving domain...")
+        try:
+            self.domain.save(
+                file_path,
+                include_boundary=include_boundary,
+                include_mesh=include_mesh
+            )
+            self.update_status(f"Domain saved to {file_path}")
+            self.log_output(f"Domain saved to {file_path}")
+            QMessageBox.information(
+                self,
+                "Domain Saved",
+                f"Domain successfully saved to:\n{file_path}\n\n"
+                f"Options:\n"
+                f"• Include boundary: {'Yes' if include_boundary else 'No'}\n"
+                f"• Include full mesh: {'Yes' if include_mesh else 'No'}"
+            )
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self._record_telemetry(e, action="save_domain", traceback_str=tb)
+            self.update_status("Save failed")
+            QMessageBox.critical(
+                self,
+                "Error Saving Domain",
+                f"Failed to save domain:\n\n{str(e)}"
+            )
+
+    def save_vascular_object_dialog(self):
+        """Save the current Tree or Forest to a file."""
+        # Determine what object we have
+        obj = None
+        obj_type = None
+        if self.forest is not None:
+            obj = self.forest
+            obj_type = "forest"
+        elif self.trees:
+            obj = self.trees[0]
+            obj_type = "tree"
+
+        if obj is None:
+            self._record_telemetry(
+                message="Save vascular object requested but no tree/forest generated",
+                level="warning",
+                action="save_vascular_no_object",
+            )
+            QMessageBox.warning(
+                self,
+                "No Vascular Object",
+                "No Tree or Forest has been generated.\n\n"
+                "Generate a Tree or Forest first using the Parameter Panel."
+            )
+            return
+
+        # Options dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Save {obj_type.capitalize()} Options")
+        form = QFormLayout()
+
+        # Include timing checkbox
+        include_timing_cb = QCheckBox()
+        include_timing_cb.setChecked(False)
+        include_timing_cb.setToolTip(
+            "Include generation timing data.\n"
+            "Useful for profiling/debugging but increases file size."
+        )
+        form.addRow("Include timing data:", include_timing_cb)
+
+        # Info label
+        if obj_type == "tree":
+            info_text = (
+                f"<i>Saving Tree with {obj.n_terminals} vessels.<br>"
+                "The domain is NOT saved - you must call set_domain() after loading.</i>"
+            )
+            extension = ".tree"
+            filter_str = "Tree Files (*.tree);;All Files (*)"
+        else:
+            total_vessels = sum(
+                sum(tree.n_terminals for tree in network)
+                for network in obj.networks
+            )
+            info_text = (
+                f"<i>Saving Forest with {obj.n_networks} network(s), {total_vessels} total vessels.<br>"
+                "The domain is NOT saved - you must call set_domain() after loading.</i>"
+            )
+            extension = ".forest"
+            filter_str = "Forest Files (*.forest);;All Files (*)"
+
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        form.addRow(info_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout = QVBoxLayout()
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        dlg.setLayout(layout)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        include_timing = include_timing_cb.isChecked()
+
+        # File dialog
+        default_name = f"vascular_{obj_type}{extension}"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Save {obj_type.capitalize()}",
+            default_name,
+            filter_str
+        )
+
+        if not file_path:
+            return
+
+        # Ensure correct extension
+        if not file_path.lower().endswith(extension):
+            file_path += extension
+
+        # Save with progress
+        self.update_status(f"Saving {obj_type}...")
+        try:
+            saved_path = obj.save(file_path, include_timing=include_timing)
+            self.update_status(f"{obj_type.capitalize()} saved to {saved_path}")
+            self.log_output(f"{obj_type.capitalize()} saved to {saved_path}")
+
+            # Build summary message
+            if obj_type == "tree":
+                summary = f"Vessels: {obj.n_terminals}"
+            else:
+                summary = f"Networks: {obj.n_networks}\n"
+                for i, n_trees in enumerate(obj.n_trees_per_network):
+                    network_vessels = sum(tree.n_terminals for tree in obj.networks[i])
+                    summary += f"• Network {i}: {n_trees} tree(s), {network_vessels} vessels\n"
+
+            QMessageBox.information(
+                self,
+                f"{obj_type.capitalize()} Saved",
+                f"{obj_type.capitalize()} successfully saved to:\n{saved_path}\n\n"
+                f"{summary}\n"
+                f"Include timing: {'Yes' if include_timing else 'No'}\n\n"
+                f"Note: Load with {obj_type.capitalize()}.load('{Path(saved_path).name}')\n"
+                f"then call set_domain() to restore domain operations."
+            )
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self._record_telemetry(e, action=f"save_{obj_type}", traceback_str=tb)
+            self.update_status("Save failed")
+            QMessageBox.critical(
+                self,
+                f"Error Saving {obj_type.capitalize()}",
+                f"Failed to save {obj_type}:\n\n{str(e)}"
+            )
 
     # ---- Fabricate / Simulation exports ----
     def _require_synthetic_object(self):
@@ -1783,10 +2045,15 @@ class VascularizeGUI(QMainWindow):
     # ---- Background domain loading ----
     def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Queue | None = None,
                           build_resolution: int | None = None):
-        def report_progress(value):
+        def report_progress(value, label=None):
+            """Report progress value and optionally update the label text."""
             if progress_queue is not None:
                 try:
-                    progress_queue.put(value)
+                    # Send tuple of (value, label) if label provided, else just value
+                    if label is not None:
+                        progress_queue.put((value, label))
+                    else:
+                        progress_queue.put(value)
                 except Exception:
                     pass
 
@@ -1794,11 +2061,81 @@ class VascularizeGUI(QMainWindow):
             from svv.domain.domain import Domain
             suffix = Path(file_path).suffix.lower()
             if suffix == ".dmn":
-                report_progress(5)
+                # Step 1: Load the .dmn file
+                report_progress(5, "Loading domain file...")
                 domain = Domain.load(file_path)
                 if cancel_event.is_set():
                     return None
-                # Ensure boundary is available; allow caller to control resolution
+                report_progress(30, "Domain file loaded")
+
+                # Check if mesh data was already loaded from the .dmn file
+                # If so, we can skip the expensive tetrahedralization step
+                mesh_already_loaded = (
+                    getattr(domain, 'mesh', None) is not None and
+                    getattr(domain, 'mesh_tree', None) is not None and
+                    getattr(domain, 'boundary', None) is not None
+                )
+
+                build_failed = False
+                build_error_msg = None
+
+                if mesh_already_loaded:
+                    # Mesh was included in .dmn file - skip rebuild
+                    report_progress(90, "Domain loaded with cached mesh data")
+                else:
+                    # Step 2: Build (tetrahedralize and extract boundary)
+                    report_progress(35, "Building domain (tetrahedralization + boundary extraction)...")
+                    try:
+                        if build_resolution is not None:
+                            domain.build(resolution=build_resolution)
+                        else:
+                            domain.build()
+                        report_progress(90, "Domain built successfully")
+                    except Exception as exc:
+                        # If build fails (e.g., TetGen errors) continue with loaded
+                        # fast-eval structures only so tree/forest generation still
+                        # works, but record the failure in telemetry for diagnosis.
+                        build_failed = True
+                        build_error_msg = str(exc)
+                        try:
+                            import traceback
+                            tb = traceback.format_exc()
+                            self._record_telemetry(exc, action="load_domain_build", traceback_str=tb)
+                        except Exception:
+                            pass
+                        report_progress(90, "Domain build failed (continuing without mesh)")
+
+                # Store build status on domain for later reference
+                domain._build_failed = build_failed
+                domain._build_error = build_error_msg
+                if cancel_event.is_set():
+                    return None
+            elif suffix in {".vtp", ".vtu", ".stl"}:
+                import pyvista as pv
+
+                # Step 1: Read mesh file
+                report_progress(5, "Reading mesh file...")
+                mesh = pv.read(file_path)
+                if cancel_event.is_set():
+                    return None
+
+                # Step 2: Create domain
+                report_progress(10, "Creating domain (initializing implicit function)...")
+                domain = Domain(mesh)
+                domain.create()
+                if cancel_event.is_set():
+                    return None
+                report_progress(30, "Domain created")
+
+                # Step 3: Solve (compute fast evaluation structures)
+                report_progress(35, "Solving domain (computing evaluation structures)...")
+                domain.solve()
+                if cancel_event.is_set():
+                    return None
+                report_progress(60, "Domain solved")
+
+                # Step 4: Build (tetrahedralize and extract boundary)
+                report_progress(65, "Building domain (tetrahedralization + boundary extraction)...")
                 build_failed = False
                 build_error_msg = None
                 try:
@@ -1806,36 +2143,21 @@ class VascularizeGUI(QMainWindow):
                         domain.build(resolution=build_resolution)
                     else:
                         domain.build()
+                    report_progress(90, "Domain built successfully")
                 except Exception as exc:
-                    # If build fails (e.g., TetGen errors) continue with loaded
-                    # fast-eval structures only so tree/forest generation still
-                    # works, but record the failure in telemetry for diagnosis.
                     build_failed = True
                     build_error_msg = str(exc)
                     try:
                         import traceback
                         tb = traceback.format_exc()
-                        self._record_telemetry(exc, action="load_domain_build", traceback_str=tb)
+                        self._record_telemetry(exc, action="load_mesh_build", traceback_str=tb)
                     except Exception:
                         pass
+                    report_progress(90, "Domain build failed (continuing without mesh)")
 
                 # Store build status on domain for later reference
                 domain._build_failed = build_failed
                 domain._build_error = build_error_msg
-                if cancel_event.is_set():
-                    return None
-                report_progress(60)
-            elif suffix in {".vtp", ".vtu", ".stl"}:
-                import pyvista as pv
-                mesh = pv.read(file_path)
-                domain = Domain(mesh)
-                domain.create()
-                if cancel_event.is_set():
-                    return None
-                domain.solve()
-                if cancel_event.is_set():
-                    return None
-                domain.build()
             else:
                 raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -1843,11 +2165,12 @@ class VascularizeGUI(QMainWindow):
                 return None
 
             if domain.boundary is None and hasattr(domain, 'patches') and len(domain.patches) > 0:
+                report_progress(92, "Building boundary from patches...")
                 domain.build()
-                report_progress(85)
+                report_progress(98, "Boundary built")
 
             domain.filename = file_path
-            report_progress(100)
+            report_progress(100, "Domain ready")
             return domain
         except Exception as exc:
             return exc
@@ -1872,20 +2195,36 @@ class VascularizeGUI(QMainWindow):
         self._load_progress.canceled.connect(self._load_cancel_event.set)
         self._load_progress.show()
 
-        # For .dmn files, prompt for build resolution to control surface quality
+        # Prompt for build resolution to control surface quality
         suffix = Path(file_path).suffix.lower()
         build_resolution = None
-        if suffix == ".dmn":
+        if suffix in {".dmn", ".vtp", ".vtu", ".stl"}:
             dlg = QDialog(self)
-            dlg.setWindowTitle("Domain Build Resolution")
+            dlg.setWindowTitle("Domain Build Options")
             form = QFormLayout()
 
             res_spin = QSpinBox()
             res_spin.setRange(5, 200)
             res_spin.setValue(25)
-            res_spin.setToolTip("Resolution used when extracting the domain surface from the implicit field.\n"
-                                "Higher values yield smoother boundaries at increased compute cost.")
+            if suffix == ".dmn":
+                res_spin.setToolTip("Resolution used when extracting the domain surface from the implicit field.\n"
+                                    "Higher values yield smoother boundaries at increased compute cost.")
+            else:
+                res_spin.setToolTip("Resolution used for domain tetrahedralization and boundary extraction.\n"
+                                    "Higher values yield finer meshes at increased compute cost.")
             form.addRow("Build resolution:", res_spin)
+
+            # Add info label for mesh files
+            if suffix != ".dmn":
+                from PySide6.QtWidgets import QLabel
+                info_label = QLabel(
+                    f"<i>Loading {suffix} file will run:<br>"
+                    f"• create() - Initialize implicit function<br>"
+                    f"• solve() - Compute evaluation structures<br>"
+                    f"• build() - Tetrahedralize and extract boundary</i>"
+                )
+                info_label.setWordWrap(True)
+                form.addRow(info_label)
 
             buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
             buttons.accepted.connect(dlg.accept)
@@ -1916,11 +2255,18 @@ class VascularizeGUI(QMainWindow):
         if self._load_progress_queue is not None and self._load_progress is not None:
             while not self._load_progress_queue.empty():
                 try:
-                    value = self._load_progress_queue.get_nowait()
+                    item = self._load_progress_queue.get_nowait()
                 except Exception:
                     break
                 try:
-                    self._load_progress.setValue(int(value))
+                    # Handle both plain values and (value, label) tuples
+                    if isinstance(item, tuple):
+                        value, label = item
+                        self._load_progress.setValue(int(value))
+                        if label:
+                            self._load_progress.setLabelText(label)
+                    else:
+                        self._load_progress.setValue(int(item))
                 except Exception:
                     pass
         if self._load_future.done():
