@@ -207,12 +207,19 @@ def set_root(tree, **kwargs):
     else:
         _flow = tree.parameters.terminal_flow
     # Ensure _start and _end are 2D with shape (1, d) for basis calculation
-    if len(_start.shape) == 1:
+    # Handle arrays with more than 2 dimensions by flattening first
+    d = tree.domain.points.shape[1]
+    if _start.ndim > 2:
+        _start = _start.flatten()[:d].reshape((1, d))
+    elif _start.ndim == 1:
         _start = _start.reshape((1, -1))
     elif _start.shape[0] != 1:
         # Take only the first row if multiple rows exist
         _start = _start[0:1, :]
-    if len(_end.shape) == 1:
+
+    if _end.ndim > 2:
+        _end = _end.flatten()[:d].reshape((1, d))
+    elif _end.ndim == 1:
         _end = _end.reshape((1, -1))
     elif _end.shape[0] != 1:
         # Take only the first row if multiple rows exist
