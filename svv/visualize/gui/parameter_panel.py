@@ -308,6 +308,16 @@ class ParameterPanel(QWidget):
         self.n_trees_spin.valueChanged.connect(self._on_forest_trees_changed)
         forest_form.addRow("Trees per Network:", self.n_trees_spin)
 
+        # Curve type used when connecting trees into networks
+        self.curve_type_combo = QComboBox()
+        # Display labels mapped to internal curve_type strings used by svv.forest.connect.curve.Curve
+        self.curve_type_combo.addItem("Bezier", userData="Bezier")
+        self.curve_type_combo.addItem("Catmull-Rom", userData="CatmullRom")
+        self.curve_type_combo.addItem("NURBS", userData="NURBS")
+        self.curve_type_combo.setCurrentIndex(0)
+        self.curve_type_combo.setToolTip("Curve family used when connecting forest trees into networks")
+        forest_form.addRow("Connection Curve:", self.curve_type_combo)
+
         self.compete_cb = QCheckBox("Enable Competition")
         self.compete_cb.setToolTip("Enable competition between trees for territory")
         forest_form.addRow("Competition:", self.compete_cb)
@@ -396,11 +406,6 @@ class ParameterPanel(QWidget):
         self.generate_btn.setObjectName("primaryButton")
         self.generate_btn.setToolTip("Generate vascular tree or forest with current parameters")
         button_layout.addWidget(self.generate_btn)
-
-        # Connect forest toggle
-        self.connect_forest_cb = QCheckBox("Connect trees within forest")
-        self.connect_forest_cb.setToolTip("If checked, connect generated forest trees into a network")
-        button_layout.addWidget(self.connect_forest_cb)
 
         self.connect_now_btn = QPushButton("Connect Forest")
         self.connect_now_btn.clicked.connect(self._connect_existing_forest)
@@ -836,7 +841,7 @@ class ParameterPanel(QWidget):
             self._start_generation_task("Generating forest...", n_vessels, task_fn, self._on_forest_generated)
 
     @staticmethod
-    def _connect_forest_task(forest):
+    def _connect_forest_task(forest, curve_type="Bezier"):
         """
         Run forest.connect() in a worker context and return any exception.
 
@@ -846,7 +851,7 @@ class ParameterPanel(QWidget):
             None on success, otherwise the raised exception.
         """
         try:
-            forest.connect()
+            forest.connect(curve_type=curve_type)
             return None
         except Exception as exc:  # Capture so GUI thread can handle it gracefully
             forest.connections = None
@@ -927,7 +932,16 @@ class ParameterPanel(QWidget):
         if hasattr(self, 'connect_now_btn'):
             self.connect_now_btn.setEnabled(False)
 
-        future = self._executor.submit(self._connect_forest_task, forest)
+        # Determine desired curve family from the GUI selector; default to Bezier
+        curve_type = "Bezier"
+        try:
+            if hasattr(self, "curve_type_combo") and self.curve_type_combo is not None:
+                data = self.curve_type_combo.currentData()
+                curve_type = data if data is not None else self.curve_type_combo.currentText()
+        except Exception:
+            curve_type = "Bezier"
+
+        future = self._executor.submit(self._connect_forest_task, forest, curve_type)
         self._connect_future = future
         self._poll_connect_future(future, forest, show_success_dialog)
 
@@ -1172,7 +1186,6 @@ class ParameterPanel(QWidget):
         n_trees_per_network = config['n_trees_per_network']
         start_points = config['start_points']
         directions = config['directions']
-        connect_forest = config.get('connect_forest', False)
 
         def _point_array(pt):
             if pt is None:
@@ -1254,7 +1267,6 @@ class ParameterPanel(QWidget):
             'convexity_tolerance': convexity_tolerance,
             'compete': compete,
             'decay_prob': decay_prob,
-            'connect_requested': connect_forest,
             'total_vessels': total_vessels,
             'canceled': cancel_event.is_set(),
         }
@@ -1323,10 +1335,7 @@ class ParameterPanel(QWidget):
                 f"Forest generated successfully with {total_vessels} vessels across {n_networks} networks"
             )
             self.parent_gui.log_output(f"[Forest] done: {total_vessels} vessels across {n_networks} networks")
-            if result.get('connect_requested') and forest is not None:
-                self.parent_gui.log_output("[Forest] connecting...")
-                self.parent_gui.update_status("Connecting forest...")
-            elif forest.connections is None:
+            if forest.connections is None:
                 self.parent_gui.log_output("[Forest] connect pending - click Connect Forest to link trees")
 
         QMessageBox.information(
@@ -1338,9 +1347,6 @@ class ParameterPanel(QWidget):
             f"Competition: {'Enabled' if compete else 'Disabled'}\n"
             f"Physical clearance: {physical_clearance}"
         )
-
-        if result.get('connect_requested') and forest is not None:
-            self._start_forest_connect(forest, show_success_dialog=False)
 
     def _export_config(self):
         """Export the current configuration."""
@@ -1365,7 +1371,6 @@ class ParameterPanel(QWidget):
             'random_seed': self.random_seed_spin.value() if self.random_seed_spin.value() >= 0 else None,
             'compete': self.compete_cb.isChecked(),
             'decay_probability': self.decay_probability_spin.value(),
-            'connect_forest': getattr(self, 'connect_forest_cb', None).isChecked() if hasattr(self, 'connect_forest_cb') else False,
             'tree_parameters': dict(self.tree_base_params),
             'tree_parameter_overrides': {str(k): v for k, v in self.tree_param_overrides.items()}
         }
