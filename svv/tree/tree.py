@@ -21,7 +21,13 @@ from collections import ChainMap
 
 
 class Tree(object):
-    def __init__(self, *, parameters: Optional[TreeParameters] = None, unit_system: Optional[UnitSystem] = None):
+    def __init__(
+        self,
+        *,
+        parameters: Optional[TreeParameters] = None,
+        unit_system: Optional[UnitSystem] = None,
+        preallocation_step: int = int(4e6),
+    ):
         """
         The Tree class defines a branching tree structure
         that is used to abstract the physical representation
@@ -46,7 +52,7 @@ class Tree(object):
         self.nonconvex_count = 0
         self.clamped_root = False
         self.rtree = None
-        self.preallocation_step = int(4e6)
+        self.preallocation_step = int(preallocation_step)
         self.preallocate = TreeData((self.preallocation_step, 31))
         self.segment_count = 0
         #self.preallocate_connectivity = (np.ones((self.preallocation_step, 3)) * -1).astype(int)
@@ -91,8 +97,26 @@ class Tree(object):
         self.characteristic_length = domain.characteristic_length
         self.convex = np.isclose(domain.convexity, 1.0, atol=convexity_tolerance)
         if self.physical_clearance > 0.0:
-            patch = domain.patches[0]
-            pt = (patch.points[0, :] + patch.normals[0, :] * self.physical_clearance).reshape(1, patch.points.shape[1])
+            # Calculate domain_clearance by evaluating a point offset from the surface
+            # Try to use patches first, fall back to boundary if patches not available
+            if len(getattr(domain, 'patches', [])) > 0:
+                patch = domain.patches[0]
+                pt = (patch.points[0, :] + patch.normals[0, :] * self.physical_clearance).reshape(1, patch.points.shape[1])
+            elif getattr(domain, 'boundary', None) is not None and domain.boundary.n_points > 0:
+                # Use boundary point and compute normal from the boundary mesh
+                boundary_pt = domain.boundary.points[0, :domain.points.shape[1]]
+                # Compute normal at this point using the boundary mesh
+                if hasattr(domain.boundary, 'point_normals') and domain.boundary.point_normals is not None:
+                    normal = domain.boundary.point_normals[0, :domain.points.shape[1]]
+                else:
+                    # Compute normals if not available
+                    domain.boundary.compute_normals(point_normals=True, inplace=True)
+                    normal = domain.boundary.point_normals[0, :domain.points.shape[1]]
+                # Offset point inward (negative normal direction for inward)
+                pt = (boundary_pt - normal * self.physical_clearance).reshape(1, domain.points.shape[1])
+            else:
+                # Fall back to using domain points if nothing else available
+                pt = domain.points[0, :].reshape(1, domain.points.shape[1])
             value = domain(pt)
             self.domain_clearance = abs(value).flatten()[0]
         else:
@@ -277,8 +301,179 @@ class Tree(object):
     def show(self, **kwargs):
         return show(self, **kwargs)
 
-    def save(self):
-        pass
+    def save(self, path: str, include_timing: bool = False):
+        """
+        Save this Tree to a .tree file.
+
+        The saved file contains all tree data, parameters, and connectivity
+        information needed to reconstruct the tree. The domain is NOT saved
+        and must be set separately after loading via :meth:`set_domain`.
+
+        Parameters
+        ----------
+        path : str
+            Output filename. If no extension is provided, ".tree" is appended.
+        include_timing : bool, optional
+            Include generation timing data (useful for profiling/debugging).
+            Default is False.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to the saved file.
+
+        Examples
+        --------
+        >>> tree.save("my_tree.tree")
+        >>> # Later...
+        >>> loaded_tree = Tree.load("my_tree.tree")
+        >>> loaded_tree.set_domain(domain)
+        """
+        from pathlib import Path
+
+        path = Path(path)
+        if path.suffix.lower() != '.tree':
+            path = path.with_suffix('.tree')
+
+        # Metadata dict (JSON-serializable scalars)
+        metadata = {
+            'version': 1,
+            'n_terminals': int(self.n_terminals),
+            'physical_clearance': float(self.physical_clearance),
+            'random_seed': self.random_seed,
+            'characteristic_length': float(self.characteristic_length) if self.characteristic_length is not None else None,
+            'clamped_root': bool(self.clamped_root),
+            'nonconvex_count': int(self.nonconvex_count),
+            'convex': bool(self.convex) if self.convex is not None else None,
+            'segment_count': int(self.segment_count),
+            'domain_clearance': float(self.domain_clearance) if self.domain_clearance is not None else None,
+        }
+
+        # Parameters (serialize to dict)
+        params_dict = {
+            'kinematic_viscosity': float(self.parameters.kinematic_viscosity),
+            'fluid_density': float(self.parameters.fluid_density),
+            'terminal_flow': float(self.parameters.terminal_flow) if self.parameters.terminal_flow is not None else None,
+            'root_flow': float(self.parameters.root_flow) if self.parameters.root_flow is not None else None,
+            'terminal_pressure': float(self.parameters.terminal_pressure),
+            'root_pressure': float(self.parameters.root_pressure),
+            'murray_exponent': float(self.parameters.murray_exponent),
+            'radius_exponent': float(self.parameters.radius_exponent),
+            'length_exponent': float(self.parameters.length_exponent),
+            'max_nonconvex_count': int(self.parameters.max_nonconvex_count),
+            # Persist base units plus the current pressure symbol for
+            # introspection. On load, UnitSystem is always constructed from
+            # the base units so pressure remains a derived quantity.
+            'unit_system': {
+                'length': self.parameters.unit_system.base.length.symbol,
+                'time': self.parameters.unit_system.base.time.symbol,
+                'mass': self.parameters.unit_system.base.mass.symbol,
+                'pressure': self.parameters.unit_system.pressure.symbol,
+            }
+        }
+
+        # Build save dict
+        save_dict = {
+            'metadata': np.array([metadata], dtype=object),
+            'parameters': np.array([params_dict], dtype=object),
+            'data': np.asarray(self.data),  # TreeData as plain ndarray
+            'vessel_map': np.array([dict(self.vessel_map)], dtype=object),
+        }
+
+        if include_timing:
+            save_dict['times'] = np.array([self.times], dtype=object)
+
+        np.savez_compressed(path, **save_dict)
+        return path
+
+    @classmethod
+    def load(cls, path: str):
+        """
+        Load a Tree from a .tree file.
+
+        The loaded tree will NOT have a domain set. You must call
+        :meth:`set_domain` after loading to enable domain-dependent
+        operations like collision detection.
+
+        Parameters
+        ----------
+        path : str
+            Path to a .tree file.
+
+        Returns
+        -------
+        Tree
+            Loaded tree instance.
+
+        Examples
+        --------
+        >>> tree = Tree.load("my_tree.tree")
+        >>> tree.set_domain(domain)  # Required for domain operations
+        """
+        with np.load(path, allow_pickle=True) as f:
+            metadata = f['metadata'][0]
+            params_dict = f['parameters'][0]
+            data_array = f['data']
+            vessel_map_dict = f['vessel_map'][0]
+            times = f['times'][0] if 'times' in f else None
+
+        # Check version
+        version = metadata.get('version', 1)
+        if version > 1:
+            raise ValueError(f"Unsupported .tree file version: {version}")
+
+        # Reconstruct unit system from base units only; pressure and other
+        # derived quantities are always auto-derived from these.
+        us_dict = params_dict.get('unit_system', {})
+        unit_system = UnitSystem(
+            length=us_dict.get('length', 'cm'),
+            time=us_dict.get('time', 's'),
+            mass=us_dict.get('mass', 'g'),
+        )
+
+        # Size preallocation to the stored data rather than using the very
+        # large default growth preallocation, to avoid excessive memory use
+        # when loading existing trees.
+        n_rows = int(getattr(data_array, 'shape', (0,))[0]) or 1
+        preallocation_step = max(n_rows * 2, 1)
+
+        # Create tree with parameters and tailored preallocation
+        tree = cls(unit_system=unit_system, preallocation_step=preallocation_step)
+
+        # Restore parameters
+        tree.parameters.kinematic_viscosity = params_dict['kinematic_viscosity']
+        tree.parameters.fluid_density = params_dict['fluid_density']
+        tree.parameters.terminal_flow = params_dict['terminal_flow']
+        tree.parameters.root_flow = params_dict['root_flow']
+        tree.parameters.terminal_pressure = params_dict['terminal_pressure']
+        tree.parameters.root_pressure = params_dict['root_pressure']
+        tree.parameters.murray_exponent = params_dict['murray_exponent']
+        tree.parameters.radius_exponent = params_dict['radius_exponent']
+        tree.parameters.length_exponent = params_dict['length_exponent']
+        tree.parameters.max_nonconvex_count = params_dict['max_nonconvex_count']
+
+        # Restore data
+        tree.data = TreeData.from_array(data_array)
+
+        # Restore vessel map
+        tree.vessel_map = TreeMap(vessel_map_dict)
+
+        # Restore metadata
+        tree.n_terminals = metadata.get('n_terminals', 0)
+        tree.physical_clearance = metadata.get('physical_clearance', 0.0)
+        tree.random_seed = metadata.get('random_seed', None)
+        tree.characteristic_length = metadata.get('characteristic_length', None)
+        tree.clamped_root = metadata.get('clamped_root', False)
+        tree.nonconvex_count = metadata.get('nonconvex_count', 0)
+        tree.convex = metadata.get('convex', None)
+        tree.segment_count = metadata.get('segment_count', 0)
+        tree.domain_clearance = metadata.get('domain_clearance', 0.0)
+
+        # Restore timing data if present
+        if times is not None:
+            tree.times = times
+
+        return tree
 
     def export_solid(self, outdir=None, shell_thickness=0.0, watertight=False, **kwargs):
         if isinstance(outdir, type(None)):
@@ -297,8 +492,25 @@ class Tree(object):
         return model
 
 
-    def export_centerlines(self, outdir=None, **kwargs):
-        centerlines, polys = build_centerlines(self)
+    def export_centerlines(self, points_per_unit_length: int = 100, **kwargs):
+        """
+        Export centerline geometry for this tree.
+
+        Parameters
+        ----------
+        points_per_unit_length : int, optional
+            Sampling density along each spline, in points per unit length of
+            centerline. Higher values yield smoother centerlines at increased
+            file size. Default is 100.
+
+        Returns
+        -------
+        centerlines : pyvista.PolyData
+            Centerline polydata with radius and section-area arrays.
+        polys : list[pyvista.PolyData]
+            Per-branch polylines used to construct the merged centerline set.
+        """
+        centerlines, polys = build_centerlines(self, points_per_unit_length=points_per_unit_length)
         return centerlines, polys
 
 

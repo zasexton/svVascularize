@@ -29,7 +29,7 @@ def main():
     """Run contrast validation and report results."""
 
     # Locate token file
-    token_file = project_root / 'svv' / 'visualize' / 'gui' / 'design_tokens_cad.json'
+    token_file = project_root / 'svv' / 'visualize' / 'gui' / 'design_tokens.json'
 
     if not token_file.exists():
         print(f"❌ ERROR: Token file not found: {token_file}")
@@ -75,7 +75,7 @@ def main():
         print("=" * 70)
         print()
         print("To fix contrast issues:")
-        print("1. Edit svv/visualize/gui/design_tokens_cad.json")
+        print("1. Edit svv/visualize/gui/design_tokens.json")
         print("2. Adjust colors that are failing")
         print("3. Re-run this validation script")
         print("4. Regenerate the QSS theme: python -m svv.visualize.gui.theme_generator")

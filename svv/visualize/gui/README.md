@@ -1,9 +1,10 @@
 # svVascularize GUI
 
-Interactive GUI for visualizing and manipulating Domain objects to configure Tree and Forest vascularization.
+Interactive GUI for visualizing and manipulating Domain objects to configure Tree and Forest vascularization, using a single CAD-style theme with dockable panels.
 
 ## Features
 
+- **CAD-Style Layout**: Dockable panels, toolbars, saved layouts, and an object browser inspired by CAD apps
 - **3D Domain Visualization**: View your domain mesh in an interactive 3D viewport
 - **Interactive Point Selection**: Click on the domain surface to select start points for trees
 - **Direction Control**: Optionally specify custom directions for tree growth
@@ -16,10 +17,12 @@ Interactive GUI for visualizing and manipulating Domain objects to configure Tre
 
 The GUI requires PySide6 and PyVistaQt (with PyVista).
 
-Recommended (conda):
+Conda (recommended for shipping/testing):
 ```bash
-conda install -c conda-forge pyside6 pyvista pyvistaqt
+conda env create -f environment-gui.yml
+conda activate svv-gui
 ```
+This installs PySide6/PyVista/PyVistaQt plus Mesa/GL runtime pieces needed on many Linux systems.
 
 Alternative (pip):
 ```bash
@@ -113,46 +116,23 @@ These settings help avoid mixing system Mesa with conda libraries, which can cau
 
 ### Main Window
 
-The main window is split into two panels:
+- Central 3D viewport (PyVista) with CAD-themed gradient background
+- Toolbars for file, view, and generation actions
+- Dockable panels for the model tree, properties, and info (layouts saved/restored)
 
-1. **Left Panel (70%)**: 3D visualization using PyVista
-2. **Right Panel (30%)**: Control widgets
+### Docked Panels
 
-### Control Widgets
-
-#### Point Selector
-
-- **Networks**: Set the number of vascular networks
-- **Network/Tree Selection**: Choose which network and tree to add points to
-- **Pick Point**: Click on the domain surface to add start points
-- **Manual Input**: Enter point coordinates manually
-- **Direction Control**: Optionally specify custom growth directions
-- **Point List**: View and manage all added points
-
-#### Parameter Panel
-
-- **Generation Mode**: Choose between single tree or forest (multiple trees)
-- **Tree Parameters**:
-  - Number of vessels to generate
-  - Physical clearance between vessels
-  - Convexity tolerance
-- **Forest Parameters** (when in forest mode):
-  - Competition between trees
-  - Decay probability
-- **Advanced Parameters**:
-  - Random seed for reproducibility
+- **Model Tree**: Domain/points/trees/forests visibility and counts
+- **Start Points**: Network/tree selection, pick on mesh, manual entry, direction vectors
+- **Generation**: Mode (Tree/Forest), vessel counts, clearances, forest competition, seed
+- **Info**: Domain stats and status messages (bottom dock, hidden by default)
 
 ### Menu Bar
 
-- **File**:
-  - Load Domain: Load a .dmn domain file
-  - Save Configuration: Export start points and parameters to JSON
-  - Exit: Close the application
-- **View**:
-  - Reset Camera: Reset the 3D view
-  - Toggle Domain Visibility: Show/hide the domain mesh
-- **Help**:
-  - About: Show information about the application
+- **File**: Load domain, save configuration, exit
+- **View**: Camera presets, visibility toggles, panel/toolbar visibility, layout save/reset
+- **Generate**: Start point and generation shortcuts
+- **Help**: About dialog
 
 ## Workflow
 

@@ -105,9 +105,11 @@ centerlines, polys = tree.export_centerlines()</code></pre>
                         <ul>
                             <li><a href="#constructor"><i class="fas fa-hammer"></i> Constructor</a></li>
                             <li><a href="#attributes"><i class="fas fa-database"></i> Attributes</a></li>
+                            <li><a href="#parameters"><i class="fas fa-sliders-h"></i> TreeParameters</a></li>
                             <li><a href="#setup-methods"><i class="fas fa-cog"></i> Setup Methods</a></li>
                             <li><a href="#growth-methods"><i class="fas fa-seedling"></i> Growth Methods</a></li>
                             <li><a href="#export-methods"><i class="fas fa-file-export"></i> Export Methods</a></li>
+                            <li><a href="#persistence"><i class="fas fa-save"></i> Persistence</a></li>
                             <li><a href="#visualization"><i class="fas fa-eye"></i> Visualization</a></li>
                             <li><a href="#examples"><i class="fas fa-code"></i> Examples</a></li>
                             <li><a href="#performance"><i class="fas fa-tachometer-alt"></i> Performance</a></li>
@@ -123,10 +125,67 @@ centerlines, polys = tree.export_centerlines()</code></pre>
                     <h2>Constructor</h2>
 
                     <div class="api-signature">
-                        <code>Tree()</code>
+                        <code>Tree(*, parameters=None, unit_system=None, preallocation_step=4000000)</code>
                     </div>
 
                     <p>Initialize an empty tree structure. The tree must be configured with a domain and root before growth.</p>
+
+                    <div class="api-parameters">
+                        <h3>Parameters</h3>
+                        <table class="api-table">
+                            <thead>
+                                <tr>
+                                    <th>Parameter</th>
+                                    <th>Type</th>
+                                    <th>Default</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>parameters</code></td>
+                                    <td>TreeParameters</td>
+                                    <td>None</td>
+                                    <td>Pre-configured parameters object. If None, creates default parameters.</td>
+                                </tr>
+                                <tr>
+                                    <td><code>unit_system</code></td>
+                                    <td>UnitSystem</td>
+                                    <td>None</td>
+                                    <td>Unit system for physical quantities (CGS by default). Ignored if <code>parameters</code> is provided.</td>
+                                </tr>
+                                <tr>
+                                    <td><code>preallocation_step</code></td>
+                                    <td>int</td>
+                                    <td>4,000,000</td>
+                                    <td>Number of vessel segments to preallocate. Larger values reduce reallocations during growth but use more memory.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="api-example">
+                        <h4>Constructor Examples</h4>
+                        <pre data-copy><code class="language-python">from svv.tree.tree import Tree
+from svv.tree.data.data import TreeParameters
+from svv.tree.data.units import UnitSystem
+
+# Default tree (CGS units)
+tree = Tree()
+
+# Tree with SI units
+si_units = UnitSystem(length='m', mass='kg', time='s')
+tree_si = Tree(unit_system=si_units)
+
+# Tree with custom parameters
+params = TreeParameters()
+params.murray_exponent = 2.7
+params.terminal_pressure = 60.0  # mmHg equivalent in CGS
+tree_custom = Tree(parameters=params)
+
+# Memory-optimized tree for smaller networks
+tree_small = Tree(preallocation_step=10000)</code></pre>
+                    </div>
                 </section>
 
                 <!-- Attributes Section -->
@@ -241,6 +300,163 @@ centerlines, polys = tree.export_centerlines()</code></pre>
                             </tr>
                         </tbody>
                     </table>
+                </section>
+
+                <!-- TreeParameters Section -->
+                <section id="parameters" class="api-section">
+                    <h2>TreeParameters</h2>
+
+                    <p>The <code>TreeParameters</code> class holds physical and algorithmic settings that steer tree generation.
+                    Parameters are stored in the unit system referenced by <code>unit_system</code>. By default, the
+                    centimetre-gram-second (CGS) convention is used.</p>
+
+                    <div class="api-signature">
+                        <code>TreeParameters(*, unit_system=None)</code>
+                    </div>
+
+                    <h3>Attributes</h3>
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Attribute</th>
+                                <th>Type</th>
+                                <th>Default (CGS)</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>unit_system</code></td>
+                                <td>UnitSystem</td>
+                                <td>CGS</td>
+                                <td>Active unit system governing numerical values</td>
+                            </tr>
+                            <tr>
+                                <td><code>kinematic_viscosity</code></td>
+                                <td>float</td>
+                                <td>0.036 cm²/s</td>
+                                <td>Blood kinematic viscosity</td>
+                            </tr>
+                            <tr>
+                                <td><code>fluid_density</code></td>
+                                <td>float</td>
+                                <td>1.06 g/cm³</td>
+                                <td>Blood mass density</td>
+                            </tr>
+                            <tr>
+                                <td><code>murray_exponent</code></td>
+                                <td>float</td>
+                                <td>3.0</td>
+                                <td>Murray's law exponent for radius scaling at bifurcations</td>
+                            </tr>
+                            <tr>
+                                <td><code>radius_exponent</code></td>
+                                <td>float</td>
+                                <td>2.0</td>
+                                <td>Exponent for radius contribution to cost function</td>
+                            </tr>
+                            <tr>
+                                <td><code>length_exponent</code></td>
+                                <td>float</td>
+                                <td>1.0</td>
+                                <td>Exponent for length contribution to cost function</td>
+                            </tr>
+                            <tr>
+                                <td><code>terminal_pressure</code></td>
+                                <td>float</td>
+                                <td>60 mmHg</td>
+                                <td>Pressure at terminal vessels (capillary bed)</td>
+                            </tr>
+                            <tr>
+                                <td><code>root_pressure</code></td>
+                                <td>float</td>
+                                <td>100 mmHg</td>
+                                <td>Pressure at the root vessel (inlet)</td>
+                            </tr>
+                            <tr>
+                                <td><code>terminal_flow</code></td>
+                                <td>float</td>
+                                <td>6.25e-5 cm³/s</td>
+                                <td>Volumetric flow per terminal vessel</td>
+                            </tr>
+                            <tr>
+                                <td><code>root_flow</code></td>
+                                <td>float or None</td>
+                                <td>None</td>
+                                <td>Total flow at root (computed during growth if None)</td>
+                            </tr>
+                            <tr>
+                                <td><code>max_nonconvex_count</code></td>
+                                <td>int</td>
+                                <td>100</td>
+                                <td>Max attempts before switching to convex mode in non-convex domains</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Methods</h3>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>set(parameter, value, *, unit=None)</code>
+                        </div>
+                        <p>Update a named parameter with optional unit conversion.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>parameter</code> (str): Parameter name (e.g., 'kinematic_viscosity', 'murray_exponent')</li>
+                                <li><code>value</code>: New value</li>
+                                <li><code>unit</code> (str or UnitSystem, optional): Source unit for conversion</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>set_unit_system(unit_system, *, convert_existing=True)</code>
+                        </div>
+                        <p>Switch to a new unit system, optionally converting existing values.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>unit_system</code> (UnitSystem): Target unit system</li>
+                                <li><code>convert_existing</code> (bool): If True, convert stored values to new units</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="api-example">
+                        <h4>TreeParameters Examples</h4>
+                        <pre data-copy><code class="language-python">from svv.tree.data.data import TreeParameters
+from svv.tree.data.units import UnitSystem
+
+# Create parameters with defaults
+params = TreeParameters()
+print(params)
+# Tree Parameters:
+# ----------------
+# Kinematic Viscosity: 0.036 cm^2/s
+# Fluid Density: 1.06 g/cm^3
+# Murray Exponent: 3.0
+# ...
+
+# Modify parameters
+params.murray_exponent = 2.7  # Direct assignment
+params.set('terminal_pressure', 80.0, unit='mmHg')  # With unit conversion
+
+# Create SI parameters
+si_system = UnitSystem(length='m', mass='kg', time='s', pressure='Pa')
+params_si = TreeParameters(unit_system=si_system)
+
+# Convert existing parameters to SI
+params.set_unit_system(si_system, convert_existing=True)</code></pre>
+                    </div>
+
+                    <div class="callout tip">
+                        <strong>Murray's Law:</strong> The <code>murray_exponent</code> (typically 2.7-3.0) controls how
+                        parent vessel radius relates to daughter radii at bifurcations. A value of 3.0 minimizes power
+                        dissipation; lower values (2.0-2.5) are observed in some vascular beds.
+                    </div>
                 </section>
 
                 <!-- Setup Methods Section -->
@@ -367,6 +583,89 @@ centerlines, polys = tree.export_centerlines()</code></pre>
                                 <li><code>polys</code>: Connectivity information</li>
                             </ul>
                         </div>
+                    </div>
+                </section>
+
+                <!-- Persistence Section -->
+                <section id="persistence" class="api-section">
+                    <h2>Persistence (Save/Load)</h2>
+
+                    <p>Trees can be saved to and loaded from <code>.tree</code> files, enabling checkpointing during
+                    long growth processes and sharing of generated vascular structures.</p>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>save(path, include_timing=False)</code>
+                        </div>
+                        <p>Save the tree to a <code>.tree</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Output filename. If no extension is provided, <code>.tree</code> is appended.</li>
+                                <li><code>include_timing</code> (bool): Include generation timing data for profiling/debugging. Default is False.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The saved file contains all tree data, parameters, and connectivity information needed
+                            to reconstruct the tree. <strong>The domain is NOT saved</strong> and must be set separately
+                            after loading via <code>set_domain()</code>.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>Tree.load(path)</code>  <span class="api-badge">classmethod</span>
+                        </div>
+                        <p>Load a tree from a <code>.tree</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Path to a <code>.tree</code> file.</li>
+                            </ul>
+                            <h4>Returns</h4>
+                            <ul>
+                                <li><code>Tree</code>: Loaded tree instance.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The loaded tree will NOT have a domain set. You must call <code>set_domain()</code>
+                            after loading to enable domain-dependent operations like collision detection.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-example">
+                        <h4>Save/Load Example</h4>
+                        <pre data-copy><code class="language-python">from svv.tree.tree import Tree
+from svv.domain.domain import Domain
+import pyvista as pv
+
+# Create and grow a tree
+domain = Domain(pv.Cube())
+domain.create()
+domain.solve()
+domain.build()
+
+tree = Tree()
+tree.set_domain(domain)
+tree.set_root()
+tree.n_add(100)
+
+# Save the tree
+tree.save("my_vascular_tree.tree")
+
+# Later, load it back
+loaded_tree = Tree.load("my_vascular_tree.tree")
+
+# Re-attach the domain for further operations
+loaded_tree.set_domain(domain)
+
+# Continue growing or export
+loaded_tree.n_add(50)
+loaded_tree.show()</code></pre>
+                    </div>
+
+                    <div class="callout warning">
+                        <strong>Domain Not Saved:</strong> The domain implicit function can be expensive to compute
+                        and is not serialized with the tree. Save your domain separately using <code>domain.save()</code>
+                        if you need to preserve the complete workspace.
                     </div>
                 </section>
 

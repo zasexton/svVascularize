@@ -140,25 +140,14 @@ if [ -n "$CONDA_PREFIX" ]; then
     fi
 fi
 
-# Launch the GUI
+# Launch the GUI (delegates to Python launcher which configures telemetry)
 echo "Launching svVascularize GUI..."
 python -c "
-import sys
-from PySide6.QtWidgets import QApplication
-from svv.visualize.gui import VascularizeGUI
+from svv.visualize.gui import launch_gui
 
-app = QApplication(sys.argv)
-gui = VascularizeGUI()
-gui.show()
-sys.exit(app.exec())
+launch_gui()
 " || python -c "
-# Fallback with exec_ for older PySide6
-import sys
-from PySide6.QtWidgets import QApplication
-from svv.visualize.gui import VascularizeGUI
+from svv.visualize.gui import launch_gui
 
-app = QApplication(sys.argv)
-gui = VascularizeGUI()
-gui.show()
-sys.exit(app.exec_())
+launch_gui()
 "

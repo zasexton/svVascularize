@@ -34,7 +34,9 @@ class TreeConnection:
             tree_object.data = forest.networks[network_id][i].data
             tree_object.domain = forest.networks[network_id][i].domain
             self.network.append(tree_object)
+            print(f"Setup tree: {i}")
         self.connected_network = deepcopy(self.network)
+        print("Finish TreeConnection initialization")
 
     def solve(self, *args, num_vessels=20, attempts=5):
         tree_0 = 0
@@ -46,12 +48,16 @@ class TreeConnection:
         self.vessels.append([])
         self.lengths.append([])
         self.lengths.append([])
-        self.connected_network = deepcopy(self.network)
-        for j in trange(len(self.ctrlpts_functions[0]), desc=f"Tree {tree_0} to Tree {tree_1}", leave=False):
+        #print("Network copy")
+        #self.connected_network = deepcopy(self.network)
+        #print("Network copy complete")
+        for j in trange(len(self.ctrlpts_functions[0]), desc=f"Tree {tree_0} to Tree {tree_1}", leave=True):
+            print(f"setup vessel connection: {j}")
             conn = VesselConnection(self.forest, self.network_id, tree_0, tree_1,
                                     self.assignments[tree_0][j], self.assignments[tree_1][j],
                                     ctrl_function=self.ctrlpts_functions[0][j],
                                     clamp_first=True, clamp_second=True, curve_type=self.curve_type)
+            print(f"setup vessel connection finished")
             collisions = []
             collisions.append(conn.connection.other_line_segments)
             if len(self.vessels) > 0:
@@ -200,7 +206,7 @@ class TreeConnection:
         plotter.add_mesh(self.forest.domain.boundary, color='grey', opacity=0.15)
         return plotter
 
-    def export_solid(self, cap_resolution=40, extrude_roots = False):
+    def export_solid(self, cap_resolution=40, extrude_roots = False, junction_smoothing = False):
         network_branches = []
         network_points = []
         network_radii = []
@@ -388,30 +394,37 @@ class TreeConnection:
             network_lines.append(lines)
             tubes = generate_tubes(lines)
             network_tubes.append(tubes)
-            model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
-            cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
-            keep = cell_quality.cell_data["CellQuality"] > 0.1
-            if not np.all(keep):
-                print("Removing poor quality elements from the mesh.")
-                keep = np.argwhere(keep).flatten()
-                non_manifold_model = model.extract_cells(keep)
-                non_manifold_model = non_manifold_model.extract_surface()
-                fix = pymeshfix.MeshFix(non_manifold_model)
-                fix.repair(verbose=True)
-                hsize = model.hsize
-                model = fix.mesh.compute_normals(auto_orient_normals=True)
-                model.hsize = hsize
-            try:
-                smooth_model, smooth_wall, smooth_caps = smooth_junctions(model)
-            except:
-                smooth_model = None
-                smooth_wall = None
-                smooth_caps = None
-            if not isinstance(smooth_model, type(None)):
-                if smooth_model.is_manifold:
-                    network_solids.append(smooth_model)
+            #model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
+            #cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
+            #keep = cell_quality.cell_data["CellQuality"] > 0.1
+            #if not np.all(keep):
+            #    print("Removing poor quality elements from the mesh.")
+            #    keep = np.argwhere(keep).flatten()
+            #    non_manifold_model = model.extract_cells(keep)
+            #    non_manifold_model = non_manifold_model.extract_surface()
+            #    fix = pymeshfix.MeshFix(non_manifold_model)
+            #    fix.repair(verbose=True)
+            #    hsize = model.hsize
+            #    model = fix.mesh.compute_normals(auto_orient_normals=True)
+            #    model.hsize = hsize
+            #model.save('tmp_tree_connection.vtp')
+            #fix = pymeshfix.MeshFix(model)
+            #fix.repair(verbose=True)
+            #model = fix.mesh
+            if junction_smoothing:
+                try:
+                    smooth_model, smooth_wall, smooth_caps = smooth_junctions(model)
+                except:
+                    smooth_model = None
+                    smooth_wall = None
+                    smooth_caps = None
+                if not isinstance(smooth_model, type(None)):
+                    if smooth_model.is_manifold:
+                        network_solids.append(smooth_model)
+                    else:
+                        network_solids.append(model)
                 else:
                     network_solids.append(model)
             else:
-                network_solids.append(model)
+                network_solids.append(None)
         return network_solids, network_lines, network_tubes

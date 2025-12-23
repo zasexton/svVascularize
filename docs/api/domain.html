@@ -99,6 +99,7 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                             <li><a href="#constructor"><i class="fas fa-hammer"></i> Constructor</a></li>
                             <li><a href="#attributes"><i class="fas fa-database"></i> Attributes</a></li>
                             <li><a href="#methods"><i class="fas fa-cogs"></i> Methods</a></li>
+                            <li><a href="#persistence"><i class="fas fa-save"></i> Persistence</a></li>
                             <li><a href="#operators"><i class="fas fa-calculator"></i> Operators</a></li>
                             <li><a href="#examples"><i class="fas fa-code"></i> Examples</a></li>
                             <li><a href="#notes"><i class="fas fa-info-circle"></i> Notes</a></li>
@@ -437,6 +438,87 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                             </div>
                             <p>Initialize the random number generator with the set seed.</p>
                         </div>
+                    </div>
+                </section>
+
+                <!-- Persistence Section -->
+                <section id="persistence" class="api-section">
+                    <h2>Persistence (Save/Load)</h2>
+
+                    <p>Domains can be saved to and loaded from <code>.dmn</code> files, allowing you to preserve
+                    expensive implicit function computations and share domain configurations.</p>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>save(path, include_boundary=False, include_mesh=False, include_patch_normals=True)</code>
+                        </div>
+                        <p>Save the domain to a <code>.dmn</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Output filename. If no extension is provided, <code>.dmn</code> is appended.</li>
+                                <li><code>include_boundary</code> (bool): Persist the boundary mesh for visualization without recomputation. Default is False.</li>
+                                <li><code>include_mesh</code> (bool): Persist the interior mesh for sampling without recomputation. Default is False.</li>
+                                <li><code>include_patch_normals</code> (bool): Include per-patch normals to fully restore Patch objects. Default is True.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The saved file contains the implicit function coefficients and patch data needed to
+                            reconstruct the domain. Including boundary and mesh data increases file size but
+                            speeds up subsequent operations.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>Domain.load(path)</code>  <span class="api-badge">classmethod</span>
+                        </div>
+                        <p>Load a domain from a <code>.dmn</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Path to a <code>.dmn</code> file.</li>
+                            </ul>
+                            <h4>Returns</h4>
+                            <ul>
+                                <li><code>Domain</code>: Fully initialized Domain instance ready for fast evaluation.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The loaded domain has its <code>function_tree</code> rebuilt and is ready for use
+                            with <code>__call__</code> (fast evaluation). Patches are reconstructed from stored
+                            arrays, enabling you to call <code>build()</code> again if needed.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-example">
+                        <h4>Save/Load Example</h4>
+                        <pre data-copy><code class="language-python">from svv.domain.domain import Domain
+import pyvista as pv
+
+# Create domain from a complex mesh
+mesh = pv.read("heart_ventricle.stl")
+domain = Domain(mesh)
+domain.create()   # Creates patches (can be slow for complex meshes)
+domain.solve()    # Solves RBF system (expensive)
+domain.build()    # Builds boundary and mesh
+
+# Save domain for later use
+domain.save("ventricle.dmn", include_boundary=True, include_mesh=True)
+
+# Later, load the domain instantly
+loaded_domain = Domain.load("ventricle.dmn")
+
+# Use immediately - no need to call create/solve/build
+point = [[0.5, 0.5, 0.5]]
+inside = loaded_domain(point) < 0  # Fast evaluation works immediately
+
+# Or call build() if you need fresh boundary/mesh
+loaded_domain.build()</code></pre>
+                    </div>
+
+                    <div class="callout tip">
+                        <strong>Performance Tip:</strong> For complex domains, saving with <code>include_boundary=True</code>
+                        and <code>include_mesh=True</code> significantly speeds up subsequent loads at the cost of
+                        larger file sizes. This is especially useful when iterating on tree generation with the same domain.
                     </div>
                 </section>
 

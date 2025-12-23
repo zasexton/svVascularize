@@ -3,8 +3,9 @@ import numpy as np
 import json
 import platform
 import svv
-from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data
+from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data, collate_timeseries_to_pvd
 from svv.simulation.fluid.rom.zero_d.process import run_0d_script, run_0d_cmdline
+from svv.simulation.fluid.inflow.waveform import generate_physiologic_wave
 from pathlib import Path
 
 def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, folder="0d_tmp", number_cardiac_cycles=1,
@@ -100,11 +101,12 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
                 None
     """
     if outdir is None:
-        outdir = os.getcwd() + os.sep + folder
+        outdir = os.path.join(os.getcwd(), folder)
     else:
-        outdir = outdir + os.sep + folder
-    if not os.path.isdir(outdir):
-        os.mkdir(folder)
+        outdir = os.path.join(outdir, folder)
+
+    # Ensure the target directory exists without failing if it already does.
+    os.makedirs(outdir, exist_ok=True)
     path_to_0d_solver = None
     input_file = {'description': {'description of case': None,
                                   'analytical results': None},
@@ -199,18 +201,18 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
                             for i in range(len(bc_values["t"])):
                                 file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
                         file.close()
-                    #else:
-                    #    time, flow = wave(self.networks[network_id][tree_id].data[vessel, 22],
-                    #                      self.networks[network_id][tree_id].data[
-                    #                          vessel, 21] * 2)  # changed wave function
-                    #    bc_values["Q"] = flow.tolist()
-                    #    bc_values["t"] = time.tolist()
-                    #    bc_values["Q"][-1] = bc_values["Q"][0]
-                    #    simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
-                    #    with open(outdir + os.sep + "inflow.flow", "w") as file:
-                    #        for i in range(len(bc_values["t"])):
-                    #            file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
-                    #    file.close()
+                    else:
+                        time, flow = generate_physiologic_wave(self.networks[network_id][tree_id].data[vessel, 22],
+                                          self.networks[network_id][tree_id].data[
+                                              vessel, 21] * 2)
+                        bc_values["Q"] = flow.tolist()
+                        bc_values["t"] = time.tolist()
+                        bc_values["Q"][-1] = bc_values["Q"][0]
+                        simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
+                        with open(outdir + os.sep + "inflow.flow", "w") as file:
+                            for i in range(len(bc_values["t"])):
+                                file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
+                        file.close()
                     bc['bc_values'] = bc_values
                     input_file['boundary_conditions'].append(bc)
                     vessel_segment['boundary_conditions'] = {'inlet': 'INFLOW'}
@@ -289,6 +291,10 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
 
     with open(outdir + os.sep + "post_process.py", "w") as file:
         file.write(post_data)
+    file.close()
+
+    with open(outdir + os.sep + "collate_timeseries_to_pvd.py", "w") as file:
+        file.write(collate_timeseries_to_pvd)
     file.close()
 
     with open(outdir + os.sep + "run.py", "w") as file:

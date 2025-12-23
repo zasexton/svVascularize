@@ -87,11 +87,11 @@ def add_vessel(tree, **kwargs):
     threshold_exponent = kwargs.pop('threshold_exponent', 1.5)
     threshold_adjuster = kwargs.pop('threshold_adjuster', 0.9)
     n_points = kwargs.pop('n_points', 50)
-    n_closest_vessels = kwargs.pop('n_closest_vessels', 5)
+    n_closest_vessels = kwargs.pop('n_closest_vessels', 2)
     nonconvex_sampling = kwargs.pop('nonconvex_sampling', 10)
     homogeneous = kwargs.pop('homogeneous', True)
     use_brute = kwargs.pop('use_brute', False)
-    max_iter = kwargs.pop('max_iter', 100)
+    max_iter = kwargs.pop('max_iter', 10000)
     return_cost = kwargs.pop('return_cost', False)
     #defualt_threshold = ((tree.domain.mesh.volume ** (1/3)) /
     #                     (tree.n_terminals ** threshold_exponent)) + tree.data[0, 21]*2.0
@@ -939,12 +939,14 @@ def add_vessel(tree, **kwargs):
                     first_pass = False
                 else:
                     threshold *= threshold_adjuster
+                    volume_threshold *= threshold_adjuster
                     count += 1
-                    if count > 5:
-                        volume_threshold *= threshold_adjuster
-                        count = 0
+                    #if count > 5:
+                    #    volume_threshold *= threshold_adjuster
+                    #    count = 0
                     if volume_threshold < threshold:
                         volume_threshold = 1.5*threshold
+                    print(f"threshold: {threshold}, volume_threshold: {volume_threshold}")
                     terminal_points, terminal_point_distances, closest_vessels, mesh_cells = get_points(tree, n_points, volume_threshold=volume_threshold,
                                                                                             threshold=threshold,
                                                                                             interior_range=interior_range,
@@ -996,11 +998,14 @@ def add_vessel(tree, **kwargs):
                             bifurcation_point = triad(result)
                             tree.new_tree_scale = vol(result)
                         else:
-                            result = minimize(cost, x0, bounds=[(0.0, 1.0), (0.0, 1.0)], callback=callback,
-                                              options={'maxiter':max_iter})
+                            cons = [{"type": "ineq", "fun": lambda a: 1 - a[0] - a[1]}]
+                            result = minimize(cost, x0, bounds=[(0.0, 1.0), (0, 1.0)],
+                                              options={'maxiter': max_iter}, constraints=cons, method="COBYLA")
+                            #result = minimize(cost, x0, bounds=[(0.0, 1.0), (0.0, 1.0)], callback=callback,
+                            #                  options={'maxiter':max_iter})
                             if not result.success:
-                                #print('Failure in optimization')
-                                #print(result.message)
+                                print('Failure in optimization')
+                                print(result.message)
                                 continue
                             bifurcation_point = triad(result.x)
                             tree.new_tree_scale = vol(result.x)
@@ -1032,19 +1037,30 @@ def add_vessel(tree, **kwargs):
                         #plotter.show()
                         #print('Bifurcation Point: ', bifurcation_point)
                         #print('Bifurcation Point Value: ', bifurcation_point_value)
+                        bifurcation_vessel = closest_vessels[j, i]
                         if numpy.any(bifurcation_point_value > interior_range[1]):
-                            #print('Bifurcation point GREATER THAN interior range')
+                            print('Bifurcation point GREATER THAN interior range')
                             continue
                         if numpy.any(bifurcation_point_value < interior_range[0]):
-                            #print('Bifurcation point LESS THAN interior range')
+                            print('Bifurcation point LESS THAN interior range')
                             continue
-                        bifurcation_vessel = closest_vessels[j, i]
                         terminal_point = terminal_points[i, :]
                         dist = close_exact_point(data[bifurcation_vessel, :].reshape(1,data.shape[1]),
                                           terminal_point)
-                        if dist < data[bifurcation_vessel, 21]*4:
+                        if dist < data[bifurcation_vessel, 21]*2:
                             print('too close')
                             continue
+
+                        dist_bifurcation_to_proximal = np.linalg.norm(bifurcation_point.reshape(1,-1) - data[closest_vessels[j, i], 0:3].reshape(1, -1)).flatten()
+                        if dist_bifurcation_to_proximal < data[bifurcation_vessel,21]*2:
+                            print('too close to proximal')
+                            continue
+
+                        dist_bifurcation_to_distal = np.linalg.norm(bifurcation_point.reshape(1,-1) - data[closest_vessels[j, i], 3:6].reshape(1, -1)).flatten()
+                        if dist_bifurcation_to_distal < data[bifurcation_vessel,21]*2:
+                            print('too close to distal')
+                            continue
+
                         line = numpy.linspace(0, 1, nonconvex_sampling).reshape(-1, 1)
                         interior_terminal = tree.domain(terminal_points[i, :].reshape(1, -1)) < interior_range[1]
                         interior_bifurcation = tree.domain(bifurcation_point.reshape(1, -1)) < interior_range[1]
@@ -1053,58 +1069,110 @@ def add_vessel(tree, **kwargs):
                         if interior_bifurcation and interior_terminal:
                             terminal_line = bifurcation_point * line + terminal_points[i, :] * (1 - line)
                             values = tree.domain(terminal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values.flatten() > interior_range[1]):
-                            if count > 1:
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range (interior terminal)')
+                                print('Vessel outside interior range (interior terminal)')
+                                #print(f"count: {count}; count_outside: {numpy.sum(count_outside)}")
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(terminal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(terminal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
+                                print("too many interior sign changes")
                                 continue
                         else:
                             terminal_line = bifurcation_point * line + terminal_points[i, :] * (1 - line)
                             values = tree.domain(terminal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
-                            if count > 1:
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
+                            count_outside = values.flatten() > interior_range[1]
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range 2 (interior terminal)')
+                                print('Vessel outside interior range 2 (interior terminal)')
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(terminal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(terminal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
                                 continue
                         if interior_bifurcation and interior_proximal:
                             proximal_line = (data[closest_vessels[j, i], 0:3] * line +
                                              bifurcation_point * (1 - line))
                             values = tree.domain(proximal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]) / 2)))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values > interior_range[1]):
-                            if count > 1:
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range (interior proximal)')
+                                print('Vessel outside interior range (interior proximal)')
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(proximal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(proximal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
                                 continue
                         else:
                             proximal_line = (data[closest_vessels[j, i], 0:3] * line +
                                              bifurcation_point * (1 - line))
                             values = tree.domain(proximal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
-                            if count > 1:
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
+                            count_outside = values.flatten() > interior_range[1]
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range 2 (interior proximal)')
+                                print('Vessel outside interior range 2 (interior proximal)')
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(proximal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(proximal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
                                 continue
                         if interior_bifurcation and interior_distal:
                             distal_line = (data[closest_vessels[j, i], 3:6] * line +
                                            bifurcation_point * (1 - line))
                             values = tree.domain(distal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]))))
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
+                            count_outside = values.flatten() > interior_range[1]
                             #if numpy.any(values > interior_range[1]):
-                            if count > 1:
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range (interior distal)')
+                                print('Vessel outside interior range (interior distal)')
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(distal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(distal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
                                 continue
                         else:
                             distal_line = (data[closest_vessels[j, i], 3:6] * line +
                                            bifurcation_point * (1 - line))
                             values = tree.domain(distal_line)
-                            count = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1]))))
-                            if count > 1:
+                            count_diff = numpy.sum(numpy.abs(numpy.diff(numpy.sign(values.flatten() - interior_range[1])/2)))
+                            count_outside = values.flatten() > interior_range[1]
+                            if count_diff > 1:
                                 nonconvex_outside = True
-                                #print('Vessel outside interior range 2 (interior distal)')
+                                print('Vessel outside interior range 2 (interior distal)')
+                                #plotter = pv.Plotter()
+                                #plotter.add_mesh(tree.domain.boundary,opacity=0.2)
+                                #plotter.add_points(distal_line[count_outside], color='red', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.add_points(distal_line[~count_outside], color='green', point_size=10,
+                                #                   render_points_as_spheres=True)
+                                #plotter.show()
                                 continue
+                        #else:
+                        #    continue
                         terminal_vessel = TreeData()
                         terminal_daughter_vessel = TreeData()
                         parent_vessel = TreeData()
@@ -1574,6 +1642,9 @@ def get_points(tree, n_points, **kwargs):
     #midpoints = (tree.data[:, 0:3] + tree.data[:, 3:6]) / 2
     #midpoints = tree.midpoints_copy
     midpoints = tree.midpoints
+    if len(midpoints.shape) == 1:
+        midpoints = midpoints.reshape(1, -1)
+        print("reshaping midpoints")
     #assert id(tree.hnsw_tree) == tree.hnsw_tree_id, "NOT THE SAME HNSW TREE"
     if search_tree is None:
         #search_ = cKDTree((tree.data[:, 0:3] + tree.data[:, 3:6]) / 2)
@@ -1581,14 +1652,16 @@ def get_points(tree, n_points, **kwargs):
     else:
         #search_ = search_tree
         pass
-    if data.shape[0] < n_heuristic:
+    if tree.n_terminals < n_heuristic:
         point_distances = numpy.ones((data.shape[0], n_points), dtype=numpy.float64) * numpy.nan
         closest_vessel_idx = numpy.zeros((data.shape[0], n_points), dtype=numpy.int64)
         mesh_cells = numpy.ones((n_points,), dtype=numpy.int64) * -1
     while remaining_points > 0 and iteration < max_iterations:
         if where == 'interior':
             start = perf_counter()
-            if tree.convex and data.shape[0] >= n_heuristic:
+            print(f"Tree Convex: {tree.convex}")
+            if not tree.convex and tree.n_terminals <= n_heuristic:
+                print("correct interior")
                 tmp_points, cells = tree.domain.get_interior_points((2 * remaining_points), tree=midpoints, threshold=threshold,
                                                              volume_threshold=volume_threshold,
                                                              implicit_range=interior_range, use_random_int=use_random_int,
@@ -1597,6 +1670,7 @@ def get_points(tree, n_points, **kwargs):
                 #tmp_points, cells = tree.domain.get_interior_points((2 * remaining_points), tree=midpoints, threshold=threshold,
                 #                                             volume_threshold=volume_threshold,
                 #                                             implicit_range=interior_range, convex=tree.convex)
+                print("other interior")
                 tmp_points, cells = tree.domain.get_interior_points((2 * remaining_points))
             end = perf_counter()
             #tree.times['get_points_0'][-1] += end - start
@@ -1606,7 +1680,10 @@ def get_points(tree, n_points, **kwargs):
             tmp_points = tree.domain.get_boundary_points(n_points)
         else:
             raise ValueError("Invalid value for 'where'.")
-        if data.shape[0] >= n_heuristic:
+        print(f"Number of potential points: {len(tmp_points)}")
+        print(f"Number of NaN points: {numpy.sum(numpy.any(numpy.isnan(tmp_points),axis=1))}")
+        print(f"points: {tmp_points}")
+        if tree.n_terminals >= n_heuristic:
             #distances, idx = search_.query(tmp_points, k=n_vessels)
             #distances, idx = tree.kdtm.query(tmp_points, k=n_vessels)
             start = perf_counter()
@@ -1638,6 +1715,7 @@ def get_points(tree, n_points, **kwargs):
                 idx = idx.T
         else:
             start = perf_counter()
+            print(f"data.shape(): {data.shape}")
             AB = data[:, 3:6] - data[:, 0:3]
             AP = tmp_points[:, np.newaxis, :] - data[:, 0:3]
             AB_dot_AB = np.sum(AB ** 2, axis=1)
@@ -1653,10 +1731,14 @@ def get_points(tree, n_points, **kwargs):
             min_dists = numpy.min(distances, axis=0)
             #plotter = pv.Plotter()
             #plotter.add_mesh(tree.domain.mesh, color='grey', opacity=0.2)
-            #plotter.add_points(tmp_points, point_size=4, color='blue')
+            #print(f"min_dists: {min_dists}")
+            #plotter.add_mesh(tree.domain.mesh.extract_cells(cells), color='purple', opacity=0.2)
+            #if len(tmp_points[min_dists < threshold, :]) > 0:
+            #    plotter.add_points(tmp_points[min_dists < threshold, :], point_size=4, color='blue')
             tmp_points = tmp_points[min_dists > threshold, :]
             #if len(tmp_points) > 0:
             #    plotter.add_points(tmp_points, point_size=4, color='green')
+            #plotter.add_points(midpoints, point_size=4, color='red')
             #print('threshold: {}'.format(threshold))
             #plotter.show()
             if tmp_points.shape[0] == 0:
@@ -1829,7 +1911,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
     proximal = data[vessel, 0:3]
     distal = data[vessel, 3:6]
     terminal = point
-    d_min = kwargs.get('d_min', data[vessel, 21]*4 + tree.physical_clearance)
+    d_min = kwargs.get('d_min', data[vessel, 21]*4)
     interior_range = kwargs.get('interior_range', [-1.0, 0.0])
     tree_scale = deepcopy(numpy.pi * numpy.sum(data[:, 21] ** tree.parameters.radius_exponent *
                                       data[:, 20] ** tree.parameters.length_exponent))
@@ -1864,7 +1946,7 @@ def construct_optimizer(tree, point, vessel, **kwargs):
             dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
                                  numpy.linalg.norm(lines[0, 3:6] - x),
                                  numpy.linalg.norm(lines[1, 3:6] - x)])
-            triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
+            #triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
             #connectivity = numpy.nan_to_num(tree.data[:, 15:18], nan=-1.0).astype(int)
             results = func(x, data, terminal, connectivity,
                            vessel, murray_exponent, kinematic_viscosity,
@@ -1873,8 +1955,8 @@ def construct_optimizer(tree, point, vessel, **kwargs):
             try:
                 #value = np.tanh((np.clip(numpy.nan_to_num(results, nan=scale),0,scale) + triad_penalty) / scale)
                 value = (((
-                    np.clip(numpy.nan_to_num(results - scale, nan=2 * scale + penalty), 0, 2 * scale + penalty))+triad_penalty) / (
-                                    scale + penalty))
+                    np.clip(numpy.nan_to_num(results - scale, nan=2 * scale + penalty), 0, 2 * scale + penalty))) / (
+                                    scale + penalty)) # used to have triad_penalty
             except RuntimeWarning as e:
                 print("RuntimeWarning caught:", e)
                 print("scale =", scale)
@@ -1905,30 +1987,47 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         dists = numpy.array([numpy.linalg.norm(lines[0, 0:3] - x),
                              numpy.linalg.norm(lines[0, 3:6] - x),
                              numpy.linalg.norm(lines[1, 3:6] - x)])
-        vec1 = distal - x
-        vec2 = terminal - x
-        vec3 = proximal - x
-        vec1 = vec1/numpy.linalg.norm(vec1)
-        vec2 = vec2/numpy.linalg.norm(vec2)
-        vec3 = vec3/numpy.linalg.norm(vec3)
-        angle1 = numpy.arccos(numpy.dot(vec1, vec3))*(180/numpy.pi)
-        angle2 = numpy.arccos(numpy.dot(vec2, vec3))*(180/numpy.pi)
+        #vec1 = distal - x
+        #vec2 = terminal - x
+        #vec3 = proximal - x
+        #vec1 = vec1/numpy.linalg.norm(vec1)
+        #vec2 = vec2/numpy.linalg.norm(vec2)
+        #vec3 = vec3/numpy.linalg.norm(vec3)
+        #angle1 = numpy.arccos(numpy.dot(vec1, vec3))*(180/numpy.pi)
+        #angle2 = numpy.arccos(numpy.dot(vec2, vec3))*(180/numpy.pi)
         #angle3 = numpy.arccos(numpy.dot(vec3, vec1))*(180/numpy.pi)
         #ADD Parent angles
 
-        if angle1 > 90 or angle2 > 90:
-            angle_penalty = penalty
+        #if angle1 > 90 or angle2 > 90:
+        #    angle_penalty = penalty
+        #else:
+        #    angle_penalty = 0.0
+        #if not isinstance(parent_vessel,type(numpy.nan)):
+        #    parent_vessel = int(parent_vessel)
+        #    vec4 = data[parent_vessel, 3:6] - data[parent_vessel, 0:3]
+        #    vec4 = vec4/numpy.linalg.norm(vec4)
+        #    angle3 = numpy.arccos(numpy.dot(vec3, vec4))*(180/numpy.pi)
+        #    if angle3 > 90:
+        #        angle_penalty += penalty
+        #angle_penalty = 0.0
+        #triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
+        triad_penalty = 0.0
+        d_min_dist = np.min(dists)
+        line = numpy.linspace(0, 1, 10).reshape(-1, 1)
+        proximal_line = np.sum(np.clip(tree.domain(proximal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        distal_line = np.sum(np.clip(tree.domain(distal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        terminal_line = np.sum(np.clip(tree.domain(terminal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        val = (proximal_line + distal_line + terminal_line)/3
+        domain_penalty = ((np.log(val + 0.001) - np.log(0.001))/(np.log(1.0+0.001) - np.log(0.001)))*2*penalty*scale
+        if numpy.isclose(numpy.min(dists),0.0):
+            triad_penalty = 2*(penalty+scale)
+            #return triad_penalty
+        elif numpy.min(dists) < d_min:
+            s = (d_min - d_min_dist)/d_min
+            triad_penalty = 2*(penalty+scale)*s**2
+            #return triad_penalty
         else:
-            angle_penalty = 0.0
-        if not isinstance(parent_vessel,type(numpy.nan)):
-            parent_vessel = int(parent_vessel)
-            vec4 = data[parent_vessel, 3:6] - data[parent_vessel, 0:3]
-            vec4 = vec4/numpy.linalg.norm(vec4)
-            angle3 = numpy.arccos(numpy.dot(vec3, vec4))*(180/numpy.pi)
-            if angle3 > 90:
-                angle_penalty += penalty
-        angle_penalty = 0.0
-        triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
+            pass
         #[TODO] angle penalty
         #[TODO] require that resulting parent vessel is at least a certain length? remove buffer region around triad
         # points
@@ -1938,6 +2037,14 @@ def construct_optimizer(tree, point, vessel, **kwargs):
                        vessel, murray_exponent, kinematic_viscosity,
                        terminal_flow, terminal_pressure, root_pressure,
                        radius_exponent, length_exponent)
+        #if numpy.isnan(results):
+        #    results = 10.0 * (scale + penalty)
+        #if not numpy.isfinite(results):
+        #    results = 10.0*(scale + penalty)
+        #else:
+        #    results = np.clip(results - scale, 0.0, 2.0 * (scale + penalty))
+        #    results = results/penalty
+        #results = numpy.log1p(results)
         #results = np.pi*results[-2]**2*results[-1]
         #try:
         #    value = np.tanh((numpy.nan_to_num(results, nan=scale) + triad_penalty) / scale)
@@ -1948,7 +2055,26 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         #assert results > tree_scale, '{} results < {} tree_scale'.format(results, tree_scale)
         #return (((np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty) + triad_penalty))/(scale+penalty))# + 1.0
         #return -1/np.clip(numpy.nan_to_num(results - scale, nan=2*scale+penalty), 0, 2*scale+penalty)
-        return -1 / np.clip(numpy.nan_to_num(results + triad_penalty + angle_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        #return -1 / np.clip(numpy.nan_to_num(results + triad_penalty + angle_penalty, nan=2 * scale + penalty), 0, 2 * scale + penalty)
+        return -1 / (np.clip(numpy.nan_to_num(results, nan=2 * scale + penalty), 0,
+                            2 * scale + penalty) + domain_penalty)
+        """
+        with numpy.errstate(over='raise', divide='raise', invalid='raise'):
+            try:
+                val = results + triad_penalty#numpy.nan_to_num(results, nan=2 * scale + penalty)/(scale + penalty)
+                #val = (val / (scale + penalty))
+                val = (2*val)**4
+                #print(val)
+            except FloatingPointError as e:
+                print("Overflow/divide in cost; results =", results)
+                print("scale =", scale, "penalty =", penalty)
+                print("Bifurcation: ", x)
+                print("Proximal: ", proximal)
+                print("Distal: ", distal)
+                print("Terminal: ", terminal)
+                val = numpy.nan_to_num(results, nan=2 * scale + penalty)/(scale + penalty)
+        """
+        return val
         #return results
         #return results
         #return value

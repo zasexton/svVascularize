@@ -293,8 +293,17 @@ class Domain(object):
             if self.random_generator is None:
                 self.set_random_generator()
             if not skip_boundary:
-                self.get_boundary(resolution)
-                self.get_interior()
+                # Check if boundary/mesh were already loaded from .dmn file
+                # If so, skip expensive regeneration
+                has_boundary = getattr(self, 'boundary', None) is not None
+                has_mesh = (
+                    getattr(self, 'mesh', None) is not None and
+                    getattr(self, 'mesh_tree', None) is not None
+                )
+                if not has_boundary:
+                    self.get_boundary(resolution)
+                if not has_mesh:
+                    self.get_interior()
             return None
         functions = []
         firsts = []
@@ -611,7 +620,7 @@ class Domain(object):
             _mesh, nodes, vertices = triangulate(self.boundary, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
             _mesh.cell_data['Normalized_Area'] = (_mesh.cell_data['Area'] / sum(_mesh.cell_data['Area']))
-            self.all_mesh_cells = list(range(_mesh.n_cells))
+            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
             self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Area'])
             self.characteristic_length = _mesh.area**(1/self.points.shape[1])
             self.area = _mesh.area
@@ -620,7 +629,7 @@ class Domain(object):
             _mesh, nodes, vertices = tetrahedralize(self.boundary, order=1, nobisect=True, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
             _mesh.cell_data['Normalized_Volume'] = (_mesh.cell_data['Volume'] / sum(_mesh.cell_data['Volume']))
-            self.all_mesh_cells = list(range(_mesh.n_cells))
+            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
             self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Volume'])
             self.characteristic_length = _mesh.volume**(1/self.points.shape[1])
             self.area = _mesh.area
@@ -657,6 +666,11 @@ class Domain(object):
         """
         use_random_int = kwargs.get('use_random_int', False)
         convex = kwargs.get('convex', False)
+        #print(f"method={method}, implicit_range={implicit_range}")
+        #if method is None:
+        #    print("method not specified")
+        #if self.mesh is None:
+        #    print("mesh not defined")
         if self.mesh is None or method == 'implicit_only':
             min_dims = np.min(self.points, axis=0)
             max_dims = np.max(self.points, axis=0)
@@ -696,8 +710,10 @@ class Domain(object):
                     self.random_points = pts
             cells = np.ones((n,), dtype=np.int64) * -1
         else:
+            print("default")
+            print(f"n: {n}, self.points.shape[1]: {self.points.shape[1]}")
             replace = kwargs.get('replace', True)
-            points = np.ones((n, self.points.shape[1]), dtype=np.float64) * np.nan
+            points = np.ones((n, 3), dtype=np.float64) * np.nan
             remaining_points = n
             ball_point = 0
             set_calc = 0
@@ -706,7 +722,9 @@ class Domain(object):
             while remaining_points > 0:
                 if self.points.shape[1] == 3:
                     #if isinstance(tree, KDTreeManager) and isinstance(threshold, float) and not convex:
+                    print(f"threshold: {threshold}; threshold_volume: {volume_threshold}")
                     if isinstance(threshold, float) and not convex:
+                        print("inside loop")
                         #cells_outer = []
                         start = perf_counter()
                         #cells_0 = tree.query_ball_tree(self.mesh_tree, volume_threshold, eps=volume_threshold/100)
@@ -731,6 +749,15 @@ class Domain(object):
                         #_, idx = self.mesh_tree.query_ball_point(tree.active_tree.data, k=min(100, self.mesh.n_cells))
                         #cells = np.unique(idx[:, 50:].flatten())
                         cells = np.setdiff1d(cells_outer, cells_inner)
+                        #if len(cells) == 0:
+                        #    print("No cells found")
+                        #else:
+                        #    #print(cells)
+                        #    pass
+                        #plotter = pv.Plotter()
+                        #plotter.add_mesh(self.boundary, show_edges=False, opacity=0.2)
+                        #plotter.add_mesh(self.mesh.extract_cells(cells), color='blue', opacity=0.6)
+                        #plotter.show()
                         end = perf_counter()
                         set_calc += end - start
                         start = perf_counter()
@@ -774,6 +801,7 @@ class Domain(object):
                     rdx = self.random_generator.random((n, 4, 1))
                     simplices = self.mesh_nodes[self.mesh_vertices[cells, :], :]
                     tmp_points = pick_from_tetrahedron(simplices, rdx)
+                    assert len(tmp_points) == n, "Length of points not equal to n!"
                     if implicit_range[1] == 0 and implicit_range[0] == -1:
                         pass
                     else:

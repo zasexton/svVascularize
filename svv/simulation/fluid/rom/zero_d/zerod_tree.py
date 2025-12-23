@@ -92,11 +92,12 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
                 None
     """
     if outdir is None:
-        outdir = os.getcwd() +os.sep +folder
+        outdir = os.path.join(os.getcwd(), folder)
     else:
-        outdir = outdir +os.sep +folder
-    if not os.path.isdir(outdir):
-        os.mkdir(outdir)
+        outdir = os.path.join(outdir, folder)
+
+    # Ensure the target directory exists without failing if it already does.
+    os.makedirs(outdir, exist_ok=True)
     if get_0d_solver:
         #if path_to_0d_solver is None:
         #    path_to_0d_solver = locate_0d_solver()

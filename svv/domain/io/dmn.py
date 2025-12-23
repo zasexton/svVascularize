@@ -168,6 +168,15 @@ def write_dmn(domain, path: str, include_boundary: bool = False, include_mesh: b
         arrays["boundary_faces"] = np.asarray(faces, dtype=np.int64) if faces is not None else np.empty((0,), dtype=np.int64)
         arrays["boundary_lines"] = np.asarray(lines, dtype=np.int64) if lines is not None else np.empty((0,), dtype=np.int64)
 
+        # Also save original_boundary if it exists (the input mesh before processing)
+        orig_boundary = getattr(domain, "original_boundary", None)
+        if orig_boundary is not None:
+            arrays["original_boundary_points"] = np.asarray(orig_boundary.points, dtype=np.float64)
+            orig_faces = getattr(orig_boundary, "faces", None)
+            orig_lines = getattr(orig_boundary, "lines", None)
+            arrays["original_boundary_faces"] = np.asarray(orig_faces, dtype=np.int64) if orig_faces is not None else np.empty((0,), dtype=np.int64)
+            arrays["original_boundary_lines"] = np.asarray(orig_lines, dtype=np.int64) if orig_lines is not None else np.empty((0,), dtype=np.int64)
+
     # Optional interior mesh (nodes + connectivity) and quick stats
     if include_mesh and getattr(domain, "mesh", None) is not None:
         if pv is None:
@@ -238,46 +247,55 @@ def read_dmn(path: str):
 
     # Restore meta
     dom.random_seed = meta.get("random_seed", None)
-    if dom.random_seed is not None:
-        dom.set_random_generator()
+    # Always set random_generator - it's required for tree/forest generation
+    # even if no specific seed was saved
+    dom.set_random_generator()
     dom.characteristic_length = meta.get("characteristic_length", None)
     dom.convexity = meta.get("convexity", None)
 
-    # Reconstruct patches from stored PTS (and patch normals if available) and parameter arrays so that callers
-    # can invoke Domain.build() again if desired.
-    try:
-        n_patches = dom.PTS.shape[0]
-        dom.patches = []
-        d = points.shape[1]
-        for i in range(n_patches):
-            pts_i = dom.PTS[i, :, 0, 0, 0, :]
-            valid_mask = np.any(~np.isnan(pts_i), axis=1)
-            n_i = int(valid_mask.sum())
-            if n_i == 0:
-                continue
-            pts_trim = pts_i[valid_mask]
-            # Per-patch normals if present
-            norms_trim = None
-            if "PNORMALS" in data:
-                pn_i = np.asarray(data["PNORMALS"][i, :, 0, 0, 0, :], dtype=np.float64)
-                valid_n = np.any(~np.isnan(pn_i), axis=1)
-                if int(valid_n.sum()) >= n_i:
-                    norms_trim = pn_i[valid_n][:n_i]
-            # Build constants for this patch from A/B/C/D
-            a_i = dom.A[i, :n_i, 0, 0, 0]
-            b_i = dom.B[i, :n_i, 0, 0, 0, :]
-            c_i = dom.C[i, 0, 0, 0, :]
-            d_i = float(dom.D[i, 0, 0, 0])
-            constants = np.concatenate([a_i, b_i.reshape(-1), c_i.reshape(-1), np.array([d_i])])
-            p = Patch()
-            if norms_trim is not None:
-                p.set_data(pts_trim, norms_trim, create_kernel=False)
-            else:
-                p.set_data(pts_trim, create_kernel=False)
-            p.constants = constants
-            dom.patches.append(p)
-    except Exception:
-        # If anything goes wrong, leave patches absent; evaluation still works.
+    # Only reconstruct patches if mesh data is NOT included in the file.
+    # If mesh data is present, patches are not needed (they're only used for rebuild).
+    # This significantly speeds up loading for large domains.
+    has_mesh_data = "mesh_nodes" in data
+    if not has_mesh_data:
+        # Reconstruct patches from stored PTS (and patch normals if available) and parameter arrays so that callers
+        # can invoke Domain.build() again if desired.
+        try:
+            n_patches = dom.PTS.shape[0]
+            dom.patches = []
+            d = points.shape[1]
+            for i in range(n_patches):
+                pts_i = dom.PTS[i, :, 0, 0, 0, :]
+                valid_mask = np.any(~np.isnan(pts_i), axis=1)
+                n_i = int(valid_mask.sum())
+                if n_i == 0:
+                    continue
+                pts_trim = pts_i[valid_mask]
+                # Per-patch normals if present
+                norms_trim = None
+                if "PNORMALS" in data:
+                    pn_i = np.asarray(data["PNORMALS"][i, :, 0, 0, 0, :], dtype=np.float64)
+                    valid_n = np.any(~np.isnan(pn_i), axis=1)
+                    if int(valid_n.sum()) >= n_i:
+                        norms_trim = pn_i[valid_n][:n_i]
+                # Build constants for this patch from A/B/C/D
+                a_i = dom.A[i, :n_i, 0, 0, 0]
+                b_i = dom.B[i, :n_i, 0, 0, 0, :]
+                c_i = dom.C[i, 0, 0, 0, :]
+                d_i = float(dom.D[i, 0, 0, 0])
+                constants = np.concatenate([a_i, b_i.reshape(-1), c_i.reshape(-1), np.array([d_i])])
+                p = Patch()
+                if norms_trim is not None:
+                    p.set_data(pts_trim, norms_trim, create_kernel=False)
+                else:
+                    p.set_data(pts_trim, create_kernel=False)
+                p.constants = constants
+                dom.patches.append(p)
+        except Exception:
+            # If anything goes wrong, leave patches absent; evaluation still works.
+            dom.patches = []
+    else:
+        # Skip patch reconstruction - not needed when mesh is loaded
         dom.patches = []
 
     # Optional: boundary
@@ -295,9 +313,27 @@ def read_dmn(path: str):
         if points.shape[1] == 2:
             dom.boundary_nodes = dom.boundary.points.astype(np.float64)
             dom.boundary_vertices = dom.boundary.lines.reshape(-1, 3)[:, 1:].astype(np.int64)
+            dom.boundary.cell_data['Normalized_Length'] = (
+                dom.boundary.cell_data['Length'] / sum(dom.boundary.cell_data['Length'])
+            )
         elif points.shape[1] == 3:
             dom.boundary_nodes = dom.boundary.points.astype(np.float64)
             dom.boundary_vertices = dom.boundary.faces.reshape(-1, 4)[:, 1:].astype(np.int64)
+            dom.boundary.cell_data['Normalized_Area'] = (
+                dom.boundary.cell_data['Area'] / sum(dom.boundary.cell_data['Area'])
+            )
+
+    # Optional: original_boundary (the input mesh before processing)
+    if "original_boundary_points" in data and pv is not None:
+        ob_pts = np.asarray(data["original_boundary_points"], dtype=np.float64)
+        ob_faces = np.asarray(data.get("original_boundary_faces", np.empty((0,), dtype=np.int64)))
+        ob_lines = np.asarray(data.get("original_boundary_lines", np.empty((0,), dtype=np.int64)))
+        if ob_faces.size > 0:
+            dom.original_boundary = pv.PolyData(ob_pts, ob_faces)
+        elif ob_lines.size > 0:
+            dom.original_boundary = pv.PolyData(ob_pts, lines=ob_lines)
+        else:
+            dom.original_boundary = pv.PolyData(ob_pts)
 
     # Optional: interior mesh
     if "mesh_nodes" in data and pv is not None:
@@ -305,34 +341,61 @@ def read_dmn(path: str):
         m_verts = np.asarray(data["mesh_vertices"], dtype=np.int64)
         dom.mesh_nodes = m_nodes
         dom.mesh_vertices = m_verts
+        n_cells = m_verts.shape[0]
+
         if points.shape[1] == 2:
-            faces = np.hstack([np.full((m_verts.shape[0], 1), 3, dtype=np.int64), m_verts])
+            faces = np.hstack([np.full((n_cells, 1), 3, dtype=np.int64), m_verts])
             dom.mesh = pv.PolyData(m_nodes, faces)
             dom.mesh = dom.mesh.compute_cell_sizes()
-            dom.mesh_tree = cKDTree(dom.mesh.cell_centers().points[:, :points.shape[1]], leafsize=4)
+            # Compute Normalized_Area if not present (compute_cell_sizes only creates 'Area')
+            if 'Normalized_Area' not in dom.mesh.cell_data:
+                total_area = np.sum(dom.mesh.cell_data['Area'])
+                if total_area > 0:
+                    dom.mesh.cell_data['Normalized_Area'] = dom.mesh.cell_data['Area'] / total_area
+                else:
+                    dom.mesh.cell_data['Normalized_Area'] = np.ones(n_cells) / n_cells
+            # Add 'probability' alias for compatibility with older code paths
+            dom.mesh.cell_data['probability'] = dom.mesh.cell_data['Normalized_Area']
+            # Build spatial index for cell lookups
+            cell_centers = dom.mesh.cell_centers().points[:, :points.shape[1]]
+            dom.mesh_tree = cKDTree(cell_centers, leafsize=4)
             try:
                 from sklearn.neighbors import BallTree
-                dom.mesh_tree_2 = BallTree(dom.mesh.cell_centers().points[:, :points.shape[1]])
+                dom.mesh_tree_2 = BallTree(cell_centers)
             except Exception:  # pragma: no cover
                 dom.mesh_tree_2 = None
-            dom.all_mesh_cells = list(range(dom.mesh.n_cells))
+            # Use numpy array instead of list for efficiency
+            dom.all_mesh_cells = np.arange(n_cells, dtype=np.int64)
             dom.cumulative_probability = np.cumsum(dom.mesh.cell_data['Normalized_Area'])
             dom.characteristic_length = dom.mesh.area ** (1 / points.shape[1])
             dom.area = dom.mesh.area
             dom.volume = 0.0
         elif points.shape[1] == 3:
             # Build tetra UnstructuredGrid
-            cells = np.hstack([np.full((m_verts.shape[0], 1), 4, dtype=np.int64), m_verts])
-            cell_types = [pv.CellType.TETRA for _ in range(m_verts.shape[0])]
+            # Use numpy array for cell_types instead of list comprehension (much faster)
+            cells = np.hstack([np.full((n_cells, 1), 4, dtype=np.int64), m_verts])
+            cell_types = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
             dom.mesh = pv.UnstructuredGrid(cells, cell_types, m_nodes)
             dom.mesh = dom.mesh.compute_cell_sizes()
-            dom.mesh_tree = cKDTree(dom.mesh.cell_centers().points[:, :points.shape[1]], leafsize=4)
+            # Compute Normalized_Volume if not present (compute_cell_sizes only creates 'Volume')
+            if 'Normalized_Volume' not in dom.mesh.cell_data:
+                total_volume = np.sum(dom.mesh.cell_data['Volume'])
+                if total_volume > 0:
+                    dom.mesh.cell_data['Normalized_Volume'] = dom.mesh.cell_data['Volume'] / total_volume
+                else:
+                    dom.mesh.cell_data['Normalized_Volume'] = np.ones(n_cells) / n_cells
+            # Add 'probability' alias for compatibility with older code paths
+            dom.mesh.cell_data['probability'] = dom.mesh.cell_data['Normalized_Volume']
+            # Build spatial index for cell lookups
+            cell_centers = dom.mesh.cell_centers().points[:, :points.shape[1]]
+            dom.mesh_tree = cKDTree(cell_centers, leafsize=4)
             try:
                 from sklearn.neighbors import BallTree
-                dom.mesh_tree_2 = BallTree(dom.mesh.cell_centers().points[:, :points.shape[1]])
+                dom.mesh_tree_2 = BallTree(cell_centers)
             except Exception:  # pragma: no cover
                 dom.mesh_tree_2 = None
-            dom.all_mesh_cells = list(range(dom.mesh.n_cells))
+            # Use numpy array instead of list for efficiency
+            dom.all_mesh_cells = np.arange(n_cells, dtype=np.int64)
             dom.cumulative_probability = np.cumsum(dom.mesh.cell_data['Normalized_Volume'])
             dom.characteristic_length = dom.mesh.volume ** (1 / points.shape[1])
             dom.area = dom.mesh.area
