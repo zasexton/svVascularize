@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QListWidget, QListWidgetItem,
     QLabel, QLineEdit, QCheckBox, QSpinBox,
-    QDoubleSpinBox, QComboBox, QSizePolicy
+    QDoubleSpinBox, QComboBox, QSizePolicy, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt, QSignalBlocker
 from svv.visualize.gui.theme import CADTheme, CADIcons
@@ -57,9 +57,20 @@ class PointSelectorWidget(QWidget):
     def _init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout()
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.setLayout(layout)
+
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(8, 8, 20, 8)  # Extra right margin for scrollbar
+        scroll_layout.setSpacing(8)
 
         # Group box for point management
         group_box = QGroupBox("Start Points & Directions")
@@ -205,7 +216,10 @@ class PointSelectorWidget(QWidget):
 
         group_layout.addLayout(action_layout)
 
-        layout.addWidget(group_box)
+        scroll_layout.addWidget(group_box)
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
 
     def set_domain(self, domain):
         """

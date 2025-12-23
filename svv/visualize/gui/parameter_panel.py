@@ -122,9 +122,13 @@ class ParameterPanel(QWidget):
         # Create scroll area for parameters
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(12)
+        # Add right margin to account for scrollbar width (~16-20px)
+        scroll_layout.setContentsMargins(0, 0, 20, 0)
 
         # Mode selection
         mode_group = QGroupBox("Generation Mode")
@@ -147,7 +151,7 @@ class ParameterPanel(QWidget):
         tree_params_group = QGroupBox("Tree Parameters")
         tree_form = QFormLayout()
         tree_form.setSpacing(10)
-        tree_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        tree_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         tree_params_group.setLayout(tree_form)
 
         # Unit system selection (dropdowns for base units)
@@ -289,7 +293,7 @@ class ParameterPanel(QWidget):
         self.forest_params_group = QGroupBox("Forest Parameters")
         forest_form = QFormLayout()
         forest_form.setSpacing(10)
-        forest_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        forest_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.forest_params_group.setLayout(forest_form)
 
         # Number of networks (Forest only)
@@ -339,7 +343,7 @@ class ParameterPanel(QWidget):
         advanced_group = QGroupBox("Advanced Parameters")
         advanced_form = QFormLayout()
         advanced_form.setSpacing(10)
-        advanced_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        advanced_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         advanced_group.setLayout(advanced_form)
 
         self.random_seed_spin = QSpinBox()

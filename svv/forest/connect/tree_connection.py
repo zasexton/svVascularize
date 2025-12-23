@@ -206,7 +206,7 @@ class TreeConnection:
         plotter.add_mesh(self.forest.domain.boundary, color='grey', opacity=0.15)
         return plotter
 
-    def export_solid(self, cap_resolution=40, extrude_roots = False):
+    def export_solid(self, cap_resolution=40, extrude_roots = False, junction_smoothing = False):
         network_branches = []
         network_points = []
         network_radii = []
@@ -394,30 +394,37 @@ class TreeConnection:
             network_lines.append(lines)
             tubes = generate_tubes(lines)
             network_tubes.append(tubes)
-            model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
-            cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
-            keep = cell_quality.cell_data["CellQuality"] > 0.1
-            if not np.all(keep):
-                print("Removing poor quality elements from the mesh.")
-                keep = np.argwhere(keep).flatten()
-                non_manifold_model = model.extract_cells(keep)
-                non_manifold_model = non_manifold_model.extract_surface()
-                fix = pymeshfix.MeshFix(non_manifold_model)
-                fix.repair(verbose=True)
-                hsize = model.hsize
-                model = fix.mesh.compute_normals(auto_orient_normals=True)
-                model.hsize = hsize
-            try:
-                smooth_model, smooth_wall, smooth_caps = smooth_junctions(model)
-            except:
-                smooth_model = None
-                smooth_wall = None
-                smooth_caps = None
-            if not isinstance(smooth_model, type(None)):
-                if smooth_model.is_manifold:
-                    network_solids.append(smooth_model)
+            #model = union_tubes(tubes, lines, cap_resolution=cap_resolution)
+            #cell_quality = model.compute_cell_quality(quality_measure='scaled_jacobian')
+            #keep = cell_quality.cell_data["CellQuality"] > 0.1
+            #if not np.all(keep):
+            #    print("Removing poor quality elements from the mesh.")
+            #    keep = np.argwhere(keep).flatten()
+            #    non_manifold_model = model.extract_cells(keep)
+            #    non_manifold_model = non_manifold_model.extract_surface()
+            #    fix = pymeshfix.MeshFix(non_manifold_model)
+            #    fix.repair(verbose=True)
+            #    hsize = model.hsize
+            #    model = fix.mesh.compute_normals(auto_orient_normals=True)
+            #    model.hsize = hsize
+            #model.save('tmp_tree_connection.vtp')
+            #fix = pymeshfix.MeshFix(model)
+            #fix.repair(verbose=True)
+            #model = fix.mesh
+            if junction_smoothing:
+                try:
+                    smooth_model, smooth_wall, smooth_caps = smooth_junctions(model)
+                except:
+                    smooth_model = None
+                    smooth_wall = None
+                    smooth_caps = None
+                if not isinstance(smooth_model, type(None)):
+                    if smooth_model.is_manifold:
+                        network_solids.append(smooth_model)
+                    else:
+                        network_solids.append(model)
                 else:
                     network_solids.append(model)
             else:
-                network_solids.append(model)
+                network_solids.append(None)
         return network_solids, network_lines, network_tubes

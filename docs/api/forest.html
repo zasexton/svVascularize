@@ -121,6 +121,7 @@ forest.show(plot_domain=True)</code></pre>
                             <li><a href="#growth-methods"><i class="fas fa-seedling"></i> Growth Methods</a></li>
                             <li><a href="#connection-methods"><i class="fas fa-link"></i> Connection Methods</a></li>
                             <li><a href="#export-methods"><i class="fas fa-file-export"></i> Export Methods</a></li>
+                            <li><a href="#persistence"><i class="fas fa-save"></i> Persistence</a></li>
                             <li><a href="#examples"><i class="fas fa-code"></i> Examples</a></li>
                             <li><a href="#algorithms"><i class="fas fa-brain"></i> Algorithms</a></li>
                         </ul>
@@ -385,6 +386,97 @@ forest.show(plot_domain=True)</code></pre>
                                 <li><code>**kwargs</code>: Additional PyVista plotting parameters</li>
                             </ul>
                         </div>
+                    </div>
+                </section>
+
+                <!-- Persistence Section -->
+                <section id="persistence" class="api-section">
+                    <h2>Persistence (Save/Load)</h2>
+
+                    <p>Forests can be saved to and loaded from <code>.forest</code> files, enabling checkpointing during
+                    complex multi-tree growth processes and sharing of generated vascular networks.</p>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>save(path, include_timing=False)</code>
+                        </div>
+                        <p>Save the forest to a <code>.forest</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Output filename. If no extension is provided, <code>.forest</code> is appended.</li>
+                                <li><code>include_timing</code> (bool): Include generation timing data for each tree. Default is False.</li>
+                            </ul>
+                            <h4>Returns</h4>
+                            <ul>
+                                <li><code>pathlib.Path</code>: Path to the saved file.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The saved file contains all forest data, tree parameters, and connectivity information.
+                            If <code>connect()</code> has been called, connections are also saved. <strong>The domain
+                            is NOT saved</strong> and must be set separately after loading via <code>set_domain()</code>.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-method">
+                        <div class="api-method-signature">
+                            <code>Forest.load(path)</code>  <span class="api-badge">classmethod</span>
+                        </div>
+                        <p>Load a forest from a <code>.forest</code> file.</p>
+                        <div class="api-method-params">
+                            <h4>Parameters</h4>
+                            <ul>
+                                <li><code>path</code> (str): Path to a <code>.forest</code> file.</li>
+                            </ul>
+                            <h4>Returns</h4>
+                            <ul>
+                                <li><code>Forest</code>: Loaded forest instance with all trees and connections restored.</li>
+                            </ul>
+                            <h4>Notes</h4>
+                            <p>The loaded forest will NOT have a domain set. You must call <code>set_domain()</code>
+                            after loading to enable domain-dependent operations. If the forest was saved with
+                            connections (after calling <code>connect()</code>), those connections are restored.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-example">
+                        <h4>Save/Load Example</h4>
+                        <pre data-copy><code class="language-python">from svv.forest.forest import Forest
+from svv.domain.domain import Domain
+import pyvista as pv
+
+# Create and grow a forest
+domain = Domain(pv.Cube())
+domain.create()
+domain.solve()
+domain.build()
+
+forest = Forest()
+forest.set_domain(domain)
+forest.set_roots()  # Uses default opposing start points
+forest.add(50)
+forest.connect()
+
+# Save the complete forest (including connections)
+forest.save("vascular_network.forest")
+
+# Later, load it back
+loaded_forest = Forest.load("vascular_network.forest")
+
+# Re-attach the domain
+loaded_forest.set_domain(domain)
+
+# Connections are preserved - can visualize immediately
+loaded_forest.show(plot_domain=True)
+
+# Or continue growing
+loaded_forest.add(25)</code></pre>
+                    </div>
+
+                    <div class="callout info">
+                        <strong>Connections Preserved:</strong> Unlike trees, forests can include connection data when
+                        saved. If you saved after calling <code>connect()</code>, the connection geometry and parameters
+                        are restored on load.
                     </div>
                 </section>
 

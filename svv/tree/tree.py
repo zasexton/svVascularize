@@ -361,6 +361,9 @@ class Tree(object):
             'radius_exponent': float(self.parameters.radius_exponent),
             'length_exponent': float(self.parameters.length_exponent),
             'max_nonconvex_count': int(self.parameters.max_nonconvex_count),
+            # Persist base units plus the current pressure symbol for
+            # introspection. On load, UnitSystem is always constructed from
+            # the base units so pressure remains a derived quantity.
             'unit_system': {
                 'length': self.parameters.unit_system.base.length.symbol,
                 'time': self.parameters.unit_system.base.time.symbol,
@@ -419,17 +422,23 @@ class Tree(object):
         if version > 1:
             raise ValueError(f"Unsupported .tree file version: {version}")
 
-        # Reconstruct unit system
+        # Reconstruct unit system from base units only; pressure and other
+        # derived quantities are always auto-derived from these.
         us_dict = params_dict.get('unit_system', {})
         unit_system = UnitSystem(
             length=us_dict.get('length', 'cm'),
             time=us_dict.get('time', 's'),
             mass=us_dict.get('mass', 'g'),
-            pressure=us_dict.get('pressure', 'Ba'),
         )
 
-        # Create tree with parameters
-        tree = cls(unit_system=unit_system)
+        # Size preallocation to the stored data rather than using the very
+        # large default growth preallocation, to avoid excessive memory use
+        # when loading existing trees.
+        n_rows = int(getattr(data_array, 'shape', (0,))[0]) or 1
+        preallocation_step = max(n_rows * 2, 1)
+
+        # Create tree with parameters and tailored preallocation
+        tree = cls(unit_system=unit_system, preallocation_step=preallocation_step)
 
         # Restore parameters
         tree.parameters.kinematic_viscosity = params_dict['kinematic_viscosity']
