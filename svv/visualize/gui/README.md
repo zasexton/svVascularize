@@ -19,10 +19,15 @@ The GUI requires PySide6 and PyVistaQt (with PyVista).
 
 Conda (recommended for shipping/testing):
 ```bash
+# Windows/macOS:
 conda env create -f environment-gui.yml
+
+# Linux (includes Mesa/libGL + X11 runtime libs):
+conda env create -f environment-gui-linux.yml
+
 conda activate svv-gui
 ```
-This installs PySide6/PyVista/PyVistaQt plus Mesa/GL runtime pieces needed on many Linux systems.
+On Linux, `environment-gui-linux.yml` installs PySide6/PyVista/PyVistaQt plus Mesa/GL runtime pieces; on Windows/macOS those Mesa packages are not needed.
 
 Alternative (pip):
 ```bash

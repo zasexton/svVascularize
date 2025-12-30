@@ -251,6 +251,14 @@ table { border-collapse: collapse; margin: 1.2rem 0; width: 100%; }
 th, td { border: 1px solid var(--clr-grey-300); padding: .55rem; text-align: left; font-size: .95rem; }
 th { background: var(--clr-grey-100); color: var(--clr-grey-700); }
 
+/* small UI icons (used in gui docs) */
+.icon {
+  width: 22px;
+  height: 22px;
+  vertical-align: middle;
+  display: inline-block;
+}
+
 /* callouts */
 .callout {
   border-left: 4px solid var(--clr-warning);
