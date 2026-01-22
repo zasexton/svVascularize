@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">svVascularize GUI layout (schematic)</title>
+  <desc id="desc">Schematic showing the CAD-style layout: top toolbars, model tree on the left, 3D viewport in the center, properties panel on the right, and an information/output dock at the bottom.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7fbff; }
+      .window { fill: #ffffff; stroke: #d9e4ec; stroke-width: 2; }
+      .topbar { fill: #003d6b; }
+      .toolbar { fill: rgba(255,255,255,.10); }
+      .panel { fill: #ffffff; stroke: #d9e4ec; stroke-width: 2; }
+      .viewport { fill: #ecf2f8; stroke: #d9e4ec; stroke-width: 2; }
+      .label { font-family: Montserrat, Helvetica, Arial, sans-serif; font-size: 18px; fill: #354652; font-weight: 700; }
+      .label-inv { font-family: Montserrat, Helvetica, Arial, sans-serif; font-size: 18px; fill: #ffffff; font-weight: 700; }
+      .muted { font-family: Montserrat, Helvetica, Arial, sans-serif; font-size: 14px; fill: #5f7485; }
+      .hint { font-family: Montserrat, Helvetica, Arial, sans-serif; font-size: 14px; fill: rgba(255,255,255,.85); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="720" />
+
+  <!-- Window -->
+  <rect class="window" x="40" y="40" width="1120" height="640" rx="18" />
+
+  <!-- Top navigation / toolbars -->
+  <rect class="topbar" x="40" y="40" width="1120" height="110" rx="18" />
+  <rect class="toolbar" x="60" y="92" width="1080" height="42" rx="10" />
+  <text class="label-inv" x="70" y="78">Toolbars</text>
+  <text class="hint" x="170" y="78">File · View · Generation</text>
+
+  <!-- Main content area -->
+  <rect class="panel" x="60" y="170" width="260" height="390" rx="12" />
+  <text class="label" x="78" y="205">Model Tree</text>
+  <text class="muted" x="78" y="232">Scene visibility &amp; hierarchy</text>
+
+  <rect class="viewport" x="340" y="170" width="560" height="390" rx="12" />
+  <text class="label" x="360" y="205">3D Viewport</text>
+  <text class="muted" x="360" y="232">Domain + points + vessels</text>
+
+  <rect class="panel" x="920" y="170" width="220" height="390" rx="12" />
+  <text class="label" x="940" y="205">Properties</text>
+  <text class="muted" x="940" y="232">Generation · Start Points</text>
+
+  <!-- Bottom dock -->
+  <rect class="panel" x="60" y="580" width="1080" height="70" rx="12" />
+  <text class="label" x="78" y="623">Information / Output</text>
+  <text class="muted" x="305" y="623">Progress, warnings, logs</text>
+
+  <!-- Status bar hint -->
+  <text class="muted" x="60" y="672">Status bar: session status · object/vessel counts · system monitor</text>
+</svg>
+

@@ -710,8 +710,8 @@ class Domain(object):
                     self.random_points = pts
             cells = np.ones((n,), dtype=np.int64) * -1
         else:
-            print("default")
-            print(f"n: {n}, self.points.shape[1]: {self.points.shape[1]}")
+            #print("default")
+            #print(f"n: {n}, self.points.shape[1]: {self.points.shape[1]}")
             replace = kwargs.get('replace', True)
             points = np.ones((n, 3), dtype=np.float64) * np.nan
             remaining_points = n
@@ -722,9 +722,9 @@ class Domain(object):
             while remaining_points > 0:
                 if self.points.shape[1] == 3:
                     #if isinstance(tree, KDTreeManager) and isinstance(threshold, float) and not convex:
-                    print(f"threshold: {threshold}; threshold_volume: {volume_threshold}")
+                    #print(f"threshold: {threshold}; threshold_volume: {volume_threshold}")
                     if isinstance(threshold, float) and not convex:
-                        print("inside loop")
+                        #print("inside loop")
                         #cells_outer = []
                         start = perf_counter()
                         #cells_0 = tree.query_ball_tree(self.mesh_tree, volume_threshold, eps=volume_threshold/100)

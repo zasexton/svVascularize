@@ -404,27 +404,34 @@ def build_0d(num_cores=None):
 
 def install_igl_backend():
     """
-    Ensure that the `igl` Python package is available so that trimesh
-    has a robust boolean backend. If `igl` is already importable this
-    is a no-op; otherwise we attempt to install it via pip.
+    Check for the optional `igl` Python package used by trimesh to provide
+    a robust boolean backend.
 
-    Any installation failure is converted into a warning so that the
-    overall svv build can still succeed, but boolean operations may
-    lack the libigl-backed engine in that case.
+    By default, svv does *not* attempt to install `igl` at build time (to avoid
+    brittle builds and unexpected network usage). To opt in to a best-effort
+    `pip install igl`, set `SVV_INSTALL_IGL_BACKEND=1`.
     """
     try:
         import igl  # type: ignore  # noqa: F401
-        return
+        return True
     except Exception:
-        pass
+        if not env_flag("SVV_INSTALL_IGL_BACKEND", False):
+            print(
+                "Note: optional dependency 'igl' is not available; trimesh boolean "
+                "operations may not have a robust backend. Set "
+                "SVV_INSTALL_IGL_BACKEND=1 to attempt installation."
+            )
+            return False
 
     print("Installing 'igl' for trimesh boolean backends...")
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "igl"])
         print("Finished installing 'igl'.")
+        return True
     except Exception as e:
         print(f"Warning: failed to install 'igl' ({e}). "
               "Trimesh boolean operations may not have a robust backend.")
+        return False
 
 
 class DownloadAndBuildExt(build_ext):
@@ -445,8 +452,8 @@ class DownloadAndBuildExt(build_ext):
             except Exception as e:
                 print(f"Warning: svZeroDSolver build failed ({e}). Continuing without building solver.")
 
-        # Always ensure a trimesh/libigl backend is present for boolean operations,
-        # but do not fail the build if installation is not possible.
+        # Check for the optional trimesh/libigl boolean backend.
+        # (Opt-in install via `SVV_INSTALL_IGL_BACKEND=1`.)
         install_igl_backend()
 
         # Always proceed to build Cython extensions
