@@ -1,4 +1,5 @@
 import numpy
+import os
 from copy import deepcopy
 from svv.tree.tree import Tree
 from svv.tree.data.data import TreeData
@@ -326,12 +327,14 @@ class Forest(object):
             for j in range(self.n_trees_per_network[i]):
                 self.networks[i][j].export_solid(outdir=outdir, shell_thickness=shell_thickness)
 
-    def export_splines(self):
+    def export_splines(self, outdir=None):
         """
         Export networks splines
         """
         if isinstance(outdir, type(None)):
             outdir = 'splines_tmp'
+            if not os.path.exists(outdir):
+                os.makedirs(outdir)
         if not isinstance(self.connections, type(None)):
             for i in range(len(self.connections.tree_connections)):
                 interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals = export_spline(self.connections.tree_connections[i])
