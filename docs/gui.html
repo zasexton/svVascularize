@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>svVascularize GUI · Documentation</title>
+  <link href="https://fonts.googleapis.com/css?family=Montserrat:400,700" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topnav">
+    <div class="container">
+      <h1>svVascularize</h1>
+      <nav>
+        <a href="index.html#about">About</a>
+        <a href="install.html">Installation</a>
+        <a class="active" href="doc.html">Documentation</a>
+        <a href="index.html#simulation">Simulation</a>
+        <a href="https://pypi.org/project/svv/" target="_blank" rel="noopener">PyPI</a>
+        <a href="https://github.com/SimVascular/svVascularize" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h2>svVascularize GUI</h2>
+      <p>A CAD-style interface for loading domains, placing start points, generating trees/forests, and exporting results.</p>
+      <a class="cta" href="doc.html">Back to Docs</a>
+    </div>
+  </section>
+
+  <main class="container content">
+    <h2 id="overview">Overview</h2>
+    <p>
+      The <code>svv.visualize.gui</code> module provides an interactive, dockable interface for configuring and visualizing
+      synthetic vascularization inside a tissue <em>Domain</em>. It is designed for exploratory workflows where you want to
+      iterate quickly on start points, parameters, and layout before automating runs in Python.
+    </p>
+
+    <h3 id="on-this-page">On this page</h3>
+    <ul>
+      <li><a href="#capabilities">What the GUI can do</a></li>
+      <li><a href="#navigation">How to navigate the interface</a></li>
+      <li><a href="#workflow">A typical workflow</a></li>
+    </ul>
+
+    <h2 id="capabilities">What The GUI Can Do</h2>
+    <ul>
+      <li><strong>Load and inspect domains:</strong> open <code>.dmn</code>, <code>.vtu</code>, <code>.vtp</code>, or <code>.stl</code> files and explore them in a 3D viewport.</li>
+      <li><strong>Define start points:</strong> pick points directly on the domain surface or enter coordinates manually (supports multiple networks/trees).</li>
+      <li><strong>Optional growth directions:</strong> attach a direction vector to a selected start point and visualize it as an arrow.</li>
+      <li><strong>Generate vascular objects:</strong> grow a single <em>Tree</em> or a multi-network <em>Forest</em>, with forest competition and per-tree overrides.</li>
+      <li><strong>CAD-style scene control:</strong> show/hide the domain, points, and (for forests) individual networks/trees from the Model Tree.</li>
+      <li><strong>Export for downstream use:</strong> centerlines (<code>.vtp</code>), solids (STL/VTU), connected-forest splines (text), and 0D/3D simulation setup files.</li>
+      <li><strong>Inspect time-varying results:</strong> open the dockable Solution Inspector for simulation solution visualization (when available).</li>
+    </ul>
+
+    <h2 id="navigation">How To Navigate The Interface</h2>
+    <h3 id="layout">Layout At A Glance</h3>
+    <ul>
+      <li><strong>Central viewport:</strong> the 3D scene (domain mesh + start points + generated vessels).</li>
+      <li><strong>Model Tree (left):</strong> a scene browser with visibility checkboxes (use it to isolate networks/trees).</li>
+      <li><strong>Properties (right):</strong> the primary control panel with tabs for <em>Generation</em> and <em>Start Points</em>.</li>
+      <li><strong>Information (bottom):</strong> progress + logs (hidden by default; can be shown from <em>View → Panels</em>).</li>
+      <li><strong>Status bar (bottom edge):</strong> session status, object/vessel counts, and a small system monitor.</li>
+    </ul>
+
+    <figure class="figure-center">
+      <img src="graphics/gui/gui_layout.svg" alt="Schematic of the svVascularize GUI layout" loading="lazy" />
+      <figcaption>GUI layout schematic (toolbars, model tree, 3D viewport, properties, info/output).</figcaption>
+    </figure>
+
+    <h3 id="viewport-controls">3D Viewport Controls</h3>
+    <p>The viewport uses standard PyVista/VTK camera navigation:</p>
+    <table>
+      <thead>
+        <tr><th>Action</th><th>Mouse / Key</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Rotate (orbit)</td><td>Left-drag</td></tr>
+        <tr><td>Pan</td><td>Right-drag, or Shift + left-drag</td></tr>
+        <tr><td>Zoom</td><td>Mouse wheel, or middle-drag</td></tr>
+        <tr><td>Re-center the camera</td><td>Use the View toolbar (Fit / Iso / Top / Front / Right)</td></tr>
+      </tbody>
+    </table>
+    <p>
+      If the camera feels “lost”, use <em>Fit</em> to bring the full domain and vasculature back into view. You can also toggle
+      visual aids like <em>Grid</em>, <em>Domain</em>, <em>Domain Edges</em>, and the <em>Scale Bar</em> from the View toolbar/menu.
+    </p>
+
+    <h3 id="view-toolbar-icons">Navigation Icons (View Toolbar)</h3>
+    <p>
+      The View toolbar provides quick camera presets and visibility toggles. These are the icons you’ll use most for navigation:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Icon</th><th>Action</th><th>Shortcut</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/maximize.svg" alt="Fit view icon" /></td>
+          <td>Fit</td>
+          <td><code>V, F</code></td>
+          <td>Re-center the camera to frame all visible objects.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/box.svg" alt="Isometric view icon" /></td>
+          <td>Iso</td>
+          <td><code>V, I</code></td>
+          <td>Isometric view (a good default for overall orientation).</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/arrow-up.svg" alt="Top view icon" /></td>
+          <td>Top</td>
+          <td><code>V, T</code></td>
+          <td>Top-down view.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/arrow-right.svg" alt="Front view icon" /></td>
+          <td>Front</td>
+          <td><code>V, 1</code></td>
+          <td>Front view.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/rotate-clockwise.svg" alt="Right view icon" /></td>
+          <td>Right</td>
+          <td><code>V, 3</code></td>
+          <td>Right-side view.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/eye.svg" alt="Toggle domain visibility icon" /></td>
+          <td>Domain</td>
+          <td><code>D</code></td>
+          <td>Show/hide the domain mesh.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/grid.svg" alt="Toggle grid icon" /></td>
+          <td>Grid</td>
+          <td><code>G</code></td>
+          <td>Show/hide the reference grid behind the scene.</td>
+        </tr>
+        <tr>
+          <td><img class="icon" src="graphics/gui/icons/ruler.svg" alt="Toggle scale bar icon" /></td>
+          <td>Scale Bar</td>
+          <td><code>S</code></td>
+          <td>Show/hide the viewport scale bar (uses the current length unit).</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 id="panels">Key Panels</h3>
+    <ul>
+      <li><strong>Start Points tab:</strong> choose a (Network, Tree) slot, then add a point by picking on the domain or via manual entry; optionally enable a custom direction and normalize it.</li>
+      <li><strong>Generation tab:</strong> switch between Tree vs Forest mode, tune parameters (vessel count, clearance, unit system, seed, competition), then click <em>Generate Tree/Forest</em>.</li>
+      <li><strong>Model Tree:</strong> toggle visibility of the domain, start points, and generated objects; in forest mode, you can hide/show per-network and per-tree actors.</li>
+      <li><strong>Information / Output:</strong> check progress and warnings during longer tasks like loading, generation, connecting forests, and exports.</li>
+    </ul>
+
+    <figure class="figure-center">
+      <img src="graphics/gui/start_points_tab.svg" alt="Schematic of the Start Points tab" loading="lazy" />
+      <figcaption>Start Points tab schematic (network/tree selection, point list, picking/manual entry, direction controls).</figcaption>
+    </figure>
+
+    <h3 id="menus">Menus You’ll Use Most</h3>
+    <ul>
+      <li><strong>File:</strong> Open domain, Save start-point configuration (JSON), Save Domain (<code>.dmn</code>), Save Tree/Forest (<code>.tree</code>/<code>.forest</code>).</li>
+      <li><strong>View:</strong> camera presets, visibility toggles, show/hide panels and toolbars, save/reset layout.</li>
+      <li><strong>Fabricate:</strong> export centerlines/solids/splines for CAD, meshing, or fabrication workflows.</li>
+      <li><strong>Simulate:</strong> export 0D/3D simulation setup files; open the Solution Inspector.</li>
+    </ul>
+
+    <h2 id="workflow">Typical Workflow</h2>
+    <ol>
+      <li><strong>Load a domain:</strong> <em>File → Open</em> to load a domain/mesh.</li>
+      <li><strong>Add start points:</strong> open the <em>Start Points</em> tab and pick points on the domain (and optional directions).</li>
+      <li><strong>Set parameters:</strong> use the <em>Generation</em> tab to choose Tree vs Forest mode and tune the generator.</li>
+      <li><strong>Generate:</strong> click <em>Generate Tree/Forest</em> and inspect the result in 3D; use the Model Tree to isolate parts of the scene.</li>
+      <li><strong>(Forest) Connect:</strong> if needed, connect trees into a network (then export connected splines).</li>
+      <li><strong>Export:</strong> use <em>Fabricate</em> and <em>Simulate</em> menus to write geometry and simulation inputs.</li>
+    </ol>
+
+    <div class="callout tip">
+      <strong>Quick launch:</strong>
+      <pre data-copy><code>python -m svv.visualize.gui
+python -m svv.visualize.gui --domain path/to/domain.dmn</code></pre>
+      <p style="margin:0">If point-picking does not work, ensure the domain was created/solved/built before loading.</p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2025 SimVascular, Stanford University, The Regents of the University of California, and others —
+      <a href="https://opensource.org/license/BSD-3-Clause">BSD 3-Clause License</a><br></p>
+    </div>
+  </footer>
+
+  <script defer src="script.js"></script>
+</body>
+</html>

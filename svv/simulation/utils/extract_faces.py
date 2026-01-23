@@ -2,7 +2,8 @@ import numpy
 import tqdm
 from scipy.spatial import cKDTree
 from collections import defaultdict
-
+import pyvista as pv
+import numpy as np
 
 def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False, combine_walls: bool = True):
     """
@@ -610,6 +611,61 @@ def extract_faces(surface, mesh, crease_angle: float = 60, verbose: bool = False
                         shared_boundaries[i].append(k)
                         break
     return faces, wall_surfaces, cap_surfaces, lumen_surfaces, shared_boundaries
+
+def split_polyline_by_turn_angle(polyline: pv.PolyData, angle_deg: float):
+    """
+    Split each polyline cell into multiple polyline segments whenever the
+    turning angle at a vertex exceeds angle_deg.
+    Returns a list[pv.PolyData], each a separate line/polyline.
+    """
+    out = []
+    angle_thr = np.deg2rad(angle_deg)
+    # Ensure we have only lines
+    polyline = polyline.extract_cells(np.arange(polyline.n_cells)).clean()
+    for ci in range(polyline.n_cells):
+        cell = polyline.get_cell(ci)
+        ids = np.array(cell.point_ids, dtype=int)
+        pts = polyline.points[ids]
+        # If the line is explicitly closed (last == first), remove the duplicate last point
+        closed = len(ids) > 2 and ids[0] == ids[-1]
+        if closed:
+            ids = ids[:-1]
+            pts = pts[:-1]
+        n = len(ids)
+        if n < 3:
+            # Too short to split
+            seg = pv.PolyData(polyline.points[ids])
+            seg.lines = np.hstack([[n], np.arange(n)]).astype(np.int64)
+            out.append(seg)
+            continue
+        # Compute turning angles at interior vertices
+        # angle at i uses vectors (i - i-1) and (i+1 - i)
+        break_idx = []
+        for i in range(1, n - 1):
+            v0 = pts[i] - pts[i - 1]
+            v1 = pts[i + 1] - pts[i]
+            n0 = np.linalg.norm(v0)
+            n1 = np.linalg.norm(v1)
+            if n0 == 0 or n1 == 0:
+                continue
+            c = np.clip(np.dot(v0, v1) / (n0 * n1), -1.0, 1.0)
+            ang = np.arccos(c)
+            if ang > angle_thr:
+                break_idx.append(i)
+        # Build segments [start .. break] [break .. nextbreak] ... [last]
+        cuts = [0] + break_idx + [n - 1]
+        for a, b in zip(cuts[:-1], cuts[1:]):
+            # include b in segment
+            seg_ids = ids[a:b + 1]
+            if len(seg_ids) < 2:
+                continue
+            seg_pts = polyline.points[seg_ids]
+            seg = pv.PolyData(seg_pts)
+            seg.lines = np.hstack([[len(seg_pts)], np.arange(len(seg_pts))]).astype(np.int64)
+            out.append(seg)
+        # If it’s a closed loop, you might also want to test/split the wrap-around corner.
+        # For rectangles, the above is usually enough once the polyline ordering is good.
+    return [s.clean() for s in out]
 
 
 def has_matching_boundary(boundary_trees_a, boundary_trees_b, tolerance=1e-9):

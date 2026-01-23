@@ -30,8 +30,10 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QMessageBox,
     QDialog,
+    QColorDialog,
+    QDialogButtonBox,
 )
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QColor
 
 from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.theme import CADTheme, CADIcons
@@ -344,6 +346,424 @@ class ColorbarOptionsDialog(QDialog):
         if "shadow" in options:
             self.shadow_cb.setChecked(options["shadow"])
         self.blockSignals(False)
+
+
+class BackgroundOptionsDialog(QDialog):
+    """
+    Popup dialog for background customization options (ParaView-like).
+
+    Supports solid, gradient, and textured backgrounds with controls for
+    colors, gradient mode, dithering, and opacity.
+    """
+
+    options_changed = Signal()
+
+    _PRESETS = {
+        "CAD Default": {
+            "mode": "Gradient",
+            "color1": CADTheme.get_color("viewport", "background-bottom"),
+            "color2": CADTheme.get_color("viewport", "background-top"),
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+        },
+        "Dark": {
+            "mode": "Gradient",
+            "color1": "#1E1E1E",
+            "color2": "#3C3C3C",
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+        },
+        "Light": {
+            "mode": "Gradient",
+            "color1": "#FFFFFF",
+            "color2": "#DADADA",
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+        },
+        "Black": {
+            "mode": "Solid",
+            "color1": "#000000",
+            "color2": "#000000",
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+        },
+        "White": {
+            "mode": "Solid",
+            "color1": "#FFFFFF",
+            "color2": "#FFFFFF",
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+        },
+    }
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Background")
+        self.setModal(False)
+        self.setMinimumWidth(360)
+
+        self._updating = False
+        self._last_valid_color1 = CADTheme.get_color("viewport", "background-bottom")
+        self._last_valid_color2 = CADTheme.get_color("viewport", "background-top")
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+
+        row = 0
+
+        grid.addWidget(QLabel("Preset:"), row, 0)
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems(["Custom", "CAD Default", "Dark", "Light", "Black", "White"])
+        self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
+        grid.addWidget(self.preset_combo, row, 1, 1, 2)
+        row += 1
+
+        grid.addWidget(QLabel("Mode:"), row, 0)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Solid", "Gradient", "Texture"])
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        grid.addWidget(self.mode_combo, row, 1, 1, 2)
+        row += 1
+
+        self.color1_label = QLabel("Color:")
+        grid.addWidget(self.color1_label, row, 0)
+        self.color1_swatch, self.color1_edit = self._make_color_picker(self._last_valid_color1)
+        grid.addWidget(self._wrap_row(self.color1_swatch, self.color1_edit), row, 1, 1, 2)
+        row += 1
+
+        self.color2_label = QLabel("Top Color:")
+        grid.addWidget(self.color2_label, row, 0)
+        self.color2_swatch, self.color2_edit = self._make_color_picker(self._last_valid_color2)
+        grid.addWidget(self._wrap_row(self.color2_swatch, self.color2_edit), row, 1, 1, 2)
+        row += 1
+
+        grid.addWidget(QLabel("Gradient:"), row, 0)
+        self.gradient_mode_combo = QComboBox()
+        self.gradient_mode_combo.addItems([
+            "Vertical",
+            "Horizontal",
+            "Radial (Farthest Side)",
+            "Radial (Farthest Corner)",
+        ])
+        self.gradient_mode_combo.currentTextChanged.connect(self._on_any_changed)
+        grid.addWidget(self.gradient_mode_combo, row, 1, 1, 2)
+        row += 1
+
+        self.dither_cb = QCheckBox("Dither (reduce banding)")
+        self.dither_cb.setChecked(True)
+        self.dither_cb.stateChanged.connect(self._on_any_changed)
+        grid.addWidget(self.dither_cb, row, 1, 1, 2)
+        row += 1
+
+        grid.addWidget(QLabel("Texture:"), row, 0)
+        self.texture_path_edit = QLineEdit()
+        self.texture_path_edit.setPlaceholderText("Select an image...")
+        self.texture_path_edit.editingFinished.connect(self._on_any_changed)
+        self.texture_browse_btn = QPushButton("Browse...")
+        self.texture_browse_btn.clicked.connect(self._browse_texture)
+        texture_row = QHBoxLayout()
+        texture_row.setContentsMargins(0, 0, 0, 0)
+        texture_row.setSpacing(6)
+        texture_row.addWidget(self.texture_path_edit, 1)
+        texture_row.addWidget(self.texture_browse_btn, 0)
+        texture_widget = QWidget()
+        texture_widget.setLayout(texture_row)
+        grid.addWidget(texture_widget, row, 1, 1, 2)
+        row += 1
+
+        self.texture_interpolate_cb = QCheckBox("Interpolate")
+        self.texture_interpolate_cb.setChecked(True)
+        self.texture_interpolate_cb.stateChanged.connect(self._on_any_changed)
+        grid.addWidget(self.texture_interpolate_cb, row, 1, 1, 2)
+        row += 1
+
+        self.texture_repeat_cb = QCheckBox("Repeat")
+        self.texture_repeat_cb.setChecked(False)
+        self.texture_repeat_cb.stateChanged.connect(self._on_any_changed)
+        grid.addWidget(self.texture_repeat_cb, row, 1, 1, 2)
+        row += 1
+
+        grid.addWidget(QLabel("Opacity:"), row, 0)
+        self.opacity_spin = QDoubleSpinBox()
+        self.opacity_spin.setRange(0.0, 1.0)
+        self.opacity_spin.setSingleStep(0.05)
+        self.opacity_spin.setDecimals(2)
+        self.opacity_spin.setValue(1.0)
+        self.opacity_spin.valueChanged.connect(self._on_any_changed)
+        grid.addWidget(self.opacity_spin, row, 1, 1, 2)
+        row += 1
+
+        layout.addLayout(grid)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(8)
+
+        self.reset_btn = QPushButton("Reset to Theme")
+        self.reset_btn.clicked.connect(self._reset_to_theme)
+        buttons_layout.addWidget(self.reset_btn, 0)
+
+        self.swap_btn = QPushButton("Swap Colors")
+        self.swap_btn.clicked.connect(self._swap_colors)
+        buttons_layout.addWidget(self.swap_btn, 0)
+
+        buttons_layout.addStretch(1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.close)
+        buttons_layout.addWidget(button_box, 0)
+
+        layout.addLayout(buttons_layout)
+
+        self._wire_color_picker(self.color1_swatch, self.color1_edit, key="color1")
+        self._wire_color_picker(self.color2_swatch, self.color2_edit, key="color2")
+        self._refresh_enabled_state()
+
+        self.set_settings(self._PRESETS["CAD Default"])
+        self._updating = True
+        try:
+            self.preset_combo.setCurrentText("CAD Default")
+        finally:
+            self._updating = False
+
+    def _wrap_row(self, swatch: QPushButton, edit: QLineEdit) -> QWidget:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(swatch, 0)
+        row.addWidget(edit, 1)
+        widget = QWidget()
+        widget.setLayout(row)
+        return widget
+
+    def _make_color_picker(self, initial_color: str) -> tuple[QPushButton, QLineEdit]:
+        swatch = QPushButton()
+        swatch.setFixedSize(28, 18)
+        swatch.setToolTip("Click to choose a color")
+        swatch.setFocusPolicy(Qt.NoFocus)
+
+        edit = QLineEdit()
+        edit.setText(initial_color)
+        edit.setToolTip("Enter a color (e.g. #RRGGBB, 'white', or '0.2,0.3,0.4')")
+        edit.setMaximumWidth(140)
+
+        self._set_swatch_color(swatch, initial_color)
+        return swatch, edit
+
+    def _parse_color(self, text: str) -> Optional[QColor]:
+        text = (text or "").strip()
+        if not text:
+            return None
+        q = QColor(text)
+        if q.isValid():
+            return q
+
+        if "," in text:
+            parts = [p.strip() for p in text.split(",") if p.strip()]
+            if len(parts) in (3, 4):
+                try:
+                    values = [float(p) for p in parts]
+                except ValueError:
+                    return None
+
+                if max(values) <= 1.0:
+                    r, g, b = values[:3]
+                    a = values[3] if len(values) == 4 else 1.0
+                    q = QColor.fromRgbF(r, g, b, a)
+                else:
+                    r, g, b = [max(0, min(255, int(round(v)))) for v in values[:3]]
+                    a = max(0, min(255, int(round(values[3])))) if len(values) == 4 else 255
+                    q = QColor(r, g, b, a)
+                return q if q.isValid() else None
+
+        return None
+
+    def _set_swatch_color(self, swatch: QPushButton, color_text: str) -> None:
+        color = self._parse_color(color_text)
+        if color is None:
+            swatch.setStyleSheet("")
+            return
+        css_color = color.name(QColor.HexRgb)
+        border = CADTheme.get_color("border", "strong")
+        swatch.setStyleSheet(f"background-color: {css_color}; border: 1px solid {border};")
+
+    def _wire_color_picker(self, swatch: QPushButton, edit: QLineEdit, key: str) -> None:
+        def pick():
+            initial = self._parse_color(edit.text()) or QColor("#000000")
+            chosen = QColorDialog.getColor(initial, self, "Select Color")
+            if not chosen.isValid():
+                return
+            edit.setText(chosen.name(QColor.HexRgb).upper())
+            self._on_color_edited(key)
+
+        swatch.clicked.connect(pick)
+        edit.editingFinished.connect(lambda: self._on_color_edited(key))
+
+    def _set_custom_preset(self) -> None:
+        if self._updating:
+            return
+        if self.preset_combo.currentText() == "Custom":
+            return
+        self._updating = True
+        try:
+            self.preset_combo.setCurrentText("Custom")
+        finally:
+            self._updating = False
+
+    def _on_color_edited(self, key: str) -> None:
+        edit = self.color1_edit if key == "color1" else self.color2_edit
+        swatch = self.color1_swatch if key == "color1" else self.color2_swatch
+        last = self._last_valid_color1 if key == "color1" else self._last_valid_color2
+
+        color = self._parse_color(edit.text())
+        if color is None:
+            edit.setText(last)
+            return
+
+        normalized = color.name(QColor.HexRgb).upper()
+        edit.setText(normalized)
+        if key == "color1":
+            self._last_valid_color1 = normalized
+        else:
+            self._last_valid_color2 = normalized
+
+        self._set_swatch_color(swatch, normalized)
+        self._set_custom_preset()
+        self._emit_changed()
+
+    def _browse_texture(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Background Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;All files (*.*)",
+        )
+        if not path:
+            return
+        self.texture_path_edit.setText(path)
+        self._set_custom_preset()
+        self._emit_changed()
+
+    def _on_preset_changed(self, preset: str) -> None:
+        if self._updating or preset == "Custom":
+            return
+        settings = self._PRESETS.get(preset)
+        if not settings:
+            return
+        self._updating = True
+        try:
+            self.set_settings(settings)
+        finally:
+            self._updating = False
+        self._emit_changed()
+
+    def _on_mode_changed(self, mode: str) -> None:
+        if not self._updating:
+            self._set_custom_preset()
+        self._refresh_enabled_state()
+        self._emit_changed()
+
+    def _on_any_changed(self) -> None:
+        if not self._updating:
+            self._set_custom_preset()
+        self._emit_changed()
+
+    def _refresh_enabled_state(self) -> None:
+        mode = self.mode_combo.currentText()
+
+        is_gradient = mode == "Gradient"
+        is_texture = mode == "Texture"
+
+        self.color2_label.setEnabled(is_gradient)
+        self.color2_swatch.setEnabled(is_gradient)
+        self.color2_edit.setEnabled(is_gradient)
+        self.gradient_mode_combo.setEnabled(is_gradient)
+        self.dither_cb.setEnabled(is_gradient)
+        self.swap_btn.setEnabled(is_gradient)
+
+        self.texture_path_edit.setEnabled(is_texture)
+        self.texture_browse_btn.setEnabled(is_texture)
+        self.texture_interpolate_cb.setEnabled(is_texture)
+        self.texture_repeat_cb.setEnabled(is_texture)
+
+        self.color1_label.setText("Color:" if mode == "Solid" else "Bottom Color:")
+
+    def _swap_colors(self) -> None:
+        if self.mode_combo.currentText() != "Gradient":
+            return
+        c1 = self.color1_edit.text()
+        c2 = self.color2_edit.text()
+        self.color1_edit.setText(c2)
+        self.color2_edit.setText(c1)
+        self._on_color_edited("color1")
+        self._on_color_edited("color2")
+
+    def _reset_to_theme(self) -> None:
+        self._updating = True
+        try:
+            self.preset_combo.setCurrentText("CAD Default")
+        finally:
+            self._updating = False
+        self._on_preset_changed("CAD Default")
+
+    def _emit_changed(self) -> None:
+        self.options_changed.emit()
+
+    def get_settings(self) -> dict:
+        return {
+            "mode": self.mode_combo.currentText(),
+            "color1": self.color1_edit.text().strip() or self._last_valid_color1,
+            "color2": self.color2_edit.text().strip() or self._last_valid_color2,
+            "gradient_mode": self.gradient_mode_combo.currentText(),
+            "dither": self.dither_cb.isChecked(),
+            "opacity": float(self.opacity_spin.value()),
+            "texture_path": self.texture_path_edit.text().strip(),
+            "texture_interpolate": self.texture_interpolate_cb.isChecked(),
+            "texture_repeat": self.texture_repeat_cb.isChecked(),
+        }
+
+    def set_settings(self, settings: dict) -> None:
+        self._updating = True
+        try:
+            mode = settings.get("mode", "Gradient")
+            self.mode_combo.setCurrentText(mode)
+
+            c1 = settings.get("color1", self._last_valid_color1)
+            c2 = settings.get("color2", self._last_valid_color2)
+            self.color1_edit.setText(c1)
+            self.color2_edit.setText(c2)
+            self._last_valid_color1 = self._parse_color(c1).name(QColor.HexRgb).upper() if self._parse_color(c1) else self._last_valid_color1
+            self._last_valid_color2 = self._parse_color(c2).name(QColor.HexRgb).upper() if self._parse_color(c2) else self._last_valid_color2
+            self._set_swatch_color(self.color1_swatch, self._last_valid_color1)
+            self._set_swatch_color(self.color2_swatch, self._last_valid_color2)
+
+            gm = settings.get("gradient_mode", "Vertical")
+            self.gradient_mode_combo.setCurrentText(gm)
+
+            if "dither" in settings:
+                self.dither_cb.setChecked(bool(settings["dither"]))
+            if "opacity" in settings:
+                self.opacity_spin.setValue(float(settings["opacity"]))
+
+            if "texture_path" in settings:
+                self.texture_path_edit.setText(settings["texture_path"] or "")
+            if "texture_interpolate" in settings:
+                self.texture_interpolate_cb.setChecked(bool(settings["texture_interpolate"]))
+            if "texture_repeat" in settings:
+                self.texture_repeat_cb.setChecked(bool(settings["texture_repeat"]))
+        finally:
+            self._updating = False
+        self._refresh_enabled_state()
 
 
 class StatisticsDialog(QDialog):
@@ -3419,6 +3839,20 @@ class SolutionInspectorWidget(QWidget):
         self._current_cmap: str = "coolwarm"
         self._global_ranges = {}
         self._colorbar_visible: bool = True
+        self._background_options_dialog: Optional[BackgroundOptionsDialog] = None
+        self._background_settings = {
+            "mode": "Gradient",
+            "color1": CADTheme.get_color("viewport", "background-bottom"),
+            "color2": CADTheme.get_color("viewport", "background-top"),
+            "gradient_mode": "Vertical",
+            "dither": True,
+            "opacity": 1.0,
+            "texture_path": "",
+            "texture_interpolate": True,
+            "texture_repeat": False,
+        }
+        self._background_texture = None
+        self._background_texture_path = ""
 
         # Animation state
         self._animation_timer: Optional[QTimer] = None
@@ -3595,6 +4029,11 @@ class SolutionInspectorWidget(QWidget):
         camera_presets_action.setStatusTip("Open camera presets panel")
         camera_presets_action.triggered.connect(self._show_camera_presets_dialog)
         view_menu.addAction(camera_presets_action)
+
+        background_action = QAction("Background", self)
+        background_action.setStatusTip("Open background customization options")
+        background_action.triggered.connect(self._show_background_options_dialog)
+        view_menu.addAction(background_action)
 
         view_menu.addSeparator()
 
@@ -4418,6 +4857,189 @@ class SolutionInspectorWidget(QWidget):
         self._camera_presets_dialog.show()
         self._camera_presets_dialog.raise_()
         self._camera_presets_dialog.activateWindow()
+
+    def _show_background_options_dialog(self) -> None:
+        """Show the background options popup dialog."""
+        if self._background_options_dialog is None:
+            self._background_options_dialog = BackgroundOptionsDialog(self)
+            self._background_options_dialog.options_changed.connect(self._on_background_options_changed)
+
+        self._background_options_dialog.set_settings(self._background_settings)
+        self._background_options_dialog.show()
+        self._background_options_dialog.raise_()
+        self._background_options_dialog.activateWindow()
+
+    def _on_background_options_changed(self) -> None:
+        if self._background_options_dialog is None:
+            return
+        settings = self._background_options_dialog.get_settings()
+        self._background_settings = settings
+        self._apply_background_settings(settings)
+
+    def _apply_background_settings(self, settings: dict) -> None:
+        plotter = getattr(self.vtk_widget, "plotter", None)
+        if plotter is None:
+            return
+
+        renderer = getattr(plotter, "renderer", None)
+        if renderer is None:
+            try:
+                renderer = plotter.ren_win.GetRenderers().GetFirstRenderer()
+            except Exception:
+                renderer = None
+
+        mode = (settings.get("mode") or "Gradient").strip()
+        color1 = (settings.get("color1") or CADTheme.get_color("viewport", "background-bottom")).strip()
+        color2 = (settings.get("color2") or CADTheme.get_color("viewport", "background-top")).strip()
+
+        if renderer is not None:
+            try:
+                renderer.TexturedBackgroundOff()
+            except Exception:
+                pass
+
+        if mode == "Texture":
+            if renderer is None:
+                return
+            try:
+                renderer.GradientBackgroundOff()
+            except Exception:
+                pass
+
+            try:
+                plotter.set_background(color1)
+            except Exception:
+                pass
+
+            texture_path = (settings.get("texture_path") or "").strip()
+            if not texture_path:
+                try:
+                    renderer.TexturedBackgroundOff()
+                except Exception:
+                    pass
+            else:
+                if texture_path != self._background_texture_path or self._background_texture is None:
+                    self._background_texture = self._load_background_texture(texture_path)
+                    self._background_texture_path = texture_path if self._background_texture is not None else ""
+
+                texture = self._background_texture
+                if texture is None:
+                    try:
+                        renderer.TexturedBackgroundOff()
+                    except Exception:
+                        pass
+                else:
+                    if settings.get("texture_interpolate", True):
+                        try:
+                            texture.InterpolateOn()
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            texture.InterpolateOff()
+                        except Exception:
+                            pass
+                    if settings.get("texture_repeat", False):
+                        try:
+                            texture.RepeatOn()
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            texture.RepeatOff()
+                        except Exception:
+                            pass
+
+                    try:
+                        renderer.SetBackgroundTexture(texture)
+                        renderer.TexturedBackgroundOn()
+                    except Exception:
+                        pass
+
+        elif mode == "Solid":
+            try:
+                plotter.set_background(color1)
+            except Exception:
+                if renderer is not None:
+                    qc = QColor(color1)
+                    if qc.isValid():
+                        renderer.SetBackground(qc.redF(), qc.greenF(), qc.blueF())
+                    try:
+                        renderer.GradientBackgroundOff()
+                    except Exception:
+                        pass
+
+        else:  # Gradient
+            try:
+                plotter.set_background(color1, top=color2)
+            except Exception:
+                if renderer is not None:
+                    qc1 = QColor(color1)
+                    qc2 = QColor(color2)
+                    if qc1.isValid():
+                        renderer.SetBackground(qc1.redF(), qc1.greenF(), qc1.blueF())
+                    if qc2.isValid():
+                        renderer.SetBackground2(qc2.redF(), qc2.greenF(), qc2.blueF())
+                    try:
+                        renderer.GradientBackgroundOn()
+                    except Exception:
+                        pass
+
+            if renderer is not None:
+                gradient_mode = (settings.get("gradient_mode") or "Vertical").strip()
+                try:
+                    modes = getattr(renderer, "GradientModes", None)
+                    if modes is not None and hasattr(renderer, "SetGradientMode"):
+                        mapping = {
+                            "Vertical": getattr(modes, "VTK_GRADIENT_VERTICAL", None),
+                            "Horizontal": getattr(modes, "VTK_GRADIENT_HORIZONTAL", None),
+                            "Radial (Farthest Side)": getattr(modes, "VTK_GRADIENT_RADIAL_VIEWPORT_FARTHEST_SIDE", None),
+                            "Radial (Farthest Corner)": getattr(modes, "VTK_GRADIENT_RADIAL_VIEWPORT_FARTHEST_CORNER", None),
+                        }
+                        mode_value = mapping.get(gradient_mode)
+                        if mode_value is None:
+                            mode_value = getattr(modes, "VTK_GRADIENT_VERTICAL", None)
+                        if mode_value is not None:
+                            renderer.SetGradientMode(mode_value)
+                except Exception:
+                    pass
+
+                try:
+                    if hasattr(renderer, "SetDitherGradient"):
+                        renderer.SetDitherGradient(bool(settings.get("dither", True)))
+                except Exception:
+                    pass
+
+        if renderer is not None:
+            try:
+                if hasattr(renderer, "SetBackgroundAlpha"):
+                    renderer.SetBackgroundAlpha(float(settings.get("opacity", 1.0)))
+            except Exception:
+                pass
+
+        try:
+            plotter.render()
+        except Exception:
+            pass
+
+    def _load_background_texture(self, path: str):
+        if not path or not os.path.isfile(path):
+            return None
+        try:
+            import vtk
+
+            factory = vtk.vtkImageReader2Factory()
+            reader = factory.CreateImageReader2(path)
+            if reader is None:
+                return None
+            reader.SetFileName(path)
+            reader.Update()
+
+            texture = vtk.vtkTexture()
+            texture.SetInputData(reader.GetOutput())
+            return texture
+        except Exception:
+            return None
 
     def _show_colorbar_options_dialog(self) -> None:
         """Show the colorbar options popup dialog."""

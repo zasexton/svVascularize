@@ -15,6 +15,7 @@ from svv.visualize.tree.show import show
 from svv.tree.branch.bifurcation import add_vessel, check_tree
 from svv.tree.export.export_solid import build_watertight_solid, build_merged_solid
 from svv.tree.export.export_centerlines import build_centerlines
+from svv.tree.export.write_splines import get_interpolated_sv_data, write_splines
 from svv.tree.utils.TreeManager import KDTreeManager, USearchTree
 from svv.tree.utils.c_extend import build_c_vessel_map
 from collections import ChainMap
@@ -278,7 +279,8 @@ class Tree(object):
             self.hnsw_tree.add_items(((new_data[new_inds[2], 0:3] + new_data[new_inds[2], 3:6]) / 2).reshape(1, 3).astype(np.float32), np.array([new_inds[2]]))
             #self.preallocate_midpoints[new_inds, :] = (new_data[new_inds, 0:3] + new_data[new_inds, 3:6])/2
             #self.midpoints_copy = self.preallocate_midpoints[:new_data.shape[0], :]
-            self.preallocate_midpoints[:self.segment_count, :] = (new_data[:, 0:3] + new_data[:, 3:6])/2
+            #self.preallocate_midpoints[:self.segment_count, :] = (new_data[:, 0:3] + new_data[:, 3:6])/2
+            self.preallocate_midpoints[new_inds, :] = (new_data[new_inds, 0:3] + new_data[new_inds, 3:6]) / 2
             self.tree_scale = self.new_tree_scale
             end = perf_counter()
             self.times['chunk_4'].append(end - start)
@@ -517,5 +519,7 @@ class Tree(object):
     def export_gcode(self):
         pass
 
-    def export_centerline(self):
-        pass
+    def export_splines(self, spline_sample_points=100):
+        interp_xyz, interp_r, interp_n, path_frames, branches, interp_xyzr = get_interpolated_sv_data(self.data)
+        splines = write_splines(interp_xyzr, spline_sample_points=spline_sample_points)
+        return splines
