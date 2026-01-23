@@ -333,8 +333,8 @@ class Forest(object):
         if isinstance(outdir, type(None)):
             outdir = 'splines_tmp'
         if not isinstance(self.connections, type(None)):
-            for i in range(len(self.connections)):
-                interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals = export_spline(self.connections[i])
+            for i in range(len(self.connections.tree_connections)):
+                interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals = export_spline(self.connections.tree_connections[i])
                 _ = write_splines(all_points, all_radii, outdir=outdir, name_prefix="{}".format(i))
 
     def save(self, path: str, include_timing: bool = False):
