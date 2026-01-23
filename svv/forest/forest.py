@@ -6,6 +6,7 @@ from svv.tree.collision.tree_collision import tree_collision
 from svv.forest.connect.geodesic import geodesic_constructor
 from svv.forest.connect.forest_connection import ForestConnection
 from svv.visualize.forest.show import show
+from svv.forest.export.export_spline import export_spline, write_splines
 
 
 class Forest(object):
@@ -324,6 +325,17 @@ class Forest(object):
         for i in range(self.n_networks):
             for j in range(self.n_trees_per_network[i]):
                 self.networks[i][j].export_solid(outdir=outdir, shell_thickness=shell_thickness)
+
+    def export_splines(self):
+        """
+        Export networks splines
+        """
+        if isinstance(outdir, type(None)):
+            outdir = 'splines_tmp'
+        if not isinstance(self.connections, type(None)):
+            for i in range(len(self.connections)):
+                interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals = export_spline(self.connections[i])
+                _ = write_splines(all_points, all_radii, outdir=outdir, name_prefix="{}".format(i))
 
     def save(self, path: str, include_timing: bool = False):
         """

@@ -261,7 +261,7 @@ def write_splines(interp_xyzr, spline_sample_points=100, write_splines=True):
             data = deepcopy(vessel_spline(t))
             for k in range(spline_sample_points):
                 spline_file.write('{}, {}, {}, {}\n'.format(data[0][k], data[1][k], data[2][k], data[3][k]))
-                spline_file.write('\n')
+            spline_file.write('\n')
     if write_splines:
         spline_file.close()
     return tree_splines

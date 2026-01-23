@@ -188,12 +188,19 @@ def export_spline(tree_connections, extrude_roots=False):
     return interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals
 
 
-def write_splines(ALL_POINTS, ALL_RADII, spline_sample_points=100, seperate=False, write_splines=True):
+def write_splines(ALL_POINTS, ALL_RADII, spline_sample_points=100, seperate=False, write_splines=True, outdir=None,
+                  name_prefix=None):
     ALL_SPLINES = []
     for network in range(len(ALL_POINTS)):
         network_splines = []
         if write_splines:
-            spline_file = open(os.getcwd() + os.sep + "network_{}_b_splines.txt".format(network), "w+")
+            if outdir is None:
+                outdir = os.getcwd()
+            if name_prefix is None:
+                name = "network_{}_b_splines.txt".format(network)
+            else:
+                name = "{}_network_{}_b_splines.txt".format(name_prefix, network)
+            spline_file = open(outdir + os.sep + name, "w+")
         for vessel in range(len(ALL_POINTS[network])):
             pt_array = np.array(ALL_POINTS[network][vessel])
             r_array = np.array(ALL_RADII[network][vessel]).reshape(-1, 1)
