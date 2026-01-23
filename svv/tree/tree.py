@@ -278,7 +278,8 @@ class Tree(object):
             self.hnsw_tree.add_items(((new_data[new_inds[2], 0:3] + new_data[new_inds[2], 3:6]) / 2).reshape(1, 3).astype(np.float32), np.array([new_inds[2]]))
             #self.preallocate_midpoints[new_inds, :] = (new_data[new_inds, 0:3] + new_data[new_inds, 3:6])/2
             #self.midpoints_copy = self.preallocate_midpoints[:new_data.shape[0], :]
-            self.preallocate_midpoints[:self.segment_count, :] = (new_data[:, 0:3] + new_data[:, 3:6])/2
+            #self.preallocate_midpoints[:self.segment_count, :] = (new_data[:, 0:3] + new_data[:, 3:6])/2
+            self.preallocate_midpoints[new_inds, :] = (new_data[new_inds, 0:3] + new_data[new_inds, 3:6]) / 2
             self.tree_scale = self.new_tree_scale
             end = perf_counter()
             self.times['chunk_4'].append(end - start)

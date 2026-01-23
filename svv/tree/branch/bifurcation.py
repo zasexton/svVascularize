@@ -91,7 +91,7 @@ def add_vessel(tree, **kwargs):
     nonconvex_sampling = kwargs.pop('nonconvex_sampling', 10)
     homogeneous = kwargs.pop('homogeneous', True)
     use_brute = kwargs.pop('use_brute', False)
-    max_iter = kwargs.pop('max_iter', 10000)
+    max_iter = kwargs.pop('max_iter', 20)
     return_cost = kwargs.pop('return_cost', False)
     #defualt_threshold = ((tree.domain.mesh.volume ** (1/3)) /
     #                     (tree.n_terminals ** threshold_exponent)) + tree.data[0, 21]*2.0
@@ -1000,7 +1000,7 @@ def add_vessel(tree, **kwargs):
                         else:
                             cons = [{"type": "ineq", "fun": lambda a: 1 - a[0] - a[1]}]
                             result = minimize(cost, x0, bounds=[(0.0, 1.0), (0, 1.0)],
-                                              options={'maxiter': max_iter}, constraints=cons, method="COBYLA")
+                                              options={'maxiter': max_iter}, constraints=cons, method="L-BFGS-B")
                             #result = minimize(cost, x0, bounds=[(0.0, 1.0), (0.0, 1.0)], callback=callback,
                             #                  options={'maxiter':max_iter})
                             if not result.success:
@@ -2013,12 +2013,13 @@ def construct_optimizer(tree, point, vessel, **kwargs):
         #triad_penalty = numpy.max([0.0, -1.0 * numpy.min(dists - d_min)])/d_min * penalty
         triad_penalty = 0.0
         d_min_dist = np.min(dists)
-        line = numpy.linspace(0, 1, 10).reshape(-1, 1)
-        proximal_line = np.sum(np.clip(tree.domain(proximal*line + x*(1-line)).flatten(), 0, 1))/len(line)
-        distal_line = np.sum(np.clip(tree.domain(distal*line + x*(1-line)).flatten(), 0, 1))/len(line)
-        terminal_line = np.sum(np.clip(tree.domain(terminal*line + x*(1-line)).flatten(), 0, 1))/len(line)
-        val = (proximal_line + distal_line + terminal_line)/3
-        domain_penalty = ((np.log(val + 0.001) - np.log(0.001))/(np.log(1.0+0.001) - np.log(0.001)))*2*penalty*scale
+        #line = numpy.linspace(0, 1, 10).reshape(-1, 1)
+        #proximal_line = np.sum(np.clip(tree.domain(proximal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        #distal_line = np.sum(np.clip(tree.domain(distal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        #terminal_line = np.sum(np.clip(tree.domain(terminal*line + x*(1-line)).flatten(), 0, 1))/len(line)
+        #val = (proximal_line + distal_line + terminal_line)/3
+        #domain_penalty = ((np.log(val + 0.001) - np.log(0.001))/(np.log(1.0+0.001) - np.log(0.001)))*2*penalty*scale
+        domain_penalty = 0.0
         if numpy.isclose(numpy.min(dists),0.0):
             triad_penalty = 2*(penalty+scale)
             #return triad_penalty
