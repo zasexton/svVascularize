@@ -2,6 +2,7 @@ import numpy
 import pyvista
 from copy import deepcopy
 from scipy.interpolate import splprep, splev
+from scipy.spatial import cKDTree
 
 
 def get_longest_path(data, seed_edge):
@@ -296,6 +297,35 @@ def build_centerlines(tree, points_per_unit_length=100):
         polys.append(poly_line)
         total_outlet_area += poly_line['CenterlineSectionArea'][-1]
 
+    # Build KD-tree for fast closest point queries across all polys
+    all_points = []
+    point_to_poly_map = []  # (poly_index, point_index_within_poly)
+    for poly_idx, poly in enumerate(polys):
+        for pt_idx in range(poly.n_points):
+            all_points.append(poly.points[pt_idx])
+            point_to_poly_map.append((poly_idx, pt_idx))
+    all_points = numpy.array(all_points)
+    kdtree = cKDTree(all_points)
+
+    def find_closest_excluding(query_point, exclude_poly_idx):
+        """Find closest point not in the excluded poly using KD-tree."""
+        k = min(len(all_points), 50)
+        distances, indices = kdtree.query(query_point, k=k)
+        if numpy.ndim(distances) == 0:
+            distances = [distances.item()]
+            indices = [indices.item()]
+        for dist, idx in zip(distances, indices):
+            poly_idx, pt_idx = point_to_poly_map[idx]
+            if poly_idx != exclude_poly_idx:
+                return poly_idx, pt_idx, all_points[idx], dist
+        # Fallback: query all points (rare case where k nearest are all from excluded poly)
+        distances, indices = kdtree.query(query_point, k=len(all_points))
+        for dist, idx in zip(distances, indices):
+            poly_idx, pt_idx = point_to_poly_map[idx]
+            if poly_idx != exclude_poly_idx:
+                return poly_idx, pt_idx, all_points[idx], dist
+        return None, None, None, numpy.inf
+
     for ind in range(len(polys)):
         cent_ids = numpy.zeros((polys[ind].n_points, len(polys)), dtype=int)
         polys[ind].point_data.set_array(cent_ids, 'CenterlineId')
@@ -303,39 +333,17 @@ def build_centerlines(tree, points_per_unit_length=100):
 
     bifurcation_point_ids = []  # polys ind index, polys jnd index, polys jnd point index
     for ind in range(1, len(polys)):
-        current_closest_dist = numpy.inf
-        current_closest_branch = None
-        current_closest_pt_id = None
-        for jnd in range(len(polys)):
-            if jnd == ind:
-                continue
-            closest_pt_id = polys[jnd].find_closest_point(polys[ind].points[0])
-            closest_point = polys[jnd].points[closest_pt_id]
-            closest_dist_tmp = numpy.linalg.norm(polys[ind].points[0] - closest_point)
-            if closest_dist_tmp < current_closest_dist:
-                current_closest_branch = jnd
-                current_closest_dist = closest_dist_tmp
-                current_closest_pt_id = closest_pt_id
-                current_closest_point = closest_point
-        bifurcation_point_ids.append([ind, current_closest_branch, current_closest_pt_id, current_closest_point])
-        polys[current_closest_branch].point_data['CenterlineId'][0:current_closest_pt_id+1, ind] = 1
+        poly_idx, pt_idx, closest_point, _ = find_closest_excluding(polys[ind].points[0], ind)
+        bifurcation_point_ids.append([ind, poly_idx, pt_idx, closest_point])
+        polys[poly_idx].point_data['CenterlineId'][0:pt_idx+1, ind] = 1
+        current_closest_branch = poly_idx
         while current_closest_branch != 0:
             closest_branch = current_closest_branch
-            current_closest_dist = numpy.inf
-            current_closest_branch = None
-            current_closest_pt_id = None
-            for jnd in range(len(polys)):
-                if jnd == closest_branch:
-                    continue
-                closest_pt_id = polys[jnd].find_closest_point(polys[closest_branch].points[0])
-                closest_point = polys[jnd].points[closest_pt_id]
-                closest_dist_tmp = numpy.linalg.norm(polys[closest_branch].points[0] - closest_point)
-                if closest_dist_tmp < current_closest_dist:
-                    current_closest_branch = jnd
-                    current_closest_dist = closest_dist_tmp
-                    current_closest_pt_id = closest_pt_id
-                    current_closest_point = closest_point
-            polys[current_closest_branch].point_data['CenterlineId'][0:current_closest_pt_id+1, ind] = 1
+            poly_idx, pt_idx, closest_point, _ = find_closest_excluding(
+                polys[closest_branch].points[0], closest_branch
+            )
+            current_closest_branch = poly_idx
+            polys[poly_idx].point_data['CenterlineId'][0:pt_idx+1, ind] = 1
 
     # Determine Branch Temp Ids (CORRECT)
     branch_tmp_count = 0
@@ -434,13 +442,40 @@ def build_centerlines(tree, points_per_unit_length=100):
         polys[ind].point_data['GlobalNodeId'] = GlobalNodeId
 
     # Merge and Connect Lines
+    # Precompute cumulative point counts for index mapping
+    cumulative_points = [0]
+    for poly in polys:
+        cumulative_points.append(cumulative_points[-1] + poly.n_points)
+
+    def find_closest_in_merged(query_point, max_poly_idx):
+        """Find closest point among polys[0..max_poly_idx-1] using KD-tree."""
+        k = min(len(all_points), 50)
+        distances, indices = kdtree.query(query_point, k=k)
+        if numpy.ndim(distances) == 0:
+            distances = [distances.item()]
+            indices = [indices.item()]
+        for dist, idx in zip(distances, indices):
+            poly_idx, pt_idx = point_to_poly_map[idx]
+            if poly_idx < max_poly_idx:
+                # Convert to merged mesh index
+                merged_idx = cumulative_points[poly_idx] + pt_idx
+                return merged_idx
+        # Fallback: query all points
+        distances, indices = kdtree.query(query_point, k=len(all_points))
+        for dist, idx in zip(distances, indices):
+            poly_idx, pt_idx = point_to_poly_map[idx]
+            if poly_idx < max_poly_idx:
+                merged_idx = cumulative_points[poly_idx] + pt_idx
+                return merged_idx
+        return 0
+
     centerlines_all = polys[0]
     for ind in range(1, len(polys)):
-        closest_pt_id = centerlines_all.find_closest_point(polys[ind].points[0])
-        closest_point_original = deepcopy(centerlines_all.points[closest_pt_id])
+        # Find closest point in already-merged polys using KD-tree
+        closest_pt_id = find_closest_in_merged(polys[ind].points[0], ind)
         centerlines_all = centerlines_all.merge(polys[ind], merge_points=False)
-        closest_next_id = centerlines_all.find_closest_point(polys[ind].points[0])
-        closest_pt_id = centerlines_all.find_closest_point(closest_point_original)
+        # The first point of polys[ind] is at cumulative_points[ind] in merged mesh
+        closest_next_id = cumulative_points[ind]
         new_line = [2, closest_pt_id, closest_next_id]
         centerlines_all.lines = numpy.hstack((centerlines_all.lines, numpy.array(new_line)))
 
