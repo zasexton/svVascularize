@@ -20,5 +20,8 @@ include svv/utils/remeshing/Windows/mmg2d_O3.exe
 include svv/utils/remeshing/Windows/mmg3d_O3.exe
 include svv/utils/remeshing/Windows/mmgs_O3.exe
  
+# Include GUI assets (theme tokens, icons, etc.)
+recursive-include svv/visualize/gui *.json *.qss *.png *.svg
+
 # Exclude any compiled extension artifacts from source distribution
 global-exclude *.so *.pyd *.dylib *.dll

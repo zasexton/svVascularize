@@ -612,7 +612,19 @@ setup_info = dict(
     long_description=DESCRIPTION,
     long_description_content_type="text/markdown",
     ext_modules=cythonize(extensions) if (extensions and HAS_CYTHON) else [],
-    package_data=( {'svv.bin': ['*']} if not ACCEL_COMPANION else {} ),
+    package_data=(
+        {
+            'svv.bin': ['*'],
+            'svv.visualize.gui': [
+                'design_tokens.json',
+                'theme.qss',
+                'svIcon.png',
+                'icons/*.svg',
+            ],
+        }
+        if not ACCEL_COMPANION
+        else {}
+    ),
     exclude_package_data=(
         {"svv": ["*.so", "*.pyd", "*.dylib", "*.dll"]} if not ACCEL_COMPANION else {}
     ),

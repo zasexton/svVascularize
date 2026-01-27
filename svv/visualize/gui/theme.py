@@ -5,7 +5,11 @@ This module provides the token-driven CAD theme with SVG icon support.
 Inspired by FreeCAD's modern dark theme.
 """
 
+import json
+import sys
+from importlib import resources as importlib_resources
 from pathlib import Path
+
 from svv.visualize.gui.theme_generator import ThemeGenerator
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtCore import Qt, QSize
@@ -22,13 +26,129 @@ class CADTheme:
 
     _generator = None
     _stylesheet = None
+    _warned_missing_assets = False
+
+    _fallback_tokens = {
+        "color": {
+            "background": {
+                "primary": "#1E1E1E",
+                "secondary": "#252526",
+                "tertiary": "#2D2D2D",
+                "surface": "#333333",
+                "elevated": "#3C3C3C",
+            },
+            "text": {
+                "primary": "#CCCCCC",
+                "secondary": "#8C8C8C",
+                "accent": "#569CD6",
+                "disabled": "#6B6B6B",
+                "inverse": "#1E1E1E",
+                "heading": "#FFFFFF",
+            },
+            "action": {
+                "primary": "#0078D4",
+                "primary-hover": "#1C8AE6",
+                "primary-pressed": "#005A9E",
+                "primary-text": "#FFFFFF",
+                "secondary": "#3C3C3C",
+                "secondary-hover": "#505050",
+                "secondary-pressed": "#2D2D2D",
+                "danger": "#D32F2F",
+                "danger-hover": "#E57373",
+                "danger-pressed": "#B71C1C",
+                "success": "#388E3C",
+                "success-hover": "#4CAF50",
+            },
+            "status": {
+                "success": "#4CAF50",
+                "warning": "#FF9800",
+                "error": "#F44336",
+                "info": "#2196F3",
+            },
+            "border": {
+                "subtle": "#6E6E6E",
+                "strong": "#808080",
+                "focus": "#0078D4",
+                "divider": "#404040",
+                "hover": "#909090",
+            },
+            "viewport": {
+                "background-top": "#B8D4E8",
+                "background-bottom": "#5A8DB8",
+                "grid": "#7BA3C4",
+                "selection": "#FF9800",
+                "hover": "#0078D4",
+                "axis-x": "#F44336",
+                "axis-y": "#4CAF50",
+                "axis-z": "#2196F3",
+                "domain-surface": "#E8C4A2",
+                "domain-edge": "#C49A6C",
+            },
+            "selection": {
+                "background": "#094771",
+                "text": "#FFFFFF",
+                "border": "#0078D4",
+            },
+        },
+        "spacing": {
+            "xs": "2px",
+            "sm": "4px",
+            "md": "6px",
+            "lg": "8px",
+            "xl": "12px",
+            "2xl": "16px",
+            "3xl": "24px",
+        },
+        "size": {
+            "icon": {
+                "small": "14px",
+                "medium": "16px",
+                "large": "20px",
+                "xlarge": "24px",
+            },
+            "button": {
+                "height": "24px",
+                "min-width": "64px",
+            },
+            "input": {
+                "height": "22px",
+            },
+            "toolbar": {
+                "height": "32px",
+                "icon-size": "16px",
+            },
+            "dock-title": {
+                "height": "24px",
+            },
+        },
+    }
 
     @classmethod
     def _ensure_generator(cls):
         """Ensure theme generator is initialized."""
-        if cls._generator is None:
-            token_file = Path(__file__).parent / 'design_tokens.json'
-            cls._generator = ThemeGenerator(token_file)
+        if cls._generator is not None:
+            return
+
+        token_file = Path(__file__).with_name("design_tokens.json")
+        try:
+            if token_file.is_file():
+                cls._generator = ThemeGenerator(token_file)
+                return
+        except Exception as exc:
+            cls._warn_missing_assets(exc)
+
+        # Fall back to package resources (works for zip imports) if available.
+        try:
+            tokens_text = (
+                importlib_resources.files(__package__)
+                .joinpath("design_tokens.json")
+                .read_text(encoding="utf-8")
+            )
+            tokens = json.loads(tokens_text)
+            cls._generator = ThemeGenerator.from_tokens(tokens, token_name="design_tokens.json")
+            return
+        except Exception as exc:
+            cls._warn_missing_assets(exc)
 
     @classmethod
     def get_stylesheet(cls) -> str:
@@ -38,12 +158,72 @@ class CADTheme:
         Returns:
             Complete QSS stylesheet string
         """
+        if cls._stylesheet is not None:
+            return cls._stylesheet
+
         cls._ensure_generator()
+        if cls._generator is not None:
+            try:
+                cls._stylesheet = cls._generator.generate_qss()
+                return cls._stylesheet
+            except Exception as exc:
+                cls._warn_missing_assets(exc)
 
-        if cls._stylesheet is None:
-            cls._stylesheet = cls._generator.generate_qss()
-
+        cls._stylesheet = cls._load_fallback_stylesheet()
         return cls._stylesheet
+
+    @classmethod
+    def _load_fallback_stylesheet(cls) -> str:
+        """
+        Load a conservative fallback stylesheet.
+
+        Prefer the bundled theme.qss when available; otherwise return an empty
+        stylesheet so the GUI can still start with Qt defaults.
+        """
+        qss_file = Path(__file__).with_name("theme.qss")
+        try:
+            if qss_file.is_file():
+                return qss_file.read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+        try:
+            return (
+                importlib_resources.files(__package__)
+                .joinpath("theme.qss")
+                .read_text(encoding="utf-8")
+            )
+        except Exception:
+            return ""
+
+    @classmethod
+    def _warn_missing_assets(cls, error: Exception) -> None:
+        if cls._warned_missing_assets:
+            return
+        cls._warned_missing_assets = True
+
+        message = (
+            "svVascularize GUI theme resources could not be loaded.\n"
+            "The GUI will continue with a fallback theme.\n\n"
+            "This can happen if the package was installed without its GUI asset files.\n"
+            "Try upgrading/reinstalling the 'svv' package."
+        )
+        print(f"{message}\n\nDetails: {error}", file=sys.stderr)
+
+        # If running inside a Qt application, also show a one-time warning dialog.
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+
+            if QApplication.instance() is None:
+                return
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("svVascularize Theme Warning")
+            msg.setText(message)
+            msg.setDetailedText(str(error))
+            msg.exec()
+        except Exception:
+            pass
 
     @classmethod
     def reload_stylesheet(cls) -> str:
@@ -76,10 +256,21 @@ class CADTheme:
         """
         cls._ensure_generator()
 
-        value = cls._generator.colors
+        if cls._generator is not None:
+            try:
+                value = cls._generator.colors
+                for key in keys:
+                    value = value[key]
+                return value
+            except Exception:
+                pass
+
+        value = cls._fallback_tokens.get("color", {})
         for key in keys:
+            if not isinstance(value, dict) or key not in value:
+                return "#CCCCCC"
             value = value[key]
-        return value
+        return value if isinstance(value, str) else "#CCCCCC"
 
     @classmethod
     def get_spacing(cls, size: str) -> str:
@@ -93,7 +284,12 @@ class CADTheme:
             Spacing value with units (e.g., '8px')
         """
         cls._ensure_generator()
-        return cls._generator.spacing[size]
+        if cls._generator is not None:
+            try:
+                return cls._generator.spacing[size]
+            except Exception:
+                pass
+        return cls._fallback_tokens.get("spacing", {}).get(size, "0px")
 
     @classmethod
     def get_size(cls, category: str, key: str) -> str:
@@ -108,7 +304,12 @@ class CADTheme:
             Size value with units (e.g., '16px')
         """
         cls._ensure_generator()
-        return cls._generator.size[category][key]
+        if cls._generator is not None:
+            try:
+                return cls._generator.size[category][key]
+            except Exception:
+                pass
+        return cls._fallback_tokens.get("size", {}).get(category, {}).get(key, "0px")
 
     @classmethod
     def validate_contrast(cls) -> dict:
@@ -119,7 +320,12 @@ class CADTheme:
             Dictionary of contrast validation results
         """
         cls._ensure_generator()
-        return cls._generator.validate_contrast()
+        if cls._generator is None:
+            return {}
+        try:
+            return cls._generator.validate_contrast()
+        except Exception:
+            return {}
 
 
 class CADIcons:
