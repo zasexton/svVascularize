@@ -977,24 +977,27 @@ class VascularizeGUI(QMainWindow):
         if not file_path:
             return
 
-        # Ensure .dmn extension
-        if not file_path.lower().endswith('.dmn'):
-            file_path += '.dmn'
+        from svv.domain.io.dmn import ensure_dmn_path
+        file_path = ensure_dmn_path(file_path)
 
         # Save with progress
         self.update_status("Saving domain...")
         try:
-            self.domain.save(
+            saved_path = self.domain.save(
                 file_path,
                 include_boundary=include_boundary,
                 include_mesh=include_mesh
             )
-            self.update_status(f"Domain saved to {file_path}")
-            self.log_output(f"Domain saved to {file_path}")
+            try:
+                self.domain.filename = saved_path
+            except Exception:
+                pass
+            self.update_status(f"Domain saved to {saved_path}")
+            self.log_output(f"Domain saved to {saved_path}")
             QMessageBox.information(
                 self,
                 "Domain Saved",
-                f"Domain successfully saved to:\n{file_path}\n\n"
+                f"Domain successfully saved to:\n{saved_path}\n\n"
                 f"Options:\n"
                 f"• Include boundary: {'Yes' if include_boundary else 'No'}\n"
                 f"• Include full mesh: {'Yes' if include_mesh else 'No'}"
