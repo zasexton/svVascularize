@@ -139,18 +139,30 @@ def set_root(tree, **kwargs):
                         lower = set(tree.domain.mesh_tree.query_ball_point(_start, threshold)[0])
                         cells = list(upper.difference(lower))
                         if tree.domain.points.shape[1] == 2:
-                            cells = tree.domain.random_generator.choice(cells, min(attempts, len(cells)),
-                                                                        p=(tree.domain.mesh['Area'][cells] /
-                                                                           tree.domain.mesh['Area'][cells].sum()),
+                            areas = tree.domain.mesh['Area'][cells]
+                            valid_mask = areas > 0
+                            if not numpy.any(valid_mask):
+                                count += 1
+                                continue
+                            valid_indices = numpy.array(cells)[valid_mask]
+                            valid_areas = areas[valid_mask]
+                            p = valid_areas / valid_areas.sum()
+                            p = p / p.sum()  # Ensure exact sum of 1.0 for numerical stability
+                            cells = tree.domain.random_generator.choice(valid_indices, min(attempts, len(valid_indices)),
+                                                                        p=p,
                                                                         replace=False)
                         elif tree.domain.points.shape[1] == 3:
-                            print("Cells: ", cells)
-                            print("Mesh Volume: ", tree.domain.mesh['Volume'][cells])
-                            print("Mesh Volume Sum: ", tree.domain.mesh['Volume'][cells].sum())
-                            print("Mesh Volume Fraction: ", tree.domain.mesh['Volume'][cells] / tree.domain.mesh['Volume'][cells].sum())
-                            cells = tree.domain.random_generator.choice(cells, min(attempts, len(cells)),
-                                                                        p=(tree.domain.mesh['Volume'][cells] /
-                                                                           tree.domain.mesh['Volume'][cells].sum()),
+                            volumes = tree.domain.mesh['Volume'][cells]
+                            valid_mask = volumes > 0
+                            if not numpy.any(valid_mask):
+                                count += 1
+                                continue
+                            valid_indices = numpy.array(cells)[valid_mask]
+                            valid_volumes = volumes[valid_mask]
+                            p = valid_volumes / valid_volumes.sum()
+                            p = p / p.sum()  # Ensure exact sum of 1.0 for numerical stability
+                            cells = tree.domain.random_generator.choice(valid_indices, min(attempts, len(valid_indices)),
+                                                                        p=p,
                                                                         replace=False)
                         else:
                             raise ValueError("Only 2D and 3D domains are supported.")
