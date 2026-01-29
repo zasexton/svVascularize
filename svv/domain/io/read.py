@@ -7,8 +7,9 @@ def read(data, **kwargs):
     Read and process mesh data. Supports PyVista objects and file paths to mesh files.
 
     Parameters:
-        data: pyvista.PolyData or str
+        data: pyvista.PolyData, pyvista.UnstructuredGrid, or str
             Input mesh data as a PyVista object or a file path to a supported mesh file.
+            For UnstructuredGrid objects (e.g., from .vtu files), the surface is extracted.
         **kwargs:
             feature_angle: float
                 Angle used to determine sharp edges for normal computation.
@@ -29,8 +30,12 @@ def read(data, **kwargs):
     if isinstance(data, str):
         data = pyvista.read(data)
 
+    # Handle UnstructuredGrid by extracting surface (e.g., from .vtu files)
+    if isinstance(data, pyvista.UnstructuredGrid):
+        data = data.extract_surface()
+
     if not isinstance(data, pyvista.PolyData):
-        raise TypeError("Input data must be a PyVista PolyData object or a valid file path.")
+        raise TypeError("Input data must be a PyVista PolyData, UnstructuredGrid, or a valid file path.")
 
     data = data.compute_normals(split_vertices=True, feature_angle=feature_angle)
 

@@ -5,6 +5,7 @@ include README.md
 recursive-include svv/utils/spatial *.pyx
 recursive-include svv/tree/utils *.pyx
 recursive-include svv/domain/routines *.pyx
+recursive-include svv/simulation/utils *.pyx
 
 # Include all remesher executables
 include svv/utils/remeshing/Linux/mmg2d_O3
@@ -20,5 +21,8 @@ include svv/utils/remeshing/Windows/mmg2d_O3.exe
 include svv/utils/remeshing/Windows/mmg3d_O3.exe
 include svv/utils/remeshing/Windows/mmgs_O3.exe
  
+# Include GUI assets (theme tokens, icons, etc.)
+recursive-include svv/visualize/gui *.json *.qss *.png *.svg
+
 # Exclude any compiled extension artifacts from source distribution
 global-exclude *.so *.pyd *.dylib *.dll

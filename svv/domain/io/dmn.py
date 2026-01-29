@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -14,10 +14,30 @@ except Exception:  # pragma: no cover
 DMN_FORMAT = "svv.domain/1.0"
 
 
-def _ensure_ext(path: str) -> str:
-    if not path.lower().endswith(".dmn"):
-        return path + ".dmn"
-    return path
+def ensure_dmn_path(path: Union[str, os.PathLike]) -> str:
+    """
+    Normalize an output path for .dmn persistence.
+
+    - Accepts ``str`` or ``PathLike`` objects.
+    - Ensures the returned path ends with a lowercase ``.dmn`` extension.
+    - Collapses legacy ``.dmn.npz`` filenames (from NumPy ``savez`` behavior)
+      to ``.dmn``.
+    """
+    path_str = os.fsdecode(os.fspath(path))
+    lower = path_str.lower()
+
+    # Legacy: np.savez_compressed("name.dmn", ...) writes "name.dmn.npz"
+    if lower.endswith(".npz") and lower[:-4].endswith(".dmn"):
+        path_str = path_str[:-4]
+        lower = lower[:-4]
+
+    if lower.endswith(".dmn"):
+        return path_str[:-4] + ".dmn"
+    return path_str + ".dmn"
+
+
+def _ensure_ext(path: Union[str, os.PathLike]) -> str:
+    return ensure_dmn_path(path)
 
 
 def _compute_firsts_from_pts(PTS: np.ndarray) -> np.ndarray:
@@ -39,8 +59,8 @@ def _compute_firsts_from_pts(PTS: np.ndarray) -> np.ndarray:
     return firsts
 
 
-def write_dmn(domain, path: str, include_boundary: bool = False, include_mesh: bool = False,
-              include_patch_normals: bool = True) -> None:
+def write_dmn(domain, path: Union[str, os.PathLike], include_boundary: bool = False, include_mesh: bool = False,
+              include_patch_normals: bool = True) -> str:
     """
     Serialize a Domain instance into a .dmn file.
 
@@ -188,9 +208,33 @@ def write_dmn(domain, path: str, include_boundary: bool = False, include_mesh: b
     # Use a file handle to avoid NumPy forcing a .npz extension
     with open(out_path, "wb") as fh:
         np.savez_compressed(fh, **arrays)
+    return out_path
 
 
-def read_dmn(path: str):
+def resolve_dmn_read_path(path: Union[str, os.PathLike]) -> str:
+    """
+    Resolve a path for reading a Domain from disk.
+
+    Accepts filenames both with and without the ``.dmn`` suffix. Also attempts
+    to load legacy ``.dmn.npz`` files created by passing a ``.dmn`` filename
+    directly to NumPy ``savez`` routines.
+    """
+    path_str = os.fsdecode(os.fspath(path))
+    if os.path.isfile(path_str):
+        return path_str
+
+    candidate = ensure_dmn_path(path_str)
+    if os.path.isfile(candidate):
+        return candidate
+
+    legacy_candidate = candidate + ".npz"
+    if os.path.isfile(legacy_candidate):
+        return legacy_candidate
+
+    return candidate
+
+
+def read_dmn(path: Union[str, os.PathLike]):
     """
     Deserialize a Domain from a .dmn file.
 
@@ -213,7 +257,7 @@ def read_dmn(path: str):
     from svv.domain.domain import Domain
     from svv.domain.patch import Patch
 
-    file_path = _ensure_ext(path)
+    file_path = resolve_dmn_read_path(path)
     data = np.load(file_path, allow_pickle=False)
 
     # Parse metadata

@@ -92,10 +92,20 @@ class Domain(object):
           boundary/mesh. Ensure `create()`, `solve()`, and `build()` have run so
           these arrays exist; otherwise save() will raise an error.
         - Boundary and mesh persistence are optional to keep files compact.
+
+        Returns
+        -------
+        str
+            The path written to (with the ``.dmn`` extension enforced).
         """
         from svv.domain.io.dmn import write_dmn
-        write_dmn(self, path, include_boundary=include_boundary, include_mesh=include_mesh,
-                  include_patch_normals=include_patch_normals)
+        return write_dmn(
+            self,
+            path,
+            include_boundary=include_boundary,
+            include_mesh=include_mesh,
+            include_patch_normals=include_patch_normals,
+        )
 
     @classmethod
     def load(cls, path):

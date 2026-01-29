@@ -21,8 +21,29 @@ class ThemeGenerator:
             token_file: Path to design tokens JSON file
         """
         self.token_file = Path(token_file)
-        with open(self.token_file, 'r') as f:
-            self.tokens: Dict[str, Any] = json.load(f)
+        with open(self.token_file, 'r', encoding='utf-8') as f:
+            tokens: Dict[str, Any] = json.load(f)
+        self._load_tokens(tokens)
+
+    @classmethod
+    def from_tokens(cls, tokens: Dict[str, Any], token_name: str = "design_tokens.json") -> "ThemeGenerator":
+        """
+        Construct a theme generator from an in-memory token dict.
+
+        This is useful when loading tokens from package resources where a real
+        filesystem path may not exist (e.g., zipped imports).
+
+        Args:
+            tokens: Design token dictionary
+            token_name: Human-readable name used in generated QSS headers
+        """
+        generator = cls.__new__(cls)
+        generator.token_file = Path(token_name)
+        generator._load_tokens(tokens)
+        return generator
+
+    def _load_tokens(self, tokens: Dict[str, Any]) -> None:
+        self.tokens = tokens
 
         # Shortcuts for easier access
         self.colors = self.tokens['color']

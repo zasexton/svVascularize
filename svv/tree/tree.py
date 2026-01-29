@@ -484,13 +484,13 @@ class Tree(object):
             else:
                 outdir = os.getcwd() + os.sep + '3d_tmp_' + str(uuid.uuid4())
         else:
-            if os.path.exists(outdir):
-                raise ValueError("Output directory already exists.")
+            if os.path.exists(outdir) and not os.path.isdir(outdir):
+                raise ValueError("Output path exists and is not a directory.")
         if not watertight:
             model = build_merged_solid(self)
-
         else:
             model = build_watertight_solid(self)
+        model.save(outdir + os.sep + 'tree_mesh.vtp')
         return model
 
 
