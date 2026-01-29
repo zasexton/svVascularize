@@ -117,7 +117,8 @@ jobs:
       - name: Upload accelerated wheels (svv-accelerated) to PyPI
         run: |
           set -euo pipefail
-          files=$(ls dist/svv-accelerated-*.whl 2>/dev/null || true)
+          # Wheel filenames normalize '-' to '_' (PEP 427), e.g. svv_accelerated-0.0.42-...
+          files=$(ls dist/svv[-_]accelerated-*.whl 2>/dev/null || true)
           if [ -z "$files" ]; then
             echo "No svv-accelerated artifacts found; skipping upload."
             exit 0
@@ -159,4 +160,5 @@ jobs:
           files: |
             dist/svv-*.whl
             dist/svv-*.tar.gz
+            dist/svv_accelerated-*.whl
             dist/svv-accelerated-*.whl

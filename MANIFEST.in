@@ -5,6 +5,7 @@ include README.md
 recursive-include svv/utils/spatial *.pyx
 recursive-include svv/tree/utils *.pyx
 recursive-include svv/domain/routines *.pyx
+recursive-include svv/simulation/utils *.pyx
 
 # Include all remesher executables
 include svv/utils/remeshing/Linux/mmg2d_O3
