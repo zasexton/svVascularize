@@ -864,13 +864,16 @@ def add_vessel(tree, **kwargs):
                         end_3_5 = perf_counter()
                         tree.times['chunk_3_5'][-1] += end_3_5 - start_3_5
                         start_3_6 = perf_counter()
-                        tmp_radii = np.zeros((data.shape[0], 1))
+                        #tmp_radii = np.zeros((data.shape[0], 1))
+                        tmp_radii = np.empty(data.shape[0], dtype=data.dtype)
                         if tree.n_terminals < 10000:
                             #np.multiply(new_vessels[:, 28], new_vessels[0, 21], out=new_vessels[:, 21])
-                            np.multiply(tmp_28, root_radius, out=tmp_radii[:, 0])
+                            #np.multiply(tmp_28, root_radius, out=tmp_radii[:, 0])
+                            np.multiply(tmp_28, root_radius, out=tmp_radii)
                         else:
                             #ne_multiply(new_vessels[:, 28], new_vessels[0, 21], new_vessels[:, 21])
-                            ne_multiply(tmp_28, root_radius, tmp_radii[:, 0])
+                            #ne_multiply(tmp_28, root_radius, tmp_radii[:, 0])
+                            ne_multiply(tmp_28, root_radius, tmp_radii)
                             #scale_column_with_multiply(new_vessels, 28, new_vessels[0, 21], 21)
                             #multiply_columns(new_vessels)
                         #new_vessels[:, 21] = multiply_elements(new_vessels[:, 28], new_vessels[0, 21])
@@ -882,7 +885,8 @@ def add_vessel(tree, **kwargs):
                         idxs = np.arange(data.shape[0]).astype(int)
                         change_i.extend(idxs.tolist())
                         change_j.extend([21]*data.shape[0])
-                        new_data.extend(tmp_radii.flatten().tolist())
+                        #new_data.extend(tmp_radii.flatten().tolist())
+                        new_data.extend(tmp_radii.tolist())
                         old_data.extend(data[:, 21].tolist())
                         #new_vessels[bifurcation_vessel, :] = parent_vessel
                         change_i.extend([bifurcation_vessel]*data.shape[1])
