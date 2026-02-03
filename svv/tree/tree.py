@@ -56,6 +56,8 @@ class Tree(object):
         self.preallocation_step = int(preallocation_step)
         self.preallocate = TreeData((self.preallocation_step, 31))
         self.segment_count = 0
+        self._idx_cache = []
+        self._col21_cache = []
         #self.preallocate_connectivity = (np.ones((self.preallocation_step, 3)) * -1).astype(int)
         self.preallocate_midpoints = np.zeros((self.preallocation_step, 3))
         self.times = {'vessels':[],
@@ -149,6 +151,10 @@ class Tree(object):
         if inplace:
             self.data = root
             self.preallocate[0, :] = root
+            if len(self._idx_cache) == 0:
+                self._idx_cache.append(0)
+            if len(self._col21_cache) == 0:
+                self._col21_cache.append(21)
             #self.data_copy = self.preallocate[:3, :]
             self.connectivity = np.nan_to_num(root[:, 15:18], nan=-1.0).astype(int).reshape(1, 3)
             #self.preallocate_connectivity[0, :] = self.connectivity
@@ -211,6 +217,9 @@ class Tree(object):
             #new_data = np.vstack([self.data, added_vessels[0], added_vessels[1]])
             self.preallocate[self.segment_count,:] = added_vessels[0]
             self.preallocate[self.segment_count+1,:] = added_vessels[1]
+            next_idxs = [len(self._idx_cache), len(self._idx_cache) + 1]
+            self._idx_cache.extend(next_idxs)
+            self._col21_cache.extend([21,21])
             end_chunk_4_0 = perf_counter()
             self.times['chunk_4_0'].append(end_chunk_4_0 - start_chunk_4_0)
             start_chunk_4_1 = perf_counter()
