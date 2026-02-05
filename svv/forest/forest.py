@@ -195,7 +195,10 @@ class Forest(object):
                 self.networks[i][j].tree_scale = tmp_tree_scales.pop(0)
                 self.networks[i][j].midpoints = (self.networks[i][j].data[:, 0:3] + self.networks[i][j].data[:, 3:6])/2
                 self.networks[i][j].segment_count = 1
-
+                if len(self.networks[i][j]._idx_cache) == 0:
+                    self.networks[i][j]._idx_cache.append(0)
+                if len(self.networks[i][j]._col21_cache) == 0:
+                    self.networks[i][j]._col21_cache.append(21)
     def add(self, *args, **kwargs):
         """
         Add a tree to the forest.
@@ -304,6 +307,9 @@ class Forest(object):
                     self.networks[i][j].tree_scale = self.networks[i][j].new_tree_scale
                     self.networks[i][j].n_terminals += 1
                     self.networks[i][j].segment_count += 2
+                    next_idxs = [len(self.networks[i][j]._idx_cache), len(self.networks[i][j]._idx_cache) + 1]
+                    self.networks[i][j]._idx_cache.extend(next_idxs)
+                    self.networks[i][j]._col21_cache.extend([21, 21])
 
     def connect(self, *args, **kwargs):
         self.connections = ForestConnection(self)
