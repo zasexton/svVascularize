@@ -178,7 +178,7 @@ class Forest(object):
                     )
                     candidate_midpoint = ((tmp_root[:, 0:3] + tmp_root[:, 3:6]) / 2).reshape(-1)
                     candidate_radius = (
-                        0.5 * float(tmp_root[0, 20]) +
+                        0.01 * float(tmp_root[0, 20]) +
                         float(tmp_root[0, 21]) +
                         float(self.physical_clearance)
                     )
