@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDockWidget, QStatusBar,
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem, QTabWidget, QToolBar,
     QPlainTextEdit, QProgressBar, QProgressDialog, QFrame, QDialog, QFormLayout,
-    QDialogButtonBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QComboBox
+    QDialogButtonBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QComboBox,
+    QColorDialog, QMenu
 )
 from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QUrl
 from PySide6.QtGui import QAction, QKeySequence, QDesktopServices
@@ -169,6 +170,8 @@ class ObjectBrowserWidget(QTreeWidget):
 
         self.setHeaderLabels(["Model Tree"])
         self.setAlternatingRowColors(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
         # Root items
         self.domain_item = None
@@ -248,6 +251,69 @@ class ObjectBrowserWidget(QTreeWidget):
         elif kind == "tree":
             mode, net_idx, tree_idx = data[1], data[2], data[3]
             vtk_widget.set_tree_visibility(mode, net_idx, tree_idx, checked)
+
+    def _show_context_menu(self, pos):
+        """Show a context menu for the clicked item."""
+        item = self.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(0, Qt.UserRole)
+        if not data or not isinstance(data, tuple):
+            return
+        kind = data[0]
+        if kind not in ("tree", "network"):
+            return
+
+        menu = QMenu(self)
+        color_action = menu.addAction("Change Color...")
+        action = menu.exec_(self.viewport().mapToGlobal(pos))
+        if action == color_action:
+            self._change_item_color(item, data)
+
+    @staticmethod
+    def _stored_color_to_qcolor(stored):
+        """Convert a stored color (name string or RGB tuple) to a QColor."""
+        from PySide6.QtGui import QColor
+        if isinstance(stored, tuple):
+            return QColor.fromRgbF(*stored[:3])
+        if isinstance(stored, str):
+            c = QColor(stored)
+            if c.isValid():
+                return c
+        return QColor(Qt.red)
+
+    def _change_item_color(self, item, data):
+        """Open a color dialog and apply the chosen color to the tree/network."""
+        vtk_widget = getattr(self.main_window, 'vtk_widget', None)
+        if not vtk_widget:
+            return
+
+        kind = data[0]
+        initial_color = self._stored_color_to_qcolor(None)
+
+        if kind == "tree":
+            mode, net_idx, tree_idx = data[1], data[2], data[3]
+            group_key = ("single", tree_idx) if mode == "single" else ("forest", net_idx, tree_idx)
+            stored = vtk_widget.tree_group_colors.get(group_key)
+            if stored is not None:
+                initial_color = self._stored_color_to_qcolor(stored)
+        elif kind == "network":
+            net_idx = data[1]
+            for key, col in vtk_widget.tree_group_colors.items():
+                if isinstance(key, tuple) and len(key) >= 3 and key[0] == "forest" and key[1] == net_idx:
+                    initial_color = self._stored_color_to_qcolor(col)
+                    break
+
+        chosen = QColorDialog.getColor(initial_color, self, "Choose Tree Color")
+        if not chosen.isValid():
+            return
+
+        rgb = (chosen.redF(), chosen.greenF(), chosen.blueF())
+
+        if kind == "tree":
+            vtk_widget.set_tree_color(group_key, rgb)
+        elif kind == "network":
+            vtk_widget.set_network_color(net_idx, rgb)
 
     def add_point(self, point_id, point_data):
         """Add a point to the tree."""

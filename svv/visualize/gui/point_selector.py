@@ -40,15 +40,33 @@ class PointSelectorWidget(QWidget):
     # ---- Public helpers ----
     def set_tree_count(self, count: int):
         """
-        Set the number of trees available for selection.
+        Set a uniform tree count for all networks (legacy helper).
 
         Parameters
         ----------
         count : int
             Desired number of trees (minimum 1).
         """
-        if count < 1:
-            count = 1
+        n = self.network_spin.value()
+        self.set_trees_per_network([max(1, count)] * n)
+
+    def set_trees_per_network(self, trees_per_network):
+        """
+        Set per-network tree counts and update the tree combo for the
+        currently selected network.
+
+        Parameters
+        ----------
+        trees_per_network : list of int
+            Number of trees for each network.
+        """
+        self._n_trees_per_network = [max(1, c) for c in trees_per_network]
+        current_net = self.network_combo.currentIndex()
+        count = (
+            self._n_trees_per_network[current_net]
+            if 0 <= current_net < len(self._n_trees_per_network)
+            else 1
+        )
         with QSignalBlocker(self.tree_combo):
             self.tree_combo.clear()
             for i in range(count):
@@ -439,6 +457,13 @@ class PointSelectorWidget(QWidget):
 
     def _on_network_selection_changed(self, value):
         """Handle network selection change in the dropdown."""
+        # Update tree combo to reflect the selected network's tree count
+        if hasattr(self, '_n_trees_per_network') and 0 <= value < len(self._n_trees_per_network):
+            count = self._n_trees_per_network[value]
+            with QSignalBlocker(self.tree_combo):
+                self.tree_combo.clear()
+                for i in range(count):
+                    self.tree_combo.addItem(f"Tree {i}")
         # Refresh list to reflect points for the selected network
         self._update_point_list()
 
@@ -556,14 +581,21 @@ class PointSelectorWidget(QWidget):
             Configuration with start_points and directions for Forest
         """
         n_networks = self.network_spin.value()
-        n_trees = self.tree_combo.count()
+
+        # Use per-network tree counts when available, else fall back to
+        # the current tree combo count applied uniformly.
+        if hasattr(self, '_n_trees_per_network') and len(self._n_trees_per_network) == n_networks:
+            n_trees_per_network = list(self._n_trees_per_network)
+        else:
+            n_trees = self.tree_combo.count()
+            n_trees_per_network = [n_trees] * n_networks
 
         # Organize points by network and tree
         config = {
             'n_networks': n_networks,
-            'n_trees_per_network': [n_trees] * n_networks,
-            'start_points': [[None for _ in range(n_trees)] for _ in range(n_networks)],
-            'directions': [[None for _ in range(n_trees)] for _ in range(n_networks)]
+            'n_trees_per_network': n_trees_per_network,
+            'start_points': [[None for _ in range(n_trees_per_network[i])] for i in range(n_networks)],
+            'directions': [[None for _ in range(n_trees_per_network[i])] for i in range(n_networks)]
         }
 
         for point_data in self.points:
@@ -574,7 +606,7 @@ class PointSelectorWidget(QWidget):
             point = point_data['point']
             direction = point_data['direction']
 
-            if network < n_networks and tree_idx < n_trees:
+            if network < n_networks and tree_idx < n_trees_per_network[network]:
                 config['start_points'][network][tree_idx] = point.tolist()
                 if direction is not None:
                     config['directions'][network][tree_idx] = direction.tolist()

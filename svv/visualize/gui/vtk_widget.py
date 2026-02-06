@@ -243,6 +243,9 @@ class VTKWidget(QWidget):
         # Grouped actor mappings for visibility toggles
         self.tree_actor_groups = {}
         self.connection_actor_groups = {}
+        # Per-group color tracking (group_id -> color used at render time)
+        self.tree_group_colors = {}
+        self.connection_group_colors = {}
         # Scale bar actor
         self._scale_bar_actor = None
         self._scale_bar_visible = True
@@ -818,6 +821,7 @@ class VTKWidget(QWidget):
         self.tree_actors.extend(actors)
         if group_id is not None:
             self.tree_actor_groups[group_id] = actors
+            self.tree_group_colors[group_id] = color
         self.plotter.render()
         return actors
 
@@ -857,6 +861,7 @@ class VTKWidget(QWidget):
         self.connection_actors.extend(actors)
         if group_id is not None:
             self.connection_actor_groups[group_id] = actors
+            self.connection_group_colors[group_id] = color
         self.plotter.render()
         return actors
 
@@ -887,6 +892,7 @@ class VTKWidget(QWidget):
             self.plotter.remove_actor(actor)
         self.tree_actors.clear()
         self.tree_actor_groups.clear()
+        self.tree_group_colors.clear()
         self.plotter.render()
 
     def clear_connections(self):
@@ -900,6 +906,7 @@ class VTKWidget(QWidget):
                 pass
         self.connection_actors.clear()
         self.connection_actor_groups.clear()
+        self.connection_group_colors.clear()
         self.plotter.render()
 
     def clear(self):
@@ -1191,3 +1198,70 @@ class VTKWidget(QWidget):
                     except Exception:
                         pass
         self.plotter.render()
+
+    # ---- Color helpers for Model Tree ----
+    def set_tree_color(self, group_id, rgb):
+        """
+        Change the color of all actors belonging to a tree group.
+
+        Parameters
+        ----------
+        group_id : tuple
+            Group identifier, e.g. ("forest", net_idx, tree_idx).
+        rgb : tuple of float
+            (r, g, b) with values in 0-1.
+        """
+        if not self.plotter:
+            return
+        actors = self.tree_actor_groups.get(group_id)
+        if not actors:
+            return
+        for actor in actors:
+            try:
+                actor.GetProperty().SetColor(rgb)
+            except Exception:
+                pass
+        self.tree_group_colors[group_id] = rgb
+        self.plotter.render()
+
+    def set_connection_color(self, group_id, rgb):
+        """
+        Change the color of all actors belonging to a connection group.
+
+        Parameters
+        ----------
+        group_id : tuple
+            Group identifier, e.g. ("conn", net_idx, tree_idx, conn_idx).
+        rgb : tuple of float
+            (r, g, b) with values in 0-1.
+        """
+        if not self.plotter:
+            return
+        actors = self.connection_actor_groups.get(group_id)
+        if not actors:
+            return
+        for actor in actors:
+            try:
+                actor.GetProperty().SetColor(rgb)
+            except Exception:
+                pass
+        self.connection_group_colors[group_id] = rgb
+        self.plotter.render()
+
+    def set_network_color(self, net_idx, rgb):
+        """
+        Change the color of all trees and connections in a network.
+
+        Parameters
+        ----------
+        net_idx : int
+            Network index.
+        rgb : tuple of float
+            (r, g, b) with values in 0-1.
+        """
+        for key in list(self.tree_actor_groups):
+            if isinstance(key, tuple) and len(key) >= 3 and key[0] == "forest" and key[1] == net_idx:
+                self.set_tree_color(key, rgb)
+        for key in list(self.connection_actor_groups):
+            if isinstance(key, tuple) and len(key) >= 2 and key[0] == "conn" and key[1] == net_idx:
+                self.set_connection_color(key, rgb)

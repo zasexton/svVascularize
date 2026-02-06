@@ -143,11 +143,13 @@ class Tree(object):
         else:
             raise ValueError("Too many arguments.")
         inplace = kwargs.pop('inplace', True)
+        build_indices = kwargs.pop('build_indices', True)
         if not isinstance(kwargs.get('direction', None), type(None)):
             self.clamped_root = True
         if self.physical_clearance > 0.0:
             kwargs['interior_range'] = [-1.0, 0.0-self.domain_clearance]
         root, root_map = set_root(self, **kwargs)
+        midpoint = ((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3)
         if inplace:
             self.data = root
             self.preallocate[0, :] = root
@@ -167,9 +169,14 @@ class Tree(object):
             #self.c_vessel_map = build_c_vessel_map(root_map)
             self.vessel_map_copy = deepcopy(self.vessel_map)
             self.n_terminals = 1
-            self.kdtm = KDTreeManager(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
-            self.hnsw_tree = USearchTree(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3).astype(np.float32))
-            self.hnsw_tree_id = id(self.hnsw_tree)
+            if build_indices:
+                self.kdtm = KDTreeManager(midpoint)
+                self.hnsw_tree = USearchTree(midpoint.astype(np.float32))
+                self.hnsw_tree_id = id(self.hnsw_tree)
+            else:
+                self.kdtm = None
+                self.hnsw_tree = None
+                self.hnsw_tree_id = None
             self.probability = np.array(self.domain.mesh.cell_data['probability'])
             self.max_distal_node = 1
             self.tree_scale = np.pi * root[0, 21]**self.parameters.radius_exponent*root[0, 20]**self.parameters.length_exponent
@@ -178,9 +185,14 @@ class Tree(object):
             #self.rtree.insert(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
         else:
             connectivity = np.nan_to_num(root[:, 15:18], nan=-1.0).astype(int).reshape(1, 3)
-            kdtm = KDTreeManager(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
-            hnsw_tree = USearchTree(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3).astype(np.float32))
-            hnsw_tree_id = id(hnsw_tree)
+            if build_indices:
+                kdtm = KDTreeManager(midpoint)
+                hnsw_tree = USearchTree(midpoint.astype(np.float32))
+                hnsw_tree_id = id(hnsw_tree)
+            else:
+                kdtm = None
+                hnsw_tree = None
+                hnsw_tree_id = None
             probability = np.array(self.domain.mesh.cell_data['probability'])
             tree_scale = np.pi * root[0, 21] ** self.parameters.radius_exponent * root[
                 0, 20] ** self.parameters.length_exponent

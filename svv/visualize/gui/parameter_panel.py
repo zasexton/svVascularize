@@ -5,18 +5,132 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QLabel, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QScrollArea, QFormLayout,
-    QMessageBox, QProgressDialog, QSizePolicy
+    QMessageBox, QProgressDialog, QSizePolicy,
+    QToolButton, QToolTip
 )
 import numpy as np
 import threading
 from queue import Queue
-from PySide6.QtCore import Signal, Qt, QTimer, QSignalBlocker, QSettings
+from PySide6.QtCore import Signal, Qt, QTimer, QSignalBlocker, QSettings, QSize
 from concurrent.futures import ThreadPoolExecutor
 from svv.visualize.gui.theme import CADTheme, CADIcons
 from svv.tree.data.data import TreeParameters
 from svv.tree.data.units import UnitSystem, _LENGTH_UNITS, _MASS_UNITS, _TIME_UNITS
 import traceback
 from svv.telemetry import capture_exception, capture_message
+
+# Descriptions shown in info-icon popups beside each parameter label.
+_PARAM_DESCRIPTIONS = {
+    'unit_system': (
+        "Base units (Length, Mass, Time) for all dimensional parameters.\n"
+        "Changing units will automatically convert existing values\n"
+        "to maintain physical consistency."
+    ),
+    'n_vessels': (
+        "Total number of terminal vessel segments to generate.\n"
+        "Each vessel is a branch endpoint in the vascular tree.\n"
+        "More vessels produce denser, more detailed networks."
+    ),
+    'physical_clearance': (
+        "Minimum distance maintained between vessel walls during\n"
+        "generation. Set to 0 to allow vessels to touch or overlap.\n"
+        "Larger values create more spaced-out networks."
+    ),
+    'convexity_tolerance': (
+        "Controls how strictly the domain convexity is checked when\n"
+        "placing new vessels. Smaller values enforce stricter convexity,\n"
+        "while larger values allow more flexibility near concave regions."
+    ),
+    'kinematic_viscosity': (
+        "Dynamic viscosity divided by fluid density (\u03bd = \u03bc/\u03c1).\n"
+        "Controls the viscous resistance of blood flow through vessels.\n"
+        "Affects vessel radius optimization via Poiseuille's law."
+    ),
+    'fluid_density': (
+        "Mass density of the fluid (blood). Used together with viscosity\n"
+        "to compute flow resistance and pressure drops through the\n"
+        "vascular network."
+    ),
+    'murray_exponent': (
+        "Exponent in Murray's law governing the relationship between\n"
+        "parent and child vessel radii at bifurcations. A value of 3\n"
+        "corresponds to optimal laminar flow. Values > 3 favor thinner\n"
+        "child branches."
+    ),
+    'radius_exponent': (
+        "Exponent controlling how vessel radius scales with tree level.\n"
+        "Affects the tapering profile of the vascular tree."
+    ),
+    'length_exponent': (
+        "Exponent controlling how vessel segment lengths scale relative\n"
+        "to their radii. Affects the overall shape and density of the\n"
+        "tree structure."
+    ),
+    'terminal_pressure': (
+        "Blood pressure at the terminal (outlet) ends of the vascular\n"
+        "tree. Together with root pressure, determines the pressure\n"
+        "gradient driving flow through the network."
+    ),
+    'root_pressure': (
+        "Blood pressure at the root (inlet) of the vascular tree.\n"
+        "The pressure difference between root and terminal pressures\n"
+        "drives flow through the entire network."
+    ),
+    'terminal_flow': (
+        "Volumetric flow rate at each terminal vessel segment.\n"
+        "Determines how much blood exits at each branch endpoint.\n"
+        "Total network flow equals terminal_flow \u00d7 number of terminals."
+    ),
+    'root_flow': (
+        "Total volumetric flow rate entering at the root vessel.\n"
+        "When set to Auto, computed as the sum of all terminal flows.\n"
+        "Set manually to override the automatic calculation."
+    ),
+    'max_nonconvex_count': (
+        "Maximum number of candidate positions sampled in non-convex\n"
+        "regions before the algorithm moves on. Higher values allow\n"
+        "better vessel placement in complex geometries but increase\n"
+        "computation time."
+    ),
+    'n_networks': (
+        "Number of independent vascular networks in the forest.\n"
+        "Each network is a separate connected vascular system\n"
+        "(e.g., arterial and venous networks)."
+    ),
+    'trees_per_network': (
+        "Number of trees in each network. Trees within a network are\n"
+        "later connected to form a complete vascular circuit. Each tree\n"
+        "grows from its own start point."
+    ),
+    'connection_curve': (
+        "Curve type used to connect trees within each network.\n"
+        "\u2022 Bezier: Smooth polynomial curves\n"
+        "\u2022 Catmull-Rom: Interpolating splines through control points\n"
+        "\u2022 NURBS: Non-Uniform Rational B-Splines for maximum flexibility"
+    ),
+    'competition': (
+        "When enabled, trees compete for territory during growth.\n"
+        "Trees encountering another tree's territory stop expanding\n"
+        "in that direction, creating natural boundaries between trees."
+    ),
+    'decay_probability': (
+        "Controls how aggressively trees yield territory during\n"
+        "competition. Higher values (closer to 1.0) make trees decay\n"
+        "faster at boundaries, creating cleaner separations. Lower\n"
+        "values allow more territorial overlap."
+    ),
+    'random_seed': (
+        "Seed for the random number generator. Set to a specific value\n"
+        "for reproducible results. 'Random' uses a different seed\n"
+        "each run."
+    ),
+    'preallocation_size': (
+        "Number of rows preallocated in memory for each tree's internal\n"
+        "data arrays. Higher values support more vessels but consume\n"
+        "more memory. Lower values are more memory-efficient but may\n"
+        "limit the maximum tree size."
+    ),
+}
 
 
 class ParameterPanel(QWidget):
@@ -185,16 +299,17 @@ class ParameterPanel(QWidget):
         unit_layout.addWidget(self.time_unit_combo)
 
         unit_layout.addStretch()
-        tree_form.addRow("Unit System:", unit_row)
+        tree_form.addRow(self._make_label_with_info("Unit System:", _PARAM_DESCRIPTIONS['unit_system']), unit_row)
 
         # Number of vessels
         self.n_vessels_spin = QSpinBox()
         self.n_vessels_spin.setRange(1, 100000)
         self.n_vessels_spin.setValue(100)
         self.n_vessels_spin.setToolTip("Total number of vessel segments to generate")
-        vessels_label = QLabel("Number of Vessels:")
-        vessels_label.setToolTip("Total number of vessel segments to generate")
-        tree_form.addRow(vessels_label, self.n_vessels_spin)
+        tree_form.addRow(
+            self._make_label_with_info("Number of Vessels:", _PARAM_DESCRIPTIONS['n_vessels']),
+            self.n_vessels_spin
+        )
 
         # Physical clearance
         self.physical_clearance_spin = QDoubleSpinBox()
@@ -203,9 +318,10 @@ class ParameterPanel(QWidget):
         self.physical_clearance_spin.setDecimals(4)
         self.physical_clearance_spin.setValue(0.0)
         self.physical_clearance_spin.setToolTip("Minimum distance between vessel walls (0 = allow touching)")
-        clearance_label = QLabel("Physical Clearance:")
-        clearance_label.setToolTip("Minimum distance between vessel walls")
-        tree_form.addRow(clearance_label, self.physical_clearance_spin)
+        tree_form.addRow(
+            self._make_label_with_info("Physical Clearance:", _PARAM_DESCRIPTIONS['physical_clearance']),
+            self.physical_clearance_spin
+        )
 
         # Convexity tolerance
         self.convexity_tolerance_spin = QDoubleSpinBox()
@@ -214,9 +330,10 @@ class ParameterPanel(QWidget):
         self.convexity_tolerance_spin.setDecimals(3)
         self.convexity_tolerance_spin.setValue(0.01)
         self.convexity_tolerance_spin.setToolTip("Tolerance for domain convexity checking (smaller = stricter)")
-        convexity_label = QLabel("Convexity Tolerance:")
-        convexity_label.setToolTip("Tolerance for domain convexity checking")
-        tree_form.addRow(convexity_label, self.convexity_tolerance_spin)
+        tree_form.addRow(
+            self._make_label_with_info("Convexity Tolerance:", _PARAM_DESCRIPTIONS['convexity_tolerance']),
+            self.convexity_tolerance_spin
+        )
 
         # Per-tree override selector (shown in forest mode)
         self.tree_override_widget = QWidget()
@@ -245,14 +362,14 @@ class ParameterPanel(QWidget):
 
         # TreeParameters fields
         self.tree_param_widgets = {}
-        self._add_tree_param_spin(tree_form, 'kinematic_viscosity', "Kinematic Viscosity", 0.0, 10.0, 5, 0.001, self.tree_param_units.get('kinematic_viscosity'))
-        self._add_tree_param_spin(tree_form, 'fluid_density', "Fluid Density", 0.0, 20.0, 4, 0.01, self.tree_param_units.get('fluid_density'))
-        self._add_tree_param_spin(tree_form, 'murray_exponent', "Murray Exponent", 0.5, 10.0, 3, 0.1, self.tree_param_units.get('murray_exponent'))
-        self._add_tree_param_spin(tree_form, 'radius_exponent', "Radius Exponent", 0.5, 10.0, 3, 0.1, self.tree_param_units.get('radius_exponent'))
-        self._add_tree_param_spin(tree_form, 'length_exponent', "Length Exponent", 0.1, 10.0, 3, 0.1, self.tree_param_units.get('length_exponent'))
-        self._add_tree_param_spin(tree_form, 'terminal_pressure', "Terminal Pressure", 0.0, 1_000_000.0, 3, 10.0, self.tree_param_units.get('terminal_pressure'))
-        self._add_tree_param_spin(tree_form, 'root_pressure', "Root Pressure", 0.0, 1_000_000.0, 3, 10.0, self.tree_param_units.get('root_pressure'))
-        self._add_tree_param_spin(tree_form, 'terminal_flow', "Terminal Flow", 0.0, 100.0, 6, 0.0001, self.tree_param_units.get('terminal_flow'))
+        self._add_tree_param_spin(tree_form, 'kinematic_viscosity', "Kinematic Viscosity", 0.0, 10.0, 5, 0.001, self.tree_param_units.get('kinematic_viscosity'), _PARAM_DESCRIPTIONS.get('kinematic_viscosity'))
+        self._add_tree_param_spin(tree_form, 'fluid_density', "Fluid Density", 0.0, 20.0, 4, 0.01, self.tree_param_units.get('fluid_density'), _PARAM_DESCRIPTIONS.get('fluid_density'))
+        self._add_tree_param_spin(tree_form, 'murray_exponent', "Murray Exponent", 0.5, 10.0, 3, 0.1, self.tree_param_units.get('murray_exponent'), _PARAM_DESCRIPTIONS.get('murray_exponent'))
+        self._add_tree_param_spin(tree_form, 'radius_exponent', "Radius Exponent", 0.5, 10.0, 3, 0.1, self.tree_param_units.get('radius_exponent'), _PARAM_DESCRIPTIONS.get('radius_exponent'))
+        self._add_tree_param_spin(tree_form, 'length_exponent', "Length Exponent", 0.1, 10.0, 3, 0.1, self.tree_param_units.get('length_exponent'), _PARAM_DESCRIPTIONS.get('length_exponent'))
+        self._add_tree_param_spin(tree_form, 'terminal_pressure', "Terminal Pressure", 0.0, 1_000_000.0, 3, 10.0, self.tree_param_units.get('terminal_pressure'), _PARAM_DESCRIPTIONS.get('terminal_pressure'))
+        self._add_tree_param_spin(tree_form, 'root_pressure', "Root Pressure", 0.0, 1_000_000.0, 3, 10.0, self.tree_param_units.get('root_pressure'), _PARAM_DESCRIPTIONS.get('root_pressure'))
+        self._add_tree_param_spin(tree_form, 'terminal_flow', "Terminal Flow", 0.0, 100.0, 6, 0.0001, self.tree_param_units.get('terminal_flow'), _PARAM_DESCRIPTIONS.get('terminal_flow'))
 
         root_flow_layout = QHBoxLayout()
         self.root_flow_spin = QDoubleSpinBox()
@@ -269,7 +386,7 @@ class ParameterPanel(QWidget):
         root_flow_layout.addWidget(root_flow_unit)
         root_flow_layout.addStretch()
         self.tree_param_unit_labels['root_flow'] = root_flow_unit
-        tree_form.addRow("Root Flow", root_flow_layout)
+        tree_form.addRow(self._make_label_with_info("Root Flow:", _PARAM_DESCRIPTIONS['root_flow']), root_flow_layout)
         self.tree_param_widgets['root_flow'] = self.root_flow_spin
 
         self.max_nonconvex_spin = QSpinBox()
@@ -284,7 +401,7 @@ class ParameterPanel(QWidget):
         max_nonconvex_layout.addWidget(max_nonconvex_unit)
         max_nonconvex_layout.addStretch()
         self.tree_param_unit_labels['max_nonconvex_count'] = max_nonconvex_unit
-        tree_form.addRow("Max Nonconvex Count", max_nonconvex_layout)
+        tree_form.addRow(self._make_label_with_info("Max Nonconvex Count:", _PARAM_DESCRIPTIONS['max_nonconvex_count']), max_nonconvex_layout)
         self.tree_param_widgets['max_nonconvex_count'] = self.max_nonconvex_spin
 
         scroll_layout.addWidget(tree_params_group)
@@ -302,15 +419,18 @@ class ParameterPanel(QWidget):
         self.n_networks_spin.setValue(1)
         self.n_networks_spin.setToolTip("Number of independent vascular networks to generate in the forest")
         self.n_networks_spin.valueChanged.connect(self._on_forest_networks_changed)
-        forest_form.addRow("Networks:", self.n_networks_spin)
+        forest_form.addRow(self._make_label_with_info("Networks:", _PARAM_DESCRIPTIONS['n_networks']), self.n_networks_spin)
 
-        # Trees per network (Forest only)
-        self.n_trees_spin = QSpinBox()
-        self.n_trees_spin.setRange(1, 16)
-        self.n_trees_spin.setValue(2)
-        self.n_trees_spin.setToolTip("Number of trees per network for forest generation")
-        self.n_trees_spin.valueChanged.connect(self._on_forest_trees_changed)
-        forest_form.addRow("Trees per Network:", self.n_trees_spin)
+        # Trees per network container (Forest only) – one spinner per network
+        self._n_trees_per_network = [2]  # default: 1 network with 2 trees
+        self._trees_per_network_widget = QWidget()
+        self._trees_per_network_layout = QVBoxLayout()
+        self._trees_per_network_layout.setContentsMargins(0, 0, 0, 0)
+        self._trees_per_network_layout.setSpacing(4)
+        self._trees_per_network_widget.setLayout(self._trees_per_network_layout)
+        self._trees_per_network_spins = []
+        forest_form.addRow(self._make_label_with_info("Trees per Network:", _PARAM_DESCRIPTIONS['trees_per_network']), self._trees_per_network_widget)
+        self._rebuild_trees_per_network_spins(1)
 
         # Curve type used when connecting trees into networks
         self.curve_type_combo = QComboBox()
@@ -320,11 +440,11 @@ class ParameterPanel(QWidget):
         self.curve_type_combo.addItem("NURBS", userData="NURBS")
         self.curve_type_combo.setCurrentIndex(0)
         self.curve_type_combo.setToolTip("Curve family used when connecting forest trees into networks")
-        forest_form.addRow("Connection Curve:", self.curve_type_combo)
+        forest_form.addRow(self._make_label_with_info("Connection Curve:", _PARAM_DESCRIPTIONS['connection_curve']), self.curve_type_combo)
 
         self.compete_cb = QCheckBox("Enable Competition")
         self.compete_cb.setToolTip("Enable competition between trees for territory")
-        forest_form.addRow("Competition:", self.compete_cb)
+        forest_form.addRow(self._make_label_with_info("Competition:", _PARAM_DESCRIPTIONS['competition']), self.compete_cb)
 
         self.decay_probability_spin = QDoubleSpinBox()
         self.decay_probability_spin.setRange(0.0, 1.0)
@@ -332,9 +452,10 @@ class ParameterPanel(QWidget):
         self.decay_probability_spin.setDecimals(2)
         self.decay_probability_spin.setValue(0.9)
         self.decay_probability_spin.setToolTip("Probability of decay for competitive growth (0-1)")
-        decay_label = QLabel("Decay Probability:")
-        decay_label.setToolTip("Probability of decay for competitive growth")
-        forest_form.addRow(decay_label, self.decay_probability_spin)
+        forest_form.addRow(
+            self._make_label_with_info("Decay Probability:", _PARAM_DESCRIPTIONS['decay_probability']),
+            self.decay_probability_spin
+        )
 
         scroll_layout.addWidget(self.forest_params_group)
         self.forest_params_group.hide()
@@ -351,9 +472,10 @@ class ParameterPanel(QWidget):
         self.random_seed_spin.setValue(-1)
         self.random_seed_spin.setSpecialValueText("Random")
         self.random_seed_spin.setToolTip("Set random seed for reproducible results (-1 = random)")
-        seed_label = QLabel("Random Seed:")
-        seed_label.setToolTip("Set random seed for reproducible results")
-        advanced_form.addRow(seed_label, self.random_seed_spin)
+        advanced_form.addRow(
+            self._make_label_with_info("Random Seed:", _PARAM_DESCRIPTIONS['random_seed']),
+            self.random_seed_spin
+        )
 
         # Preallocation size (rows) for tree data
         self.preallocation_spin = QSpinBox()
@@ -364,9 +486,10 @@ class ParameterPanel(QWidget):
             "Maximum number of rows preallocated for each tree's data array.\n"
             "Lower values reduce memory usage but limit the maximum number of vessels."
         )
-        prealloc_label = QLabel("Preallocation Size (rows):")
-        prealloc_label.setToolTip("Maximum number of rows preallocated for each tree's data array.")
-        advanced_form.addRow(prealloc_label, self.preallocation_spin)
+        advanced_form.addRow(
+            self._make_label_with_info("Preallocation Size (rows):", _PARAM_DESCRIPTIONS['preallocation_size']),
+            self.preallocation_spin
+        )
 
         scroll_layout.addWidget(advanced_group)
 
@@ -458,6 +581,40 @@ class ParameterPanel(QWidget):
         label.setStyleSheet("color: #6a6a6a;")
         return label
 
+    def _make_info_button(self, description):
+        """Create a small info-circle button that shows *description* on click."""
+        btn = QToolButton()
+        btn.setIcon(CADIcons.get_icon(
+            "info",
+            color=CADTheme.get_color('text', 'secondary'),
+            size=14,
+        ))
+        btn.setIconSize(QSize(14, 14))
+        btn.setFixedSize(18, 18)
+        btn.setCursor(Qt.WhatsThisCursor)
+        btn.setStyleSheet(
+            "QToolButton { border: none; background: transparent; padding: 0px; }"
+            "QToolButton:hover { background: rgba(255,255,255,0.08); border-radius: 9px; }"
+        )
+        btn.clicked.connect(
+            lambda _=None, d=description, b=btn: QToolTip.showText(
+                b.mapToGlobal(b.rect().bottomLeft()), d, b
+            )
+        )
+        return btn
+
+    def _make_label_with_info(self, text, description):
+        """Return a QWidget containing a QLabel and a small info icon button."""
+        widget = QWidget()
+        lay = QHBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        widget.setLayout(lay)
+        lay.addWidget(QLabel(text))
+        lay.addWidget(self._make_info_button(description))
+        lay.addStretch()
+        return widget
+
     def _refresh_unit_labels(self):
         self.tree_param_units = self._build_tree_param_units()
         for key, label in self.tree_param_unit_labels.items():
@@ -513,7 +670,7 @@ class ParameterPanel(QWidget):
         # Notify listeners that the length unit has changed
         self.length_unit_changed.emit(length_symbol)
 
-    def _add_tree_param_spin(self, form, key, label, min_v, max_v, decimals, step, unit_text=None):
+    def _add_tree_param_spin(self, form, key, label, min_v, max_v, decimals, step, unit_text=None, info_text=None):
         """Create and register a QDoubleSpinBox for a tree parameter."""
         spin = QDoubleSpinBox()
         spin.setRange(min_v, max_v)
@@ -532,7 +689,11 @@ class ParameterPanel(QWidget):
             row_layout.addStretch()
             self.tree_param_unit_labels[key] = unit_label
             widget = row_widget
-        form.addRow(label + ":", widget)
+        row_label = (
+            self._make_label_with_info(label + ":", info_text)
+            if info_text else label + ":"
+        )
+        form.addRow(row_label, widget)
         self.tree_param_widgets[key] = spin
 
     def _apply_params_to_widgets(self, values):
@@ -653,16 +814,24 @@ class ParameterPanel(QWidget):
     def _on_point_selector_network_changed(self, value):
         """Sync override combos when point selector network count changes."""
         # When the user changes the network count in the point selector, keep
-        # override combos in sync. Prefer the Forest 'trees per network' value
-        # when available so the forest controls remain the source of truth.
-        if hasattr(self, "n_trees_spin") and self.forest_params_group.isVisible():
-            n_trees = self.n_trees_spin.value()
+        # override combos and per-network spinners in sync.
+        if hasattr(self, "_trees_per_network_spins") and self.forest_params_group.isVisible():
+            with QSignalBlocker(self.n_networks_spin):
+                self.n_networks_spin.setValue(value)
+            self._rebuild_trees_per_network_spins(value)
+            trees_per_network = list(self._n_trees_per_network)
         else:
             try:
                 n_trees = self.parent_gui.point_selector.tree_combo.count()
             except Exception:
                 n_trees = 2
-        self._sync_tree_override_options(value, [n_trees] * value)
+            trees_per_network = [n_trees] * value
+        if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
+            try:
+                self.parent_gui.point_selector.set_trees_per_network(trees_per_network)
+            except Exception:
+                pass
+        self._sync_tree_override_options(value, trees_per_network)
 
     def _build_tree_parameters(self, values):
         """Create a TreeParameters instance from a value dict."""
@@ -684,8 +853,8 @@ class ParameterPanel(QWidget):
         """
         Handle changes to the number of networks for forest generation.
 
-        This updates the point selector's Networks spinbox and the per-tree
-        override dropdowns so everything stays in sync.
+        This rebuilds the per-network tree count spinners, updates the point
+        selector's Networks spinbox, and syncs the per-tree override dropdowns.
         """
         if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
             ps = self.parent_gui.point_selector
@@ -694,25 +863,69 @@ class ParameterPanel(QWidget):
                     ps.network_spin.setValue(value)
             except Exception:
                 pass
-        n_trees = self.n_trees_spin.value() if hasattr(self, "n_trees_spin") else 2
-        self._sync_tree_override_options(value, [n_trees] * value)
-
-    def _on_forest_trees_changed(self, value):
-        """
-        Handle changes to the number of trees per network for forest generation.
-
-        This updates the point selector's Tree dropdown and the per-tree override
-        dropdowns so everything stays in sync.
-        """
-        value = max(1, value)
-        if self.parent_gui and hasattr(self, "parent_gui") and hasattr(self.parent_gui, "point_selector"):
-            ps = self.parent_gui.point_selector
+        self._rebuild_trees_per_network_spins(value)
+        if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
             try:
-                ps.set_tree_count(value)
+                self.parent_gui.point_selector.set_trees_per_network(list(self._n_trees_per_network))
             except Exception:
                 pass
+        self._sync_tree_override_options(value, list(self._n_trees_per_network))
+
+    def _rebuild_trees_per_network_spins(self, n_networks):
+        """Rebuild the per-network tree count spinners for the given number of networks."""
+        old_values = list(self._n_trees_per_network)
+
+        # Clear existing widgets
+        while self._trees_per_network_layout.count():
+            item = self._trees_per_network_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._trees_per_network_spins = []
+
+        new_values = []
+        for i in range(n_networks):
+            default_val = old_values[i] if i < len(old_values) else 2
+            new_values.append(default_val)
+
+            row = QWidget()
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            row.setLayout(row_layout)
+
+            if n_networks > 1:
+                row_layout.addWidget(QLabel(f"Network {i}:"))
+
+            spin = QSpinBox()
+            spin.setRange(1, 16)
+            spin.setValue(default_val)
+            spin.setToolTip(f"Number of trees in network {i}")
+            spin.valueChanged.connect(lambda v, idx=i: self._on_per_network_trees_changed(idx, v))
+            row_layout.addWidget(spin)
+            row_layout.addStretch()
+
+            self._trees_per_network_layout.addWidget(row)
+            self._trees_per_network_spins.append(spin)
+
+        self._n_trees_per_network = new_values
+
+    def _on_per_network_trees_changed(self, network_idx, value):
+        """Handle a change to the tree count for a specific network."""
+        value = max(1, value)
+        if network_idx < len(self._n_trees_per_network):
+            self._n_trees_per_network[network_idx] = value
+
+        # Update point selector
+        if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
+            try:
+                self.parent_gui.point_selector.set_trees_per_network(list(self._n_trees_per_network))
+            except Exception:
+                pass
+
+        # Sync override dropdowns
         n_networks = self.n_networks_spin.value() if hasattr(self, "n_networks_spin") else 1
-        self._sync_tree_override_options(n_networks, [value] * n_networks)
+        self._sync_tree_override_options(n_networks, list(self._n_trees_per_network))
 
     def _params_for_tree(self, net_idx, tree_idx):
         """Merge base params with per-tree override."""
@@ -745,13 +958,17 @@ class ParameterPanel(QWidget):
             if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
                 try:
                     n_networks = self.n_networks_spin.value()
-                    n_trees = max(1, self.n_trees_spin.value())
+                    trees_per_network = list(self._n_trees_per_network)
+                    # Ensure list length matches current network count
+                    while len(trees_per_network) < n_networks:
+                        trees_per_network.append(2)
+                    trees_per_network = trees_per_network[:n_networks]
                     # Update point selector's controls to reflect forest settings
                     ps = self.parent_gui.point_selector
                     with QSignalBlocker(ps.network_spin):
                         ps.network_spin.setValue(n_networks)
-                    ps.set_tree_count(n_trees)
-                    self._sync_tree_override_options(n_networks, [n_trees] * n_networks)
+                    ps.set_trees_per_network(trees_per_network)
+                    self._sync_tree_override_options(n_networks, trees_per_network)
                 except Exception:
                     pass
             self._load_tree_params_for_selected()
