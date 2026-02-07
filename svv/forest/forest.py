@@ -271,6 +271,13 @@ class Forest(object):
                         #tmp_new_vessels = numpy.vstack([self.networks[i][j].data, tmp_added_vessels[0], tmp_added_vessels[1]])
                         change_i = numpy.array(change_i, dtype=int)
                         change_j = numpy.array(change_j, dtype=int)
+                        required_rows = int(self.networks[i][j].segment_count) + 2
+                        if change_i.size:
+                            try:
+                                required_rows = max(required_rows, int(change_i.max()) + 1)
+                            except Exception:
+                                pass
+                        self.networks[i][j].ensure_preallocation(required_rows)
                         self.networks[i][j].preallocate[self.networks[i][j].segment_count, :] = tmp_added_vessels[0]
                         self.networks[i][j].preallocate[self.networks[i][j].segment_count+1, :] = tmp_added_vessels[1]
                         self.networks[i][j].preallocate[change_i, change_j] = numpy.array(new_tmp_data)
@@ -370,9 +377,16 @@ class Forest(object):
         """
         if isinstance(outdir, type(None)):
             outdir = '3d_tmp'
+        os.makedirs(outdir, exist_ok=True)
         for i in range(self.n_networks):
+            net_dir = os.path.join(outdir, f"network_{i}")
+            os.makedirs(net_dir, exist_ok=True)
             for j in range(self.n_trees_per_network[i]):
-                self.networks[i][j].export_solid(outdir=outdir, shell_thickness=shell_thickness)
+                self.networks[i][j].export_solid(outdir=net_dir, shell_thickness=shell_thickness)
+                tmp_path = os.path.join(net_dir, "tree_mesh.vtp")
+                dst_path = os.path.join(net_dir, f"tree_{j}_mesh.vtp")
+                if os.path.exists(tmp_path):
+                    os.replace(tmp_path, dst_path)
 
     def export_splines(self, outdir=None):
         """

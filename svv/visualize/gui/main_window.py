@@ -1363,7 +1363,88 @@ class VascularizeGUI(QMainWindow):
                             pass
                 else:
                     # Forest or other object types: ignore watertight flag
-                    obj.export_solid(outdir=out_dir, shell_thickness=shell_thickness)
+                    from svv.forest.forest import Forest as _ForestType
+                    if isinstance(obj, _ForestType):
+                        # Respect GUI visibility toggles: export only the
+                        # networks/trees that are currently checked in the Model Tree.
+                        selection = {}
+                        saw_network_items = False
+                        browser = getattr(self, "object_browser", None)
+                        forests_item = getattr(browser, "forests_item", None) if browser is not None else None
+                        if forests_item is not None:
+                            try:
+                                for i in range(forests_item.childCount()):
+                                    net_item = forests_item.child(i)
+                                    data = net_item.data(0, Qt.UserRole)
+                                    if not data or not isinstance(data, tuple) or data[0] != "network":
+                                        continue
+                                    saw_network_items = True
+                                    net_idx = int(data[1])
+                                    if net_item.checkState(0) != Qt.Checked:
+                                        continue
+                                    tree_idxs = []
+                                    for j in range(net_item.childCount()):
+                                        t_item = net_item.child(j)
+                                        t_data = t_item.data(0, Qt.UserRole)
+                                        if (
+                                            not t_data
+                                            or not isinstance(t_data, tuple)
+                                            or t_data[0] != "tree"
+                                            or t_data[1] != "forest"
+                                        ):
+                                            continue
+                                        tree_idx = int(t_data[3])
+                                        if t_item.checkState(0) == Qt.Checked:
+                                            tree_idxs.append(tree_idx)
+                                    selection[net_idx] = sorted(set(tree_idxs))
+                            except Exception:
+                                selection = {}
+                                saw_network_items = False
+
+                        # If we couldn't read GUI state, fall back to exporting everything.
+                        if not saw_network_items:
+                            obj.export_solid(outdir=out_dir, shell_thickness=shell_thickness)
+                        elif not selection:
+                            QMessageBox.information(
+                                self,
+                                "No Visible Networks",
+                                "No visible networks are selected for export.\n\n"
+                                "Enable one or more Network checkboxes in the Model Tree and try again."
+                            )
+                            return
+                        else:
+                            exported_any = False
+                            for net_idx, tree_idxs in sorted(selection.items()):
+                                if net_idx < 0 or net_idx >= obj.n_networks:
+                                    continue
+                                if not tree_idxs:
+                                    continue
+                                net_dir = os.path.join(out_dir, f"network_{net_idx}")
+                                os.makedirs(net_dir, exist_ok=True)
+
+                                for tree_idx in tree_idxs:
+                                    if tree_idx < 0 or tree_idx >= len(obj.networks[net_idx]):
+                                        continue
+                                    tree = obj.networks[net_idx][tree_idx]
+                                    tree.export_solid(outdir=net_dir, shell_thickness=shell_thickness)
+
+                                    # Tree.export_solid always writes "tree_mesh.vtp"; rename to avoid overwrites.
+                                    tmp_path = os.path.join(net_dir, "tree_mesh.vtp")
+                                    dst_path = os.path.join(net_dir, f"tree_{tree_idx}_mesh.vtp")
+                                    if os.path.exists(tmp_path):
+                                        os.replace(tmp_path, dst_path)
+                                    exported_any = True
+
+                            if not exported_any:
+                                QMessageBox.information(
+                                    self,
+                                    "No Visible Networks",
+                                    "No visible network trees were selected for export.\n\n"
+                                    "Enable one or more Network/Tree checkboxes in the Model Tree and try again."
+                                )
+                                return
+                    else:
+                        obj.export_solid(outdir=out_dir, shell_thickness=shell_thickness)
             else:
                 raise ValueError("Selected object does not support solid export.")
             self.update_status(f"Solids exported to {out_dir}")

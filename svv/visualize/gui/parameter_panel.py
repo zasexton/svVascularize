@@ -480,11 +480,11 @@ class ParameterPanel(QWidget):
         # Preallocation size (rows) for tree data
         self.preallocation_spin = QSpinBox()
         self.preallocation_spin.setRange(1000, 20000000)
-        self.preallocation_spin.setSingleStep(100000)
-        self.preallocation_spin.setValue(int(4e6))
+        self.preallocation_spin.setSingleStep(10000)
+        self.preallocation_spin.setValue(int(1e5))
         self.preallocation_spin.setToolTip(
             "Maximum number of rows preallocated for each tree's data array.\n"
-            "Lower values reduce memory usage but limit the maximum number of vessels."
+            "Lower values reduce memory usage but may trigger resize operations during growth."
         )
         advanced_form.addRow(
             self._make_label_with_info("Preallocation Size (rows):", _PARAM_DESCRIPTIONS['preallocation_size']),
