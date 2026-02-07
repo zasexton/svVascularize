@@ -3,6 +3,7 @@ import pyvista as pv
 from scipy.interpolate import splprep, splev
 from tqdm import trange
 from copy import deepcopy
+from typing import Optional
 import pymeshfix
 
 from svv.tree.tree import Tree
@@ -17,6 +18,14 @@ from svv.forest.export.export_solid import smooth_junctions
 
 class TreeConnection:
     def __init__(self, forest, network_id, **kwargs):
+        self._collision_cache = kwargs.get("collision_cache", None)
+        self._collision_filter = kwargs.get("collision_filter", True)
+        self._collision_filter_samples = int(kwargs.get("collision_filter_samples", 7))
+        self._collision_filter_length_fraction = float(kwargs.get("collision_filter_length_fraction", 0.25))
+        self._collision_filter_radius_multiplier = float(kwargs.get("collision_filter_radius_multiplier", 6.0))
+        self._collision_filter_scale = float(kwargs.get("collision_filter_scale", 1.0))
+        self._collision_filter_padding = float(kwargs.get("collision_filter_padding", 0.0))
+
         self.assignments, self.ctrlpts_functions = assign_network(forest, network_id, **kwargs)
         self.forest = forest
         self.network_id = network_id
@@ -28,15 +37,127 @@ class TreeConnection:
         self.plotting_vessels = None
         self.network = []
         self.curve_type = kwargs.get("curve_type", "Bezier")
+        self.connected_network = []
+        from svv.tree.data.data import TreeData
         for i in range(forest.n_trees_per_network[network_id]):
-            tree_object = Tree()
+            # Use lightweight Tree instances for connection work.  We don't
+            # grow these trees, so avoid allocating large growth buffers.
+            tree_object = Tree(preallocation_step=1)
             tree_object.parameters = forest.networks[network_id][i].parameters
             tree_object.data = forest.networks[network_id][i].data
             tree_object.domain = forest.networks[network_id][i].domain
             self.network.append(tree_object)
-            print(f"Setup tree: {i}")
-        self.connected_network = deepcopy(self.network)
-        print("Finish TreeConnection initialization")
+
+            tree_copy = Tree(preallocation_step=1)
+            tree_copy.parameters = forest.networks[network_id][i].parameters
+            tree_copy.data = TreeData.from_array(np.asarray(forest.networks[network_id][i].data).copy())
+            tree_copy.domain = forest.networks[network_id][i].domain
+            self.connected_network.append(tree_copy)
+
+    def _static_segment_indices(self, sample_points: np.ndarray, radius: float) -> np.ndarray:
+        cache = self._collision_cache
+        if cache is None:
+            return np.zeros((0,), dtype=int)
+        endpoint_tree = cache.get("endpoint_tree", None)
+        if endpoint_tree is None:
+            return np.zeros((0,), dtype=int)
+        sample_points = np.asarray(sample_points, dtype=float)
+        if sample_points.ndim == 1:
+            sample_points = sample_points.reshape(1, -1)
+        idxs = endpoint_tree.query_ball_point(sample_points, r=float(radius))
+        if idxs is None:
+            return np.zeros((0,), dtype=int)
+        if isinstance(idxs, np.ndarray):
+            idxs = idxs.tolist()
+        if len(idxs) == 0:
+            return np.zeros((0,), dtype=int)
+        # query_ball_point returns a list-of-lists for multi-point queries
+        if isinstance(idxs, list) and len(idxs) > 0 and isinstance(idxs[0], (list, np.ndarray)):
+            flat = [np.asarray(v, dtype=int).reshape(-1) for v in idxs if v is not None and len(v)]
+            if not flat:
+                return np.zeros((0,), dtype=int)
+            idxs = np.unique(np.concatenate(flat))
+        else:
+            idxs = np.asarray(idxs, dtype=int).reshape(-1)
+        seg_ids = np.asarray(cache["endpoint_to_segment"], dtype=int)[idxs]
+        if seg_ids.size == 0:
+            return np.zeros((0,), dtype=int)
+        return np.unique(seg_ids.astype(int))
+
+    def _build_collision_vessels(self, *, tree_a: int, idx_a: int, tree_b: int, idx_b: int,
+                                 anchor_a: np.ndarray, anchor_b: np.ndarray,
+                                 exclude_connection_tail_index: Optional[int] = None) -> np.ndarray:
+        cache = self._collision_cache
+        collision_arrays = []
+
+        if cache is not None:
+            segments = np.asarray(cache.get("segments", np.zeros((0, 7), dtype=float)))
+            if segments.shape[0] > 0:
+                if self._collision_filter:
+                    samples = max(2, self._collision_filter_samples)
+                    t = np.linspace(0.0, 1.0, samples)
+                    anchor_a = np.asarray(anchor_a, dtype=float).reshape(-1)[:3]
+                    anchor_b = np.asarray(anchor_b, dtype=float).reshape(-1)[:3]
+                    sample_points = (1.0 - t)[:, None] * anchor_a + t[:, None] * anchor_b
+                    length = float(np.linalg.norm(anchor_b - anchor_a))
+
+                    r0 = float(np.nan_to_num(self.forest.networks[self.network_id][tree_a].data[idx_a, 21], nan=0.0))
+                    r1 = float(np.nan_to_num(self.forest.networks[self.network_id][tree_b].data[idx_b, 21], nan=0.0))
+                    max_r = max(r0, r1)
+                    base = max(length * self._collision_filter_length_fraction, max_r * self._collision_filter_radius_multiplier)
+                    radius = (base * self._collision_filter_scale) + self._collision_filter_padding
+                    radius += float(getattr(self.forest, "physical_clearance", 0.0) or 0.0)
+
+                    seg_ids = self._static_segment_indices(sample_points, radius)
+                else:
+                    seg_ids = np.arange(segments.shape[0], dtype=int)
+
+                # Exclude the two terminal segments being connected so the new
+                # curve can attach at those endpoints without triggering the
+                # distance constraint.
+                try:
+                    ranges = cache.get("tree_ranges", None)
+                    if ranges is not None:
+                        s_a = ranges[self.network_id][tree_a]
+                        s_b = ranges[self.network_id][tree_b]
+                        exclude_ids = {
+                            int(s_a.start) + int(idx_a),
+                            int(s_b.start) + int(idx_b),
+                        }
+                        if seg_ids.size:
+                            keep = np.array([sid not in exclude_ids for sid in seg_ids], dtype=bool)
+                            seg_ids = seg_ids[keep]
+                except Exception:
+                    pass
+
+                if seg_ids.size:
+                    collision_arrays.append(segments[seg_ids, :])
+
+        # Dynamic connection vessels within this TreeConnection.
+        if exclude_connection_tail_index is None:
+            for per_tree in self.vessels:
+                if len(per_tree) > 0:
+                    collision_arrays.extend(per_tree)
+        else:
+            for per_tree in self.vessels:
+                for c, arr in enumerate(per_tree):
+                    if arr is None or arr.shape[0] == 0:
+                        continue
+                    if c == exclude_connection_tail_index:
+                        if arr.shape[0] > 1:
+                            collision_arrays.append(arr[:-1, :])
+                        continue
+                    collision_arrays.append(arr)
+
+        # Connection vessels from other networks (already solved).
+        if len(self.other_vessels) > 0:
+            for per_tree in self.other_vessels:
+                if len(per_tree) > 0:
+                    collision_arrays.extend(per_tree)
+
+        if not collision_arrays:
+            return np.zeros((0, 7), dtype=float)
+        return np.vstack(collision_arrays)
 
     def solve(self, *args, num_vessels=20, attempts=5):
         tree_0 = 0
@@ -53,24 +174,42 @@ class TreeConnection:
         #print("Network copy complete")
         for j in trange(len(self.ctrlpts_functions[0]), desc=f"Tree {tree_0} to Tree {tree_1}", leave=True):
             print(f"setup vessel connection: {j}")
+            idx_a = self.assignments[tree_0][j]
+            idx_b = self.assignments[tree_1][j]
+            v0 = self.forest.networks[self.network_id][tree_0].data[idx_a, :]
+            v1 = self.forest.networks[self.network_id][tree_1].data[idx_b, :]
+            anchor_a = v0[3:6]
+            anchor_b = v1[3:6]
+            collision_vessels = None
+            if self._collision_cache is not None:
+                collision_vessels = self._build_collision_vessels(
+                    tree_a=tree_0,
+                    idx_a=idx_a,
+                    tree_b=tree_1,
+                    idx_b=idx_b,
+                    anchor_a=anchor_a,
+                    anchor_b=anchor_b,
+                )
             conn = VesselConnection(self.forest, self.network_id, tree_0, tree_1,
-                                    self.assignments[tree_0][j], self.assignments[tree_1][j],
+                                    idx_a, idx_b,
                                     ctrl_function=self.ctrlpts_functions[0][j],
-                                    clamp_first=True, clamp_second=True, curve_type=self.curve_type)
+                                    clamp_first=True, clamp_second=True, curve_type=self.curve_type,
+                                    collision_vessels=collision_vessels)
             print(f"setup vessel connection finished")
-            collisions = []
-            collisions.append(conn.connection.other_line_segments)
-            if len(self.vessels) > 0:
-                for i in range(len(self.vessels)):
-                    if len(self.vessels[i]) > 0:
-                        collisions.extend(self.vessels[i])
-            if len(self.other_vessels) > 0:
-                for i in range(len(self.other_vessels)):
-                    if len(self.other_vessels[i]) > 0:
-                        collisions.extend(self.other_vessels[i])
-            if len(collisions) > 0:
-                collisions = np.vstack(collisions)
-                conn.connection.set_collision_vessels(collisions)
+            if self._collision_cache is None:
+                collisions = []
+                collisions.append(conn.connection.other_line_segments)
+                if len(self.vessels) > 0:
+                    for i in range(len(self.vessels)):
+                        if len(self.vessels[i]) > 0:
+                            collisions.extend(self.vessels[i])
+                if len(self.other_vessels) > 0:
+                    for i in range(len(self.other_vessels)):
+                        if len(self.other_vessels[i]) > 0:
+                            collisions.extend(self.other_vessels[i])
+                if len(collisions) > 0:
+                    collisions = np.vstack(collisions)
+                    conn.connection.set_collision_vessels(collisions)
             index_0 = self.assignments[tree_0][j]
             index_1 = self.assignments[tree_1][j]
             degree = args[0]
@@ -112,25 +251,43 @@ class TreeConnection:
                 self.vessels.append([])
                 self.lengths.append([])
                 for j in trange(len(remaining_connections[n - 2]), desc=f"Tree {tree_0} to Tree {tree_n} ", leave=False):
+                    idx_a = remaining_assignments[n - 2][j]
+                    idx_b = self.assignments[tree_0][j]
+                    v0 = self.forest.networks[self.network_id][tree_n].data[idx_a, :]
+                    anchor_a = v0[3:6]
+                    anchor_b = midpoints[j]
+                    collision_vessels = None
+                    if self._collision_cache is not None:
+                        collision_vessels = self._build_collision_vessels(
+                            tree_a=tree_n,
+                            idx_a=idx_a,
+                            tree_b=tree_0,
+                            idx_b=idx_b,
+                            anchor_a=anchor_a,
+                            anchor_b=anchor_b,
+                            exclude_connection_tail_index=j,
+                        )
                     conn = VesselConnection(self.forest, self.network_id, tree_n, tree_0,
-                                            remaining_assignments[n - 2][j], self.assignments[tree_0][j],
+                                            idx_a, idx_b,
                                             ctrl_function=remaining_connections[n - 2][j],
                                             clamp_first=True, clamp_second=False, point_1=midpoints[j],
-                                            curve_type=self.curve_type)
-                    collisions = []
-                    for i in range(len(self.vessels)):
-                        for c in range(len(self.vessels[i])):
-                            if c == j:
-                                collisions.append(self.vessels[i][c][:-1, :])
-                            else:
-                                collisions.append(self.vessels[i][c])
-                    if len(self.other_vessels) > 0:
-                        for i in range(len(self.other_vessels)):
-                            if len(self.other_vessels[i]) > 0:
-                                collisions.extend(self.other_vessels[i])
-                    collisions.append(conn.connection.other_line_segments)
-                    collisions = np.vstack(collisions)
-                    conn.connection.set_collision_vessels(collisions)
+                                            curve_type=self.curve_type,
+                                            collision_vessels=collision_vessels)
+                    if self._collision_cache is None:
+                        collisions = []
+                        for i in range(len(self.vessels)):
+                            for c in range(len(self.vessels[i])):
+                                if c == j:
+                                    collisions.append(self.vessels[i][c][:-1, :])
+                                else:
+                                    collisions.append(self.vessels[i][c])
+                        if len(self.other_vessels) > 0:
+                            for i in range(len(self.other_vessels)):
+                                if len(self.other_vessels[i]) > 0:
+                                    collisions.extend(self.other_vessels[i])
+                        collisions.append(conn.connection.other_line_segments)
+                        collisions = np.vstack(collisions)
+                        conn.connection.set_collision_vessels(collisions)
                     index_0 = remaining_assignments[n - 2][j]
                     index_1 = self.assignments[tree_0][j]
                     degree = args[0]

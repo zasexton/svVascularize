@@ -7,7 +7,7 @@ from svv.forest.connect.base_connection import BaseConnection
 class VesselConnection:
     def __init__(self, forest, network_id, tree_0, tree_1, idx, jdx,
                  ctrl_function=None, clamp_first=True, clamp_second=True,
-                 point_0=None, point_1=None, curve_type="Bezier"):
+                 point_0=None, point_1=None, curve_type="Bezier", collision_vessels=None):
         self.forest = forest
         self.tree_0 = tree_0
         self.tree_1 = tree_1
@@ -21,7 +21,6 @@ class VesselConnection:
         self.distal_1 = vessel_1[3:6]
         self.radius_0 = vessel_0[21]
         self.radius_1 = vessel_1[21]
-        collision_vessels = []
         min_distance = max(self.radius_0, self.radius_1)*0.5
         #min_distance = (max(numpy.max(forest.networks[network_id][tree_0].data[:,21]),
         #                   numpy.max(forest.networks[network_id][tree_1].data[:,21])) + max(self.radius_0,self.radius_1))
@@ -29,66 +28,77 @@ class VesselConnection:
                               domain=forest.domain, ctrlpt_function=ctrl_function, clamp_first=clamp_first,
                               clamp_second=clamp_second, point_0=point_0, point_1=point_1, min_distance=min_distance,
                               curve_type=curve_type)
-        tree_0_idx = numpy.arange(forest.networks[network_id][tree_0].data.shape[0], dtype=int).tolist()
-        if not numpy.isnan(vessel_0[17]):
-            parent = int(vessel_0[17])
-            daughter_0 = int(forest.networks[network_id][tree_0].data[parent, 15])
-            daughter_1 = int(forest.networks[network_id][tree_0].data[parent, 16])
-            #tree_0_idx.remove(parent)
-            #if daughter_0 == idx:
-            #    tree_0_idx.remove(daughter_0)
-            #else:
-            #    tree_0_idx.remove(daughter_1)
-            tree_0_idx.remove(idx)
-        if not numpy.isnan(vessel_0[15]):
-            daughter_2 = int(vessel_1[15])
-            tree_0_idx.remove(daughter_2)
-        if not numpy.isnan(vessel_0[16]):
-            daughter_3 = int(vessel_1[16])
-            tree_0_idx.remove(daughter_3)
-        tree_0_idx = numpy.array(tree_0_idx).astype(int)
-        tmp = numpy.zeros((tree_0_idx.shape[0], 7))
-        tmp[:, 0:3] = forest.networks[network_id][tree_0].data[tree_0_idx, 0:3]
-        tmp[:, 3:6] = forest.networks[network_id][tree_0].data[tree_0_idx, 3:6]
-        tmp[:, 6] = forest.networks[network_id][tree_0].data[tree_0_idx, 21]
-        collision_vessels.append(deepcopy(tmp))
-        tree_1_idx = numpy.arange(forest.networks[network_id][tree_1].data.shape[0], dtype=int).tolist()
-        if not numpy.isnan(vessel_1[17]):
-            parent = int(vessel_1[17])
-            daughter_0 = int(forest.networks[network_id][tree_1].data[parent, 15])
-            daughter_1 = int(forest.networks[network_id][tree_1].data[parent, 16])
-            #tree_1_idx.remove(parent)
-            #if daughter_0 == jdx:
-            #    tree_1_idx.remove(daughter_0)
-            #else:
-            #    tree_1_idx.remove(daughter_1)
-            #tree_1_idx.remove(daughter_0)
-            #tree_1_idx.remove(daughter_1)
-            tree_1_idx.remove(jdx)
-        if not numpy.isnan(vessel_1[15]):
-            daughter_2 = int(vessel_1[15])
-            tree_1_idx.remove(daughter_2)
-        if not numpy.isnan(vessel_1[16]):
-            daughter_3 = int(vessel_1[16])
-            tree_1_idx.remove(daughter_3)
-        tree_1_idx = numpy.array(tree_1_idx).astype(int)
-        tmp = numpy.zeros((tree_1_idx.shape[0], 7))
-        tmp[:, 0:3] = forest.networks[network_id][tree_1].data[tree_1_idx, 0:3]
-        tmp[:, 3:6] = forest.networks[network_id][tree_1].data[tree_1_idx, 3:6]
-        tmp[:, 6] = forest.networks[network_id][tree_1].data[tree_1_idx, 21]
-        collision_vessels.append(deepcopy(tmp))
-        for i in range(forest.n_networks):
-            for j in range(forest.n_trees_per_network[i]):
-                if i == network_id and (j == tree_0 or j == tree_1):
-                    continue
-                tmp = numpy.zeros((forest.networks[i][j].data.shape[0], 7))
-                tmp[:, 0:3] = forest.networks[i][j].data[:, 0:3]
-                tmp[:, 3:6] = forest.networks[i][j].data[:, 3:6]
-                tmp[:, 6] = forest.networks[i][j].data[:, 21]
-                collision_vessels.append(deepcopy(tmp))
-        collision_vessels = numpy.vstack(collision_vessels)
-        if collision_vessels.shape[0] > 0:
-            conn.set_collision_vessels(collision_vessels)
+        if collision_vessels is None:
+            collision_list = []
+            tree_0_idx = numpy.arange(forest.networks[network_id][tree_0].data.shape[0], dtype=int).tolist()
+            if not numpy.isnan(vessel_0[17]):
+                parent = int(vessel_0[17])
+                daughter_0 = int(forest.networks[network_id][tree_0].data[parent, 15])
+                daughter_1 = int(forest.networks[network_id][tree_0].data[parent, 16])
+                #tree_0_idx.remove(parent)
+                #if daughter_0 == idx:
+                #    tree_0_idx.remove(daughter_0)
+                #else:
+                #    tree_0_idx.remove(daughter_1)
+                tree_0_idx.remove(idx)
+            if not numpy.isnan(vessel_0[15]):
+                daughter_2 = int(vessel_1[15])
+                tree_0_idx.remove(daughter_2)
+            if not numpy.isnan(vessel_0[16]):
+                daughter_3 = int(vessel_1[16])
+                tree_0_idx.remove(daughter_3)
+            tree_0_idx = numpy.array(tree_0_idx).astype(int)
+            tmp = numpy.zeros((tree_0_idx.shape[0], 7))
+            tmp[:, 0:3] = forest.networks[network_id][tree_0].data[tree_0_idx, 0:3]
+            tmp[:, 3:6] = forest.networks[network_id][tree_0].data[tree_0_idx, 3:6]
+            tmp[:, 6] = forest.networks[network_id][tree_0].data[tree_0_idx, 21]
+            collision_list.append(deepcopy(tmp))
+            tree_1_idx = numpy.arange(forest.networks[network_id][tree_1].data.shape[0], dtype=int).tolist()
+            if not numpy.isnan(vessel_1[17]):
+                parent = int(vessel_1[17])
+                daughter_0 = int(forest.networks[network_id][tree_1].data[parent, 15])
+                daughter_1 = int(forest.networks[network_id][tree_1].data[parent, 16])
+                #tree_1_idx.remove(parent)
+                #if daughter_0 == jdx:
+                #    tree_1_idx.remove(daughter_0)
+                #else:
+                #    tree_1_idx.remove(daughter_1)
+                #tree_1_idx.remove(daughter_0)
+                #tree_1_idx.remove(daughter_1)
+                tree_1_idx.remove(jdx)
+            if not numpy.isnan(vessel_1[15]):
+                daughter_2 = int(vessel_1[15])
+                tree_1_idx.remove(daughter_2)
+            if not numpy.isnan(vessel_1[16]):
+                daughter_3 = int(vessel_1[16])
+                tree_1_idx.remove(daughter_3)
+            tree_1_idx = numpy.array(tree_1_idx).astype(int)
+            tmp = numpy.zeros((tree_1_idx.shape[0], 7))
+            tmp[:, 0:3] = forest.networks[network_id][tree_1].data[tree_1_idx, 0:3]
+            tmp[:, 3:6] = forest.networks[network_id][tree_1].data[tree_1_idx, 3:6]
+            tmp[:, 6] = forest.networks[network_id][tree_1].data[tree_1_idx, 21]
+            collision_list.append(deepcopy(tmp))
+            for i in range(forest.n_networks):
+                for j in range(forest.n_trees_per_network[i]):
+                    if i == network_id and (j == tree_0 or j == tree_1):
+                        continue
+                    tmp = numpy.zeros((forest.networks[i][j].data.shape[0], 7))
+                    tmp[:, 0:3] = forest.networks[i][j].data[:, 0:3]
+                    tmp[:, 3:6] = forest.networks[i][j].data[:, 3:6]
+                    tmp[:, 6] = forest.networks[i][j].data[:, 21]
+                    collision_list.append(deepcopy(tmp))
+            collision_arr = numpy.vstack(collision_list) if len(collision_list) else numpy.zeros((0, 7), dtype=float)
+            if collision_arr.shape[0] > 0:
+                conn.set_collision_vessels(collision_arr)
+        else:
+            collision_vessels = numpy.asarray(collision_vessels, dtype=float)
+            if collision_vessels.ndim == 2 and collision_vessels.shape[1] >= 6 and collision_vessels.shape[0] > 0:
+                if collision_vessels.shape[1] == 6:
+                    tmp = numpy.zeros((collision_vessels.shape[0], 7), dtype=float)
+                    tmp[:, 0:6] = collision_vessels[:, 0:6]
+                    tmp[:, 6] = 0.0
+                    collision_vessels = tmp
+                conn.set_collision_vessels(collision_vessels)
         conn.set_physical_clearance(self.forest.networks[network_id][tree_0].domain_clearance)
         bounds = numpy.zeros((3, 2))
         bounds[:, 0] = numpy.min(forest.domain.points, axis=0).T
