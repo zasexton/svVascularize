@@ -26,12 +26,19 @@ class TreeConnection:
         self._collision_filter_scale = float(kwargs.get("collision_filter_scale", 1.0))
         self._collision_filter_padding = float(kwargs.get("collision_filter_padding", 0.0))
 
-        self.assignments, self.ctrlpts_functions = assign_network(forest, network_id, **kwargs)
         self.forest = forest
         self.network_id = network_id
+        n_trees = int(forest.n_trees_per_network[network_id])
+        self.assignments = [[] for _ in range(n_trees)]
+        self.ctrlpts_functions = []
+        if n_trees >= 2:
+            assignments, ctrlpts_functions = assign_network(forest, network_id, **kwargs)
+            if assignments is not None and ctrlpts_functions is not None:
+                self.assignments = assignments
+                self.ctrlpts_functions = ctrlpts_functions
         self.connections = []
-        self.vessels = []
-        self.lengths = []
+        self.vessels = [[] for _ in range(n_trees)]
+        self.lengths = [[] for _ in range(n_trees)]
         self.other_vessels = []
         self.meshes = []
         self.plotting_vessels = None
@@ -160,11 +167,20 @@ class TreeConnection:
         return np.vstack(collision_arrays)
 
     def solve(self, *args, num_vessels=20, attempts=5):
+        n_trees = int(self.forest.n_trees_per_network[self.network_id])
+        if n_trees < 2 or not self.ctrlpts_functions or len(self.ctrlpts_functions[0]) == 0:
+            self.connections = []
+            self.vessels = [[] for _ in range(n_trees)]
+            self.lengths = [[] for _ in range(n_trees)]
+            if not isinstance(self.assignments, list) or len(self.assignments) != n_trees:
+                self.assignments = [[] for _ in range(n_trees)]
+            return
         tree_0 = 0
         tree_1 = 1
         tree_connections = []
         midpoints = []
         self.vessels = []
+        self.lengths = []
         self.vessels.append([])
         self.vessels.append([])
         self.lengths.append([])
@@ -362,6 +378,63 @@ class TreeConnection:
             count += 1
         plotter.add_mesh(self.forest.domain.boundary, color='grey', opacity=0.15)
         return plotter
+
+    def build_merged_solid(self, tree_indices=None, include_connections=True):
+        """
+        Build a fast (non-watertight) merged cylinder solid for this connected network.
+
+        This mirrors Tree.export_solid(watertight=False) behavior but includes the
+        inter-tree connection vessels stored on this TreeConnection.
+        """
+        solids = []
+
+        if tree_indices is None:
+            tree_indices = list(range(len(self.connected_network)))
+        else:
+            tree_indices = [
+                int(i) for i in np.asarray(tree_indices, dtype=int).reshape(-1).tolist()
+                if 0 <= int(i) < len(self.connected_network)
+            ]
+        if not tree_indices:
+            return None
+
+        def add_segment(p0, p1, radius):
+            p0 = np.asarray(p0, dtype=float).reshape(-1)[:3]
+            p1 = np.asarray(p1, dtype=float).reshape(-1)[:3]
+            direction = p1 - p0
+            length = float(np.linalg.norm(direction))
+            if not np.isfinite(length) or length <= 0.0:
+                return
+            radius = float(radius)
+            if not np.isfinite(radius) or radius <= 0.0:
+                return
+            direction = direction / length
+            center = (p0 + p1) / 2.0
+            solids.append(pv.Cylinder(center=center, direction=direction, radius=radius, height=length))
+
+        # Tree segments (post-connection endpoint updates).
+        for tree_idx in tree_indices:
+            data = np.asarray(self.connected_network[tree_idx].data)
+            if data.ndim != 2 or data.shape[0] == 0 or data.shape[1] < 22:
+                continue
+            for row in data:
+                add_segment(row[0:3], row[3:6], row[21])
+
+        # Connection segments.
+        if include_connections and isinstance(self.vessels, list):
+            for tree_idx in tree_indices:
+                if tree_idx >= len(self.vessels):
+                    continue
+                for conn in self.vessels[tree_idx]:
+                    arr = np.asarray(conn)
+                    if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 7:
+                        continue
+                    for row in arr:
+                        add_segment(row[0:3], row[3:6], row[6])
+
+        if not solids:
+            return None
+        return pv.merge(solids)
 
     def export_solid(self, cap_resolution=40, extrude_roots = False, junction_smoothing = False):
         network_branches = []

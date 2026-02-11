@@ -102,6 +102,12 @@ _PARAM_DESCRIPTIONS = {
         "later connected to form a complete vascular circuit. Each tree\n"
         "grows from its own start point."
     ),
+    'vessels_per_network': (
+        "Number of vessel-growth steps to run for each network.\n"
+        "This controls how many vessels are added to every tree in the\n"
+        "network during forest generation. Networks can stop growing\n"
+        "earlier than others by setting a smaller value here."
+    ),
     'connection_curve': (
         "Curve type used to connect trees within each network.\n"
         "\u2022 Bezier: Smooth polynomial curves\n"
@@ -431,6 +437,20 @@ class ParameterPanel(QWidget):
         self._trees_per_network_spins = []
         forest_form.addRow(self._make_label_with_info("Trees per Network:", _PARAM_DESCRIPTIONS['trees_per_network']), self._trees_per_network_widget)
         self._rebuild_trees_per_network_spins(1)
+
+        # Vessels per network container (Forest only) – one spinner per network
+        self._n_vessels_per_network = [self.n_vessels_spin.value()]
+        self._vessels_per_network_widget = QWidget()
+        self._vessels_per_network_layout = QVBoxLayout()
+        self._vessels_per_network_layout.setContentsMargins(0, 0, 0, 0)
+        self._vessels_per_network_layout.setSpacing(4)
+        self._vessels_per_network_widget.setLayout(self._vessels_per_network_layout)
+        self._vessels_per_network_spins = []
+        forest_form.addRow(
+            self._make_label_with_info("Vessels per Network:", _PARAM_DESCRIPTIONS['vessels_per_network']),
+            self._vessels_per_network_widget
+        )
+        self._rebuild_vessels_per_network_spins(1)
 
         # Curve type used when connecting trees into networks
         self.curve_type_combo = QComboBox()
@@ -819,6 +839,7 @@ class ParameterPanel(QWidget):
             with QSignalBlocker(self.n_networks_spin):
                 self.n_networks_spin.setValue(value)
             self._rebuild_trees_per_network_spins(value)
+            self._rebuild_vessels_per_network_spins(value)
             trees_per_network = list(self._n_trees_per_network)
         else:
             try:
@@ -864,6 +885,7 @@ class ParameterPanel(QWidget):
             except Exception:
                 pass
         self._rebuild_trees_per_network_spins(value)
+        self._rebuild_vessels_per_network_spins(value)
         if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
             try:
                 self.parent_gui.point_selector.set_trees_per_network(list(self._n_trees_per_network))
@@ -909,6 +931,53 @@ class ParameterPanel(QWidget):
             self._trees_per_network_spins.append(spin)
 
         self._n_trees_per_network = new_values
+
+    def _rebuild_vessels_per_network_spins(self, n_networks):
+        """Rebuild the per-network vessel-count spinners for the given number of networks."""
+        old_values = list(getattr(self, "_n_vessels_per_network", []))
+
+        # Clear existing widgets
+        while self._vessels_per_network_layout.count():
+            item = self._vessels_per_network_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._vessels_per_network_spins = []
+
+        default_base = int(self.n_vessels_spin.value()) if hasattr(self, "n_vessels_spin") else 100
+        new_values = []
+        for i in range(n_networks):
+            default_val = int(old_values[i]) if i < len(old_values) else default_base
+            default_val = max(1, default_val)
+            new_values.append(default_val)
+
+            row = QWidget()
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            row.setLayout(row_layout)
+
+            if n_networks > 1:
+                row_layout.addWidget(QLabel(f"Network {i}:"))
+
+            spin = QSpinBox()
+            spin.setRange(1, 100000)
+            spin.setValue(default_val)
+            spin.setToolTip(f"Number of vessel-growth steps for network {i}")
+            spin.valueChanged.connect(lambda v, idx=i: self._on_per_network_vessels_changed(idx, v))
+            row_layout.addWidget(spin)
+            row_layout.addStretch()
+
+            self._vessels_per_network_layout.addWidget(row)
+            self._vessels_per_network_spins.append(spin)
+
+        self._n_vessels_per_network = new_values
+
+    def _on_per_network_vessels_changed(self, network_idx, value):
+        """Handle a change to the vessel count for a specific network."""
+        value = max(1, int(value))
+        if network_idx < len(self._n_vessels_per_network):
+            self._n_vessels_per_network[network_idx] = value
 
     def _on_per_network_trees_changed(self, network_idx, value):
         """Handle a change to the tree count for a specific network."""
@@ -1045,10 +1114,19 @@ class ParameterPanel(QWidget):
             n_networks = point_config.get('n_networks', 1)
             n_trees_per_network = point_config.get('n_trees_per_network', [2] * n_networks)
             self._sync_tree_override_options(n_networks, n_trees_per_network)
+            per_network = list(getattr(self, "_n_vessels_per_network", []))
+            if len(per_network) != n_networks:
+                per_network = [int(n_vessels)] * int(n_networks)
+            total_steps = max(per_network) if per_network else int(n_vessels)
             if self.parent_gui:
-                self.parent_gui.update_status(f"Generating forest with {n_vessels} total vessels...")
+                if n_networks <= 4:
+                    self.parent_gui.update_status(f"Generating forest (vessels/network: {per_network})...")
+                else:
+                    self.parent_gui.update_status(
+                        f"Generating forest (vessels/network: min {min(per_network)} max {max(per_network)})..."
+                    )
             task_fn = lambda cancel, queue: self._generate_forest_task(
-                n_vessels,
+                per_network,
                 physical_clearance,
                 convexity_tolerance,
                 preallocation_step,
@@ -1059,7 +1137,7 @@ class ParameterPanel(QWidget):
                 cancel,
                 queue
             )
-            self._start_generation_task("Generating forest...", n_vessels, task_fn, self._on_forest_generated)
+            self._start_generation_task("Generating forest...", total_steps, task_fn, self._on_forest_generated)
 
     @staticmethod
     def _connect_forest_task(forest, curve_type="Bezier"):
@@ -1469,21 +1547,35 @@ class ParameterPanel(QWidget):
         forest.set_domain(self.parent_gui.domain, convexity_tolerance)
         forest.set_roots(start_points, directions)
 
-        update_every = max(1, n_vessels // 100)
-        for i in range(n_vessels):
+        if isinstance(n_vessels, (list, tuple, np.ndarray)):
+            per_network = [int(v) for v in np.asarray(n_vessels, dtype=int).reshape(-1).tolist()]
+        else:
+            per_network = [int(n_vessels)] * int(n_networks)
+        if len(per_network) < int(n_networks):
+            per_network.extend([per_network[-1] if per_network else 1] * (int(n_networks) - len(per_network)))
+        per_network = per_network[:int(n_networks)]
+        per_network = [max(1, int(v)) for v in per_network]
+
+        total_steps = max(per_network) if per_network else 0
+        update_every = max(1, total_steps // 100) if total_steps > 0 else 1
+        for i in range(total_steps):
             if cancel_event.is_set():
                 break
-            forest.add(1, decay_probability=decay_prob)
+            active_networks = [idx for idx in range(int(n_networks)) if i < per_network[idx]]
+            if not active_networks:
+                break
+            forest.add(1, network_id=active_networks, decay_probability=decay_prob)
             if (i + 1) % update_every == 0 and progress_queue is not None:
                 progress_queue.put(i + 1)
 
         total_vessels = sum(tree.n_terminals for network in forest.networks for tree in network)
         if progress_queue is not None:
-            progress_queue.put(min(total_vessels, n_vessels))
+            progress_queue.put(total_steps)
 
         return {
             'forest': forest,
             'n_networks': n_networks,
+            'n_vessels_per_network': per_network,
             'physical_clearance': physical_clearance,
             'convexity_tolerance': convexity_tolerance,
             'compete': compete,
@@ -1583,7 +1675,7 @@ class ParameterPanel(QWidget):
         dict
             Dictionary of parameters
         """
-        return {
+        params = {
             'mode': 'tree' if self.mode_combo.currentIndex() == 0 else 'forest',
             'n_vessels': self.n_vessels_spin.value(),
             'physical_clearance': self.physical_clearance_spin.value(),
@@ -1595,3 +1687,6 @@ class ParameterPanel(QWidget):
             'tree_parameters': dict(self.tree_base_params),
             'tree_parameter_overrides': {str(k): v for k, v in self.tree_param_overrides.items()}
         }
+        if self.mode_combo.currentIndex() != 0:
+            params['n_vessels_per_network'] = list(getattr(self, "_n_vessels_per_network", []))
+        return params
