@@ -537,13 +537,6 @@ class ParameterPanel(QWidget):
         except Exception:
             pass
 
-        # Keep override dropdowns in sync with point selector network count
-        if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
-            try:
-                self.parent_gui.point_selector.network_spin.valueChanged.connect(self._on_point_selector_network_changed)
-            except Exception:
-                pass
-
         # Action buttons
         button_layout = QVBoxLayout()
         button_layout.setSpacing(8)
@@ -875,13 +868,13 @@ class ParameterPanel(QWidget):
         Handle changes to the number of networks for forest generation.
 
         This rebuilds the per-network tree count spinners, updates the point
-        selector's Networks spinbox, and syncs the per-tree override dropdowns.
+        selector's network dropdown, and syncs the per-tree override dropdowns.
         """
         if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
             ps = self.parent_gui.point_selector
             try:
-                with QSignalBlocker(ps.network_spin):
-                    ps.network_spin.setValue(value)
+                if hasattr(ps, "set_network_count"):
+                    ps.set_network_count(value)
             except Exception:
                 pass
         self._rebuild_trees_per_network_spins(value)
@@ -1015,8 +1008,8 @@ class ParameterPanel(QWidget):
             if self.parent_gui and hasattr(self.parent_gui, "point_selector"):
                 ps = self.parent_gui.point_selector
                 try:
-                    with QSignalBlocker(ps.network_spin):
-                        ps.network_spin.setValue(1)
+                    if hasattr(ps, "set_network_count"):
+                        ps.set_network_count(1)
                     ps.set_tree_count(1)
                 except Exception:
                     pass
@@ -1034,8 +1027,8 @@ class ParameterPanel(QWidget):
                     trees_per_network = trees_per_network[:n_networks]
                     # Update point selector's controls to reflect forest settings
                     ps = self.parent_gui.point_selector
-                    with QSignalBlocker(ps.network_spin):
-                        ps.network_spin.setValue(n_networks)
+                    if hasattr(ps, "set_network_count"):
+                        ps.set_network_count(n_networks)
                     ps.set_trees_per_network(trees_per_network)
                     self._sync_tree_override_options(n_networks, trees_per_network)
                 except Exception:
