@@ -39,7 +39,33 @@ jobs:
         env:
           SVV_BUILD_MMG: "1"
         run: |
-          pip install .
+          # Disable build isolation so build-time tools (cmake, compilers) installed above
+          # are visible to setup.py when building MMG.
+          pip install . --no-build-isolation
+
+      - name: Verify MMG executables are installed
+        run: |
+          python - << 'PY'
+          import os
+          import sys
+          import svv
+
+          bin_dir = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
+          print("svv/bin:", bin_dir)
+          if not os.path.isdir(bin_dir):
+            raise SystemExit("svv/bin directory missing; MMG did not build/package correctly.")
+
+          names = set(os.listdir(bin_dir))
+          expected = {"mmg2d_O3", "mmg3d_O3", "mmgs_O3"}
+          if os.name == "nt":
+            expected = {e + ".exe" for e in expected}
+
+          missing = sorted(expected - names)
+          if missing:
+            raise SystemExit(f"Missing MMG executables in svv/bin: {missing}. Found: {sorted(names)}")
+
+          print("MMG executables present:", sorted(expected))
+          PY
 
       - name: Run basic smoke test
         run: |
