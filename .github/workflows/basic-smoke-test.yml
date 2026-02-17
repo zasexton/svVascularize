@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     defaults:
       run:
         shell: bash
@@ -32,7 +32,8 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
+          python -m pip install cmake
 
       - name: Build svVascularize
         env:
@@ -42,7 +43,14 @@ jobs:
 
       - name: Run basic smoke test
         run: |
-          python .github/scripts/basic_smoke_test.py
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a python .github/scripts/basic_smoke_test.py
+          else
+            python .github/scripts/basic_smoke_test.py
+          fi
+        env:
+          SVV_TELEMETRY_DISABLED: "1"
+          SVV_GUI_GL_MODE: "software"
 
       - name: Record job status
         if: always()
