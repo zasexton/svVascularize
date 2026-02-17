@@ -17,6 +17,7 @@ from PySide6.QtGui import QAction, QKeySequence, QDesktopServices
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 import threading
+from typing import Optional
 from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.point_selector import PointSelectorWidget
 from svv.visualize.gui.parameter_panel import ParameterPanel
@@ -801,8 +802,8 @@ class VascularizeGUI(QMainWindow):
         export_solid_action.triggered.connect(self.export_solids_dialog)
         fabricate_menu.addAction(export_solid_action)
 
-        export_splines_action = QAction("Export Splines (Connected Forest)...", self)
-        export_splines_action.setStatusTip("Export B-spline centerlines for a connected forest to a text file")
+        export_splines_action = QAction("Export Splines...", self)
+        export_splines_action.setStatusTip("Export B-spline centerline samples for the current tree or forest")
         export_splines_action.triggered.connect(self.export_splines_dialog)
         fabricate_menu.addAction(export_splines_action)
 
@@ -1368,7 +1369,7 @@ class VascularizeGUI(QMainWindow):
                         import numpy as np
                         import pyvista as pv
 
-                        def _build_independent_network_solid(net_idx: int, tree_idxs: list[int] | None):
+                        def _build_independent_network_solid(net_idx: int, tree_idxs: Optional[list[int]]):
                             solids = []
 
                             def add_segment(p0, p1, radius):
@@ -1817,31 +1818,21 @@ class VascularizeGUI(QMainWindow):
 
     def export_splines_dialog(self):
         """
-        Export spline samples for a connected Forest to a text file.
+        Export spline samples to a text file.
 
-        Uses svv.forest.export.export_spline.write_splines underneath. This
-        requires a Forest with non-None `connections`.
+        - Tree: exports per-branch spline samples (tree format)
+        - Forest:
+          - connected: exports connected-network spline samples (network format)
+          - unconnected: exports per-tree spline samples (tree format)
         """
         obj = self._require_synthetic_object()
         if obj is None:
             return
 
-        # Only connected forests are supported
+        from svv.tree.tree import Tree as _TreeType
         from svv.forest.forest import Forest as _ForestType
-        from svv.forest.export.export_spline import write_splines, export_spline
-        if not isinstance(obj, _ForestType) or getattr(obj, "connections", None) is None:
-            QMessageBox.warning(
-                self,
-                "Splines Not Available",
-                "Spline export is only available for connected Forest objects.\n\n"
-                "Generate a forest and use the Connect Forest option first."
-            )
-            self._record_telemetry(
-                message="Spline export requested without a connected Forest",
-                level="warning",
-                action="export_splines_unconnected",
-            )
-            return
+        is_tree = isinstance(obj, _TreeType)
+        is_forest = isinstance(obj, _ForestType)
 
         # Options dialog
         dlg = QDialog(self)
@@ -1884,34 +1875,110 @@ class VascularizeGUI(QMainWindow):
             return
 
         try:
-            # export_spline operates on TreeConnection objects from Forest.connections.tree_connections
-            # It returns: (interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals)
-            all_points = []
-            all_radii = []
-            for tc in obj.connections.tree_connections:
-                _, _, _, net_points, net_radii, _ = export_spline(tc)
-                all_points.extend(net_points)
-                all_radii.extend(net_radii)
+            from pathlib import Path as _Path
 
-            # Temporarily change working directory to target location for write_splines
-            cwd = os.getcwd()
-            target_dir = os.path.dirname(file_path) or cwd
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            try:
-                os.chdir(target_dir)
-                # write_splines writes 'network_{i}_b_splines.txt' in cwd; we adapt
-                write_splines(all_points, all_radii,
-                              spline_sample_points=spline_sample_points,
-                              seperate=seperate,
-                              write_splines=True)
-                # If only one network, rename the default file to requested name
-                default_path = os.path.join(target_dir, "network_0_b_splines.txt")
-                if os.path.exists(default_path):
-                    os.replace(default_path, file_path)
-            finally:
-                os.chdir(cwd)
+            import numpy as np
+            from scipy.interpolate import splev
+            from svv.tree.export.write_splines import get_interpolated_sv_data
 
-            self.update_status(f"Splines exported to {file_path}")
+            out_path = _Path(file_path)
+            if not out_path.suffix:
+                out_path = out_path.with_suffix(".txt")
+
+            def _write_tree_splines(tree: _TreeType, dst: _Path) -> None:
+                if getattr(tree, "data", None) is None:
+                    raise ValueError("Tree has no data to export.")
+                *_, interp_xyzr = get_interpolated_sv_data(tree.data)
+                if not interp_xyzr:
+                    raise ValueError("Tree has no spline branches to export.")
+                t = np.linspace(0, 1, num=spline_sample_points)
+                with dst.open("w", encoding="utf-8") as spline_file:
+                    for vessel in range(len(interp_xyzr)):
+                        spline_file.write(f"Vessel: {vessel}, Number of Points: {spline_sample_points}\n\n")
+                        data = splev(t, interp_xyzr[vessel][0])
+                        for k in range(spline_sample_points):
+                            if seperate:
+                                label = 1 if k > spline_sample_points // 2 else 0
+                                spline_file.write(
+                                    f"{data[0][k]}, {data[1][k]}, {data[2][k]}, {data[3][k]}, {label}\n"
+                                )
+                            else:
+                                spline_file.write(
+                                    f"{data[0][k]}, {data[1][k]}, {data[2][k]}, {data[3][k]}\n"
+                                )
+                        spline_file.write("\n")
+
+            if is_tree:
+                _write_tree_splines(obj, out_path)
+                self.update_status(f"Tree splines exported to {out_path}")
+                return
+
+            if is_forest and getattr(obj, "connections", None) is not None:
+                from svv.forest.export.export_spline import write_splines, export_spline
+
+                # export_spline operates on TreeConnection objects from Forest.connections.tree_connections
+                # It returns: (interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals)
+                all_points = []
+                all_radii = []
+                for tc in obj.connections.tree_connections:
+                    _, _, _, net_points, net_radii, _ = export_spline(tc)
+                    all_points.extend(net_points)
+                    all_radii.extend(net_radii)
+
+                # Temporarily change working directory to target location for write_splines
+                cwd = os.getcwd()
+                target_dir = str(out_path.parent) if str(out_path.parent) else cwd
+                try:
+                    os.chdir(target_dir)
+                    # write_splines writes 'network_{i}_b_splines.txt' in cwd; we adapt
+                    write_splines(
+                        all_points,
+                        all_radii,
+                        spline_sample_points=spline_sample_points,
+                        seperate=seperate,
+                        write_splines=True,
+                    )
+                    default_path = os.path.join(target_dir, "network_0_b_splines.txt")
+                    if os.path.exists(default_path):
+                        os.replace(default_path, str(out_path))
+                finally:
+                    os.chdir(cwd)
+
+                self.update_status(f"Connected forest splines exported to {out_path}")
+                return
+
+            if is_forest:
+                # Forest without connections: export each Tree independently using the tree spline format.
+                trees = []
+                for net_idx, network in enumerate(getattr(obj, "networks", []) or []):
+                    for tree_idx, tree in enumerate(network):
+                        trees.append((net_idx, tree_idx, tree))
+                if not trees:
+                    raise ValueError("Forest contains no trees to export.")
+
+                if len(trees) == 1:
+                    _, _, tree = trees[0]
+                    _write_tree_splines(tree, out_path)
+                    self.update_status(f"Tree splines exported to {out_path}")
+                    return
+
+                stem = out_path.stem or "splines"
+                suffix = out_path.suffix or ".txt"
+                written = []
+                for net_idx, tree_idx, tree in trees:
+                    dst = out_path.with_name(f"{stem}_network{net_idx}_tree{tree_idx}{suffix}")
+                    _write_tree_splines(tree, dst)
+                    written.append(dst)
+
+                QMessageBox.information(
+                    self,
+                    "Splines Exported",
+                    f"Exported {len(written)} tree spline file(s) to:\n{out_path.parent}"
+                )
+                self.update_status(f"Exported {len(written)} tree spline file(s)")
+                return
+
+            raise ValueError("Unsupported object type for spline export.")
         except Exception as e:
             self._record_telemetry(e, action="export_splines")
             QMessageBox.critical(
@@ -1932,7 +1999,8 @@ class VascularizeGUI(QMainWindow):
             "© SimVascular"
         )
 
-    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", traceback_str: str | None = None, **tags):
+    def _record_telemetry(self, exc=None, message: Optional[str] = None, level: str = "error",
+                          traceback_str: Optional[str] = None, **tags):
         """
         Send errors or warnings to telemetry without interrupting the GUI.
 
@@ -2247,8 +2315,8 @@ class VascularizeGUI(QMainWindow):
         event.accept()
 
     # ---- Background domain loading ----
-    def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Queue | None = None,
-                          build_resolution: int | None = None):
+    def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Optional[Queue] = None,
+                          build_resolution: Optional[int] = None):
         def report_progress(value, label=None):
             """Report progress value and optionally update the label text."""
             if progress_queue is not None:
