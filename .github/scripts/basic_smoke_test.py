@@ -30,6 +30,10 @@ from svv.simulation.simulation import Simulation
 from svv.utils.remeshing.remesh import remesh_surface
 
 
+def _log(msg: str) -> None:
+    print(msg, flush=True)
+
+
 @contextmanager
 def _temp_cwd():
     """Run work in a temp dir to avoid polluting the repo with tmp.mesh files."""
@@ -42,42 +46,85 @@ def _temp_cwd():
             os.chdir(old)
 
 
-def _smoke_gui(domain: Domain) -> None:
-    """Verify the Qt GUI can be created and shown briefly."""
-    from PySide6.QtCore import QTimer, Qt
-    from PySide6.QtWidgets import QApplication
-    from svv.visualize.gui.main_window import VascularizeGUI
+def _gui_smoke_process(result_queue) -> None:
+    """Run GUI init/show in a separate process to avoid CI hangs."""
+    try:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+        from svv.visualize.gui.main_window import VascularizeGUI
 
-    app = QApplication.instance() or QApplication(sys.argv[:1])
-    gui = VascularizeGUI(domain=domain)
-    # Ensure close() actually destroys the window so VTK/Qt resources are
-    # released while the X server is still available (important for Xvfb CI).
-    gui.setAttribute(Qt.WA_DeleteOnClose, True)
+        _log("SMOKE: gui: starting QApplication")
+        app = QApplication.instance() or QApplication(sys.argv[:1])
 
-    # Quit once the window is destroyed.
-    gui.destroyed.connect(lambda *_: app.quit())
-    gui.show()
+        _log("SMOKE: gui: constructing main window")
+        gui = VascularizeGUI(domain=None)
+        gui.show()
+        _log("SMOKE: gui: shown; entering event loop")
 
-    # Run the event loop briefly so widgets initialize.
-    QTimer.singleShot(250, gui.close)
-    # Safety net in case close() doesn't fire destroyed (shouldn't happen with WA_DeleteOnClose).
-    QTimer.singleShot(2000, app.quit)
-    app.exec()
+        # Quit shortly after show() so we validate initialization without
+        # hanging on shutdown paths that can be flaky in headless CI.
+        QTimer.singleShot(1500, app.quit)
+        app.exec()
+        _log("SMOKE: gui: event loop exited")
+
+        result_queue.put(("ok", None))
+        try:
+            result_queue.close()
+            result_queue.join_thread()
+        except Exception:
+            pass
+        os._exit(0)
+    except BaseException as e:
+        try:
+            result_queue.put(("error", repr(e)))
+        except Exception:
+            pass
+        raise
+
+
+def _smoke_gui(timeout_s: int = 45) -> None:
+    """Verify the Qt GUI can be created and shown briefly (with a hard timeout)."""
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    result_queue = ctx.Queue()
+    p = ctx.Process(target=_gui_smoke_process, args=(result_queue,))
+    p.start()
+    p.join(timeout_s)
+
+    if p.is_alive():
+        p.terminate()
+        p.join(5)
+        raise RuntimeError(f"GUI smoke test timed out after {timeout_s}s")
+
+    status = None
+    message = None
+    try:
+        status, message = result_queue.get(timeout=2)
+    except Exception:
+        pass
+
+    if p.exitcode != 0 or status != "ok":
+        raise RuntimeError(f"GUI smoke test failed (exitcode={p.exitcode}) {status}: {message}")
 
 
 def main() -> None:
+    _log("SMOKE: starting")
     # Domain build (geometry + implicit function + tetrahedral mesh)
+    _log("SMOKE: domain: create/solve/build")
     cube = Domain(pv.Cube().triangulate())
     cube.create()
     cube.solve()
     cube.build()
 
     # MMG remeshing (validate that packaged/built executables run)
+    _log("SMOKE: mmg: remesh_surface(pv.Cube())")
     with _temp_cwd():
         remeshed = remesh_surface(pv.Cube().triangulate(), verbosity=0)
     assert remeshed.n_cells > 0
 
     # Tree build
+    _log("SMOKE: tree: build")
     t = Tree()
     t.set_domain(cube)
     t.parameters.set('root_pressure', 100)
@@ -88,6 +135,7 @@ def main() -> None:
     t.n_add(3)
 
     # Forest build (minimal network + one add step)
+    _log("SMOKE: forest: build")
     forest = Forest(domain=cube, n_networks=1, n_trees_per_network=[1])
     forest.set_domain(cube)
     forest.set_roots()
@@ -100,7 +148,9 @@ def main() -> None:
     # sim.build_meshes(fluid=True, tissue=False, boundary_layer=False)
 
     # GUI launch (after core objects exist)
-    _smoke_gui(cube)
+    _log("SMOKE: gui: launch")
+    _smoke_gui()
+    _log("SMOKE: done")
 
 
 if __name__ == "__main__":

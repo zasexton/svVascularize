@@ -255,6 +255,55 @@ class VTKWidget(QWidget):
         self._grid_visible = False
         self._grid_actor = None
 
+        # Create layout
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+        self._layout = layout
+
+        # Lazily initialize the VTK/PyVista interactor after the widget is shown.
+        # On some platforms (notably macOS CI), creating the interactor during
+        # __init__ can hang before the window is realized.
+        self._pv = None
+        self._QtInteractor = None
+        self.plotter = None
+        self._plotter_init_in_progress = False
+        self._plotter_init_done = False
+        self._plotter_init_failed = False
+
+        self._vtk_placeholder = QLabel("Initializing 3D viewport…", self)
+        self._vtk_placeholder.setAlignment(Qt.AlignCenter)
+        self._vtk_placeholder.setWordWrap(True)
+        self._vtk_placeholder.setStyleSheet(
+            f"padding: 24px; color: {CADTheme.get_color('text', 'secondary')};"
+        )
+        layout.addWidget(self._vtk_placeholder)
+
+        # Lightweight HUD overlay (created eagerly; rendering is driven by plotter availability)
+        self._hud = QLabel(self)
+        self._hud.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._hud.setStyleSheet(
+            "color: #E0E0E0; background-color: rgba(30,30,30,180);"
+            "border: 1px solid rgba(122,155,192,180); padding: 6px 10px; border-radius: 6px;"
+        )
+        self._hud.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._ensure_plotter_initialized()
+
+    def _ensure_plotter_initialized(self):
+        if self._plotter_init_done or self._plotter_init_in_progress or self._plotter_init_failed:
+            return
+        self._plotter_init_in_progress = True
+        # Schedule after the event loop starts to avoid platform-specific hangs.
+        QTimer.singleShot(0, self._init_plotter)
+
+    def _init_plotter(self):
+        if self._plotter_init_done or self._plotter_init_failed:
+            self._plotter_init_in_progress = False
+            return
+
         # Attempt to import PyVista and PyVistaQt lazily with helpful errors
         try:
             from pyvistaqt import QtInteractor as _QtInteractor
@@ -266,30 +315,41 @@ class VTKWidget(QWidget):
                 "(conda: `conda install -c conda-forge libffi>=3.4,<3.5`; system: `sudo apt install libffi8` on Ubuntu 22.04 "
                 "or `libffi7` on Ubuntu 20.04). Also install dependencies: PySide6, pyvista, pyvistaqt."
             )
-            raise RuntimeError(msg) from e
+            self._vtk_placeholder.setText(msg)
+            self._vtk_placeholder.setStyleSheet(
+                "padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;"
+            )
+            self._plotter_init_failed = True
+            self._plotter_init_in_progress = False
+            return
 
         self._pv = _pv
         self._QtInteractor = _QtInteractor
-
-        # Create layout
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.setLayout(layout)
 
         # Configure VTK for better software rendering support
         try:
             import vtk
             # Set VTK to use software rendering if OpenGL fails
             vtk.vtkObject.GlobalWarningDisplayOff()  # Suppress warnings
-        except:
+        except Exception:
             pass
 
         # Create PyVista plotter with error handling
         try:
             self.plotter = self._QtInteractor(self)
-            layout.addWidget(self.plotter.interactor)
+            self._layout.addWidget(self.plotter.interactor)
+            if getattr(self, "_vtk_placeholder", None) is not None:
+                try:
+                    self._layout.removeWidget(self._vtk_placeholder)
+                except Exception:
+                    pass
+                try:
+                    self._vtk_placeholder.deleteLater()
+                except Exception:
+                    pass
+                self._vtk_placeholder = None
         except Exception as e:
-            # If plotter creation fails, create a fallback widget
+            # If plotter creation fails, keep a fallback widget so the rest of the GUI works.
             error_label = QLabel(
                 f"3D Visualization unavailable:\n{str(e)}\n\n"
                 "This may be due to missing OpenGL libraries.\n"
@@ -299,8 +359,20 @@ class VTKWidget(QWidget):
             )
             error_label.setWordWrap(True)
             error_label.setStyleSheet("padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;")
-            layout.addWidget(error_label)
+            if getattr(self, "_vtk_placeholder", None) is not None:
+                try:
+                    self._layout.removeWidget(self._vtk_placeholder)
+                except Exception:
+                    pass
+                try:
+                    self._vtk_placeholder.deleteLater()
+                except Exception:
+                    pass
+                self._vtk_placeholder = None
+            self._layout.addWidget(error_label)
             self.plotter = None
+            self._plotter_init_failed = True
+            self._plotter_init_in_progress = False
             return
 
         # Enable surface picking for accurate front-face point selection
@@ -339,13 +411,6 @@ class VTKWidget(QWidget):
         bg_bottom = CADTheme.get_color('viewport', 'background-bottom')
         bg_top = CADTheme.get_color('viewport', 'background-top')
         self.plotter.set_background(bg_bottom, top=bg_top)
-        # Note: show_grid adds axis labels which can interfere with scale bar
-        # Disabled to avoid duplicate scale indicators
-        # try:
-        #     self.plotter.show_grid(color=CADTheme.get_color('viewport', 'grid'),
-        #                            location='back')
-        # except Exception:
-        #     pass
         try:
             self.plotter.enable_eye_dome_lighting()
         except Exception:
@@ -356,21 +421,18 @@ class VTKWidget(QWidget):
         # Initial camera setup
         self.plotter.camera_position = 'iso'
 
-        # Lightweight HUD overlay
-        self._hud = QLabel(self)
-        self._hud.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._hud.setStyleSheet(
-            "color: #E0E0E0; background-color: rgba(30,30,30,180);"
-            "border: 1px solid rgba(122,155,192,180); padding: 6px 10px; border-radius: 6px;"
-        )
-        self._hud.hide()
-
         # Add scale bar/ruler for real-world dimensions
         self._init_scale_bar()
 
-        # Add subtle grid for better spatial reference (optional)
-        # Can be toggled in future versions
-        # self.plotter.show_grid(color='#505050')
+        # If a domain was set before the plotter was ready, render it now.
+        if self.domain is not None:
+            try:
+                self.set_domain(self.domain)
+            except Exception:
+                pass
+
+        self._plotter_init_done = True
+        self._plotter_init_in_progress = False
 
     def shutdown(self):
         """
@@ -631,9 +693,24 @@ class VTKWidget(QWidget):
         if hasattr(domain, 'unit') and domain.unit:
             self.set_scale_bar_unit(domain.unit)
 
-        # Reset camera to show full domain
-        self.plotter.reset_camera()
-        self.plotter.render()
+        def _reset_and_render():
+            if not self.plotter:
+                return
+            try:
+                self.plotter.reset_camera()
+            except Exception:
+                pass
+            try:
+                self.plotter.render()
+            except Exception:
+                pass
+
+        # Reset camera to show full domain. Some platform/runner combinations can hang
+        # when rendering before the widget is realized, so defer a tick when needed.
+        if self.isVisible():
+            _reset_and_render()
+        else:
+            QTimer.singleShot(0, _reset_and_render)
 
     def _show_hud(self, message: str, duration_ms: int = 1400):
         """Show a transient HUD message in the viewport."""
@@ -737,6 +814,9 @@ class VTKWidget(QWidget):
         actor
             PyVista actor for the direction arrow
         """
+        if not self.plotter:
+            return None
+
         point = np.asarray(point).flatten()
         direction = np.asarray(direction).flatten()
         direction = direction / np.linalg.norm(direction)
@@ -791,6 +871,9 @@ class VTKWidget(QWidget):
         list
             List of actors for the tree vessels
         """
+        if not self.plotter:
+            return []
+
         actors = []
         base = label or f"tree_{len(self.tree_actors)}"
         for i in range(tree.data.shape[0]):
@@ -837,6 +920,8 @@ class VTKWidget(QWidget):
             Color of the vessels
         """
         if vessels is None or vessels.size == 0:
+            return []
+        if not self.plotter:
             return []
         actors = []
         base = label or f"connection_{len(self.connection_actors)}"
