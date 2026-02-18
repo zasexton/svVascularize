@@ -10,7 +10,7 @@ scikit-image
 tetgen
 trimesh[all]
 meshio
-open3d
+open3d; python_version < "3.13"
 pyvista>=0.44.2
 scikit-learn
 tqdm
