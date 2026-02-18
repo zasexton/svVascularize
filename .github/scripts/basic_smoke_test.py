@@ -53,6 +53,10 @@ def _gui_smoke_process(result_queue) -> None:
         # For smoke testing we only need to verify the Qt GUI launches.
         if sys.platform == "darwin" and (os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI")):
             os.environ.setdefault("SVV_GUI_DISABLE_VTK", "1")
+        # Windows CI runners have been observed to hard-crash (0xC0000005) during
+        # VTK/Qt interactor initialization on some Python/VTK combinations.
+        if sys.platform == "win32" and (os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI")):
+            os.environ.setdefault("SVV_GUI_DISABLE_VTK", "1")
 
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication
