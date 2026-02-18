@@ -9,6 +9,9 @@ from contextlib import contextmanager
 if sys.platform.startswith("linux"):
     os.environ.setdefault("SVV_GUI_GL_MODE", "software")
     os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+    # Prefer a headless Qt platform in CI to avoid flaky XCB plugin deps.
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # Never prompt for telemetry consent in CI.
 os.environ.setdefault("SVV_TELEMETRY_DISABLED", "1")
