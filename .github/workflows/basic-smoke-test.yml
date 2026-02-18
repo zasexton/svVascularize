@@ -188,7 +188,7 @@ jobs:
             esac
           done
 
-          label="linux_${linux}-macos_${macos}-windows_${windows}"
+          message="linux ${linux} | macos ${macos} | windows ${windows}"
 
           if [ "$linux" = "ok" ] && [ "$macos" = "ok" ] && [ "$windows" = "ok" ]; then
             color="brightgreen"
@@ -198,7 +198,13 @@ jobs:
             color="lightgrey"
           fi
 
-          badge_url="https://img.shields.io/badge/svv_passing-${label}-${color}"
+          msg_enc=$(SMOKE_MSG="${message}" python - << 'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ["SMOKE_MSG"], safe=""))
+          PY
+          )
+          badge_url="https://img.shields.io/static/v1?label=svv%20passing&message=${msg_enc}&color=${color}"
           link="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/basic-smoke-test.yml?query=branch%3A${GITHUB_REF_NAME}"
           new_badge="[![SVV passing](${badge_url})](${link})"
 
