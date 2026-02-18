@@ -1,5 +1,6 @@
 import numpy
 import numpy as np
+import os
 from scipy.spatial import cKDTree
 import pyvista as pv
 from scipy.optimize import minimize, brute
@@ -22,7 +23,7 @@ from svv.tree.utils.c_extend import update_alt
 from scipy.sparse import coo_matrix, lil_matrix
 import numexpr as ne
 import matplotlib.pyplot as plt
-ne.set_num_threads(16)
+ne.set_num_threads(min(16, max(1, os.cpu_count() or 1)))
 
 #[TODO] angle constraint to make sure that daughters are wide enough apart
 #[TODO] remove terminal and parent sister collision constraint

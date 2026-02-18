@@ -99,6 +99,12 @@ jobs:
           SVV_TELEMETRY_DISABLED: "1"
           SVV_GUI_GL_MODE: "software"
           QT_X11_NO_MITSHM: "1"
+          SVV_USEARCH_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          VECLIB_MAXIMUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
 
       - name: Record job status
         if: always()

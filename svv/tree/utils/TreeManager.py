@@ -1,12 +1,35 @@
+import os
 import threading
 from threading import Lock, Condition
 from scipy.spatial import cKDTree
 import numpy as np
-from time import perf_counter
-from threading import Lock, Condition
-import os
-from usearch.index import Index, MetricKind
-MAX_THREADS = min(4, max(1, os.cpu_count() - 1))
+from typing import Optional
+
+from usearch.index import Index
+
+MAX_THREADS = min(4, max(1, (os.cpu_count() or 1) - 1))
+
+
+def _resolve_usearch_threads(threads: Optional[int]) -> int:
+    if threads is not None:
+        try:
+            return max(1, int(threads))
+        except Exception:
+            return 1
+
+    env_threads = os.environ.get("SVV_USEARCH_THREADS") or os.environ.get("USEARCH_THREADS")
+    if env_threads:
+        try:
+            return max(1, int(env_threads))
+        except Exception:
+            pass
+
+    # Use a conservative default on Windows to avoid instability in some
+    # environments when searching from multiple threads.
+    if os.name == "nt":
+        return 1
+
+    return MAX_THREADS
 
 class USearchTree:
     def __init__(self, data, space='l2sq', ef_construction=200, M=100, ef=20):
@@ -19,8 +42,14 @@ class USearchTree:
         - ef_construction: The size of the dynamic candidate list during construction.
         - M: Controls the number of bi-directional links created for every new element during construction.
         """
-        self.dim = data.shape[1]
-        metric = {'l2': 'euclidean', 'ip': 'dot', 'cos': 'cos'}.get(space, 'euclidean')
+        data = np.asarray(data)
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        if data.ndim != 2:
+            raise ValueError(f"USearchTree data must be 2D, got shape {getattr(data, 'shape', None)}")
+
+        self.dim = int(data.shape[1])
+        self.metric = str(space)
 
         self.index = Index(
             ndim=self.dim,
@@ -32,9 +61,19 @@ class USearchTree:
         )
 
         labels = np.arange(data.shape[0])
-        self.index.add(labels, data)
+        self.index.add(labels, np.ascontiguousarray(data, dtype=np.float32))
 
-    def query(self, points, k=1, threads=MAX_THREADS):
+    def _coerce_points(self, points) -> np.ndarray:
+        arr = np.asarray(points)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.ndim != 2:
+            raise ValueError(f"USearchTree points must be 2D, got shape {getattr(arr, 'shape', None)}")
+        if int(arr.shape[1]) != self.dim:
+            raise ValueError(f"USearchTree points must have dim={self.dim}, got shape {arr.shape}")
+        return np.ascontiguousarray(arr, dtype=np.float32)
+
+    def query(self, points, k=1, threads: Optional[int] = None):
         """
         Query the nearest neighbors for the given points.
 
@@ -46,7 +85,9 @@ class USearchTree:
         - distances: A 2D array of distances to the nearest neighbors.
         - indices: A 2D array of indices of the nearest neighbors.
         """
-        results = self.index.search(points, k, threads=threads)
+        points = self._coerce_points(points)
+        threads = _resolve_usearch_threads(threads)
+        results = self.index.search(points, int(k), threads=threads)
         distances = results.distances
         indices = results.keys
         return distances, indices
@@ -63,13 +104,21 @@ class USearchTree:
         - A list of lists, where each sublist contains the indices of points within distance `r` of the corresponding query point.
         """
         # Approximate a ball query by performing knn search with a large `k` and filtering by `r`
-        k = kwargs.get("k", min(50, self.index.size))
-        distances, indices = self.query(points, k)
+        points = self._coerce_points(points)
+        index_size = int(getattr(self.index, "size", 0))
+        if index_size <= 0:
+            return [np.asarray([], dtype=np.int64) for _ in range(points.shape[0])]
+
+        k = int(kwargs.get("k", min(50, index_size)))
+        k = max(1, min(k, index_size))
+        threads = kwargs.get("threads", None)
+        distances, indices = self.query(points, k, threads=threads)
 
         # Filter based on radius `r`
         result = []
-        for i in range(len(points)):
-            within_r = indices[i][distances[i] <= r]  # Filter neighbors by radius
+        r_val = float(np.asarray(r).reshape(-1)[0])
+        for i in range(points.shape[0]):
+            within_r = indices[i][distances[i] <= r_val]  # Filter neighbors by radius
             result.append(within_r)
 
         return result
@@ -90,7 +139,8 @@ class USearchTree:
         Parameters:
         - data: A 2D numpy array of new points to add.
         """
-        self.index.add(ids, data)
+        data = self._coerce_points(data)
+        self.index.add(np.asarray(ids), data)
 
     def replace(self, data, ids):
         """
@@ -100,6 +150,8 @@ class USearchTree:
         - data: A 2D numpy array of new points to replace existing points.
         - ids: A list of IDs of the points to replace.
         """
+        data = self._coerce_points(data)
+        ids = np.asarray(ids)
         self.index.remove(ids)
         self.index.add(ids, data)
 
