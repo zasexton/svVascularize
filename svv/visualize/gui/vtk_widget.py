@@ -293,6 +293,25 @@ class VTKWidget(QWidget):
         self._ensure_plotter_initialized()
 
     def _ensure_plotter_initialized(self):
+        disable_vtk = os.environ.get("SVV_GUI_DISABLE_VTK", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if disable_vtk:
+            if getattr(self, "_vtk_placeholder", None) is not None:
+                self._vtk_placeholder.setText(
+                    "3D visualization disabled (SVV_GUI_DISABLE_VTK=1).\n\n"
+                    "The GUI will run with limited 3D viewport features."
+                )
+                self._vtk_placeholder.setStyleSheet(
+                    "padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;"
+                )
+            self._plotter_init_failed = True
+            self._plotter_init_in_progress = False
+            return
+
         if self._plotter_init_done or self._plotter_init_in_progress or self._plotter_init_failed:
             return
         self._plotter_init_in_progress = True

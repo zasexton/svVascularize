@@ -49,6 +49,11 @@ def _temp_cwd():
 def _gui_smoke_process(result_queue) -> None:
     """Run GUI init/show in a separate process to avoid CI hangs."""
     try:
+        # macOS CI runners occasionally hang when initializing the embedded VTK viewport.
+        # For smoke testing we only need to verify the Qt GUI launches.
+        if sys.platform == "darwin" and (os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI")):
+            os.environ.setdefault("SVV_GUI_DISABLE_VTK", "1")
+
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication
         from svv.visualize.gui.main_window import VascularizeGUI
