@@ -91,13 +91,14 @@ jobs:
       - name: Run basic smoke test
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a python .github/scripts/basic_smoke_test.py
+            xvfb-run -a -s "-screen 0 1920x1080x24" python .github/scripts/basic_smoke_test.py
           else
             python .github/scripts/basic_smoke_test.py
           fi
         env:
           SVV_TELEMETRY_DISABLED: "1"
           SVV_GUI_GL_MODE: "software"
+          QT_X11_NO_MITSHM: "1"
 
       - name: Record job status
         if: always()

@@ -8,9 +8,14 @@ from contextlib import contextmanager
 # but these defaults make the script more robust when run locally too.)
 if sys.platform.startswith("linux"):
     os.environ.setdefault("SVV_GUI_GL_MODE", "software")
-    os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
-    # Prefer a headless Qt platform in CI to avoid flaky XCB plugin deps.
-    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+    # If we have an X server (e.g. Xvfb in CI), prefer the normal XCB platform
+    # so PyVistaQt/VTK can embed a render window reliably.
+    if os.environ.get("DISPLAY"):
+        if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+            os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    else:
+        # No display available: fall back to offscreen modes to keep imports working.
+        os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # Never prompt for telemetry consent in CI.
@@ -39,17 +44,24 @@ def _temp_cwd():
 
 def _smoke_gui(domain: Domain) -> None:
     """Verify the Qt GUI can be created and shown briefly."""
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, Qt
     from PySide6.QtWidgets import QApplication
     from svv.visualize.gui.main_window import VascularizeGUI
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     gui = VascularizeGUI(domain=domain)
+    # Ensure close() actually destroys the window so VTK/Qt resources are
+    # released while the X server is still available (important for Xvfb CI).
+    gui.setAttribute(Qt.WA_DeleteOnClose, True)
+
+    # Quit once the window is destroyed.
+    gui.destroyed.connect(lambda *_: app.quit())
     gui.show()
 
     # Run the event loop briefly so widgets initialize.
     QTimer.singleShot(250, gui.close)
-    QTimer.singleShot(500, app.quit)
+    # Safety net in case close() doesn't fire destroyed (shouldn't happen with WA_DeleteOnClose).
+    QTimer.singleShot(2000, app.quit)
     app.exec()
 
 
