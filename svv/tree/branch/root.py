@@ -11,8 +11,13 @@ def set_root(tree, **kwargs):
     """
     Set the root of the tree.
     """
+    def _coerce_cell_id(cell_id):
+        """Return a scalar int cell id from PyVista/Numpy outputs."""
+        return int(numpy.asarray(cell_id).reshape(-1)[0])
+
     start = kwargs.get('start', None)
     direction = kwargs.get('direction', None)
+    within_tolerance = kwargs.get('within_tolerance', 1e-6)
 
     # Validate and normalize start point shape
     # Must be either None, 1D array of shape (d,), or 2D array of shape (1, d)
@@ -78,7 +83,9 @@ def set_root(tree, **kwargs):
                         raise ValueError("Invalid start_on value: {}.".format(start_on))
                 else:
                     _start = start
-                    start_within = tree.domain.within(start, layer=layer)
+                    # Treat points that are numerically very close to the boundary
+                    # as "within" so root endpoints are sampled into the interior.
+                    start_within = tree.domain.within(start, layer=layer + within_tolerance)
                 if direction is None:
                     if start_within:
                         _end, _ = tree.domain.get_interior_points(attempts, implicit_range=interior_range)
@@ -91,7 +98,7 @@ def set_root(tree, **kwargs):
                             _end = _end[0, :]
                             finished = True
                     else:
-                        closest_cell = tree.domain.boundary.find_closest_cell(_start)
+                        closest_cell = _coerce_cell_id(tree.domain.boundary.find_closest_cell(_start.reshape(-1)))
                         simplices = tree.domain.boundary_nodes[tree.domain.boundary_vertices[[closest_cell], :], :]
                         rdx = tree.domain.random_generator.random((1, tree.domain.points.shape[1], 1))
                         if tree.domain.points.shape[1] == 2:
@@ -131,7 +138,7 @@ def set_root(tree, **kwargs):
                         raise ValueError("Invalid start_on value: {}.".format(start_on))
                 else:
                     _start = start
-                    start_within = tree.domain.within(start, layer=layer)
+                    start_within = tree.domain.within(start, layer=layer + within_tolerance)
                 if direction is None:
                     if start_within:
                         upper = set(tree.domain.mesh_tree.query_ball_point(_start,
@@ -176,13 +183,14 @@ def set_root(tree, **kwargs):
                             raise ValueError("Only 2D and 3D domains are supported.")
                         _end = _end[:, :tree.domain.points.shape[1]]
                         values = tree.domain(_end).flatten()
-                        _end = _end[values < interior_range[1], :]
+                        _end = _end[values < (interior_range[1] + within_tolerance), :]
                         scale = numpy.linspace(0.0, 1.0, nonconvex_sampling).reshape((1, -1, 1))
                         _mid = _start*(1-scale) + _end.reshape((_end.shape[0], 1, _end.shape[1]))*scale
                         values = tree.domain(_mid.reshape((-1, _mid.shape[2]))).reshape((-1, nonconvex_sampling))
-                        _end = _end[~numpy.any(values > 0.0, axis=1)]
-                        values = values[~numpy.any(values > 0.0, axis=1), :]
-                        _end = _end[~numpy.any(values[:, nonconvex_sampling//2:] > interior_range[1], axis=1)]
+                        outside = values > (layer + within_tolerance)
+                        _end = _end[~numpy.any(outside, axis=1)]
+                        values = values[~numpy.any(outside, axis=1), :]
+                        _end = _end[~numpy.any(values[:, nonconvex_sampling//2:] > (interior_range[1] + within_tolerance), axis=1)]
                         if _end.shape[0] == 0:
                             count += 1
                             continue
@@ -190,7 +198,7 @@ def set_root(tree, **kwargs):
                             _end = _end[0, :]
                             finished = True
                     else:
-                        closest_cell = tree.domain.boundary.find_closest_cell(_start)
+                        closest_cell = _coerce_cell_id(tree.domain.boundary.find_closest_cell(_start.reshape(-1)))
                         simplices = tree.domain.boundary_nodes[tree.domain.boundary_vertices[[closest_cell], :], :]
                         rdx = tree.domain.random_generator.random((1, tree.domain.points.shape[1], 1))
                         if tree.domain.points.shape[1] == 2:
@@ -203,8 +211,8 @@ def set_root(tree, **kwargs):
                 else:
                     _end = _start + direction * threshold * numpy.linspace(0.75, 1.5, attempts).reshape(-1, 1)
                     values = tree.domain(_end[:, :tree.domain.points.shape[1]]).flatten()
-                    if len(values[values < interior_range[1]]) > 0:
-                        _end = _end[values < interior_range[1], :]
+                    if len(values[values < (interior_range[1] + within_tolerance)]) > 0:
+                        _end = _end[values < (interior_range[1] + within_tolerance), :]
                         _end_idx = tree.domain.random_generator.choice(numpy.arange(_end.shape[0]).tolist(), 1,
                                                                        replace=False)
                         _end = _end[_end_idx, :]
@@ -213,20 +221,23 @@ def set_root(tree, **kwargs):
                         idx = numpy.argmin(values).flatten()
                         _end = _end[idx[0], :]
                     finished = True
-    _length = numpy.linalg.norm(_end - _start)
+    # Compute length using a single (d,) start/end vector regardless of any
+    # intermediate array shapes produced during sampling.
+    d = tree.domain.points.shape[1]
+    _start_vec = numpy.asarray(_start, dtype=float).reshape(-1)[:d]
+    _end_vec = numpy.asarray(_end, dtype=float).reshape(-1)[:d]
+    _length = float(numpy.linalg.norm(_end_vec - _start_vec))
     if hasattr(tree.parameters.terminal_flow, '__call__'):
-        _flow = tree.parameters.terminal_flow(_end[:, :tree.domain.points.shape[1]])
+        _flow = tree.parameters.terminal_flow(_end_vec.reshape(1, d))
     else:
         _flow = tree.parameters.terminal_flow
     # Ensure _start and _end are 2D with shape (1, d) for basis calculation
     # Handle arrays with more than 2 dimensions by flattening first
-    d = tree.domain.points.shape[1]
     if _start.ndim > 2:
         _start = _start.flatten()[:d].reshape((1, d))
     elif _start.ndim == 1:
         _start = _start.reshape((1, -1))
     elif _start.shape[0] != 1:
-        # Take only the first row if multiple rows exist
         _start = _start[0:1, :]
 
     if _end.ndim > 2:
@@ -234,7 +245,6 @@ def set_root(tree, **kwargs):
     elif _end.ndim == 1:
         _end = _end.reshape((1, -1))
     elif _end.shape[0] != 1:
-        # Take only the first row if multiple rows exist
         _end = _end[0:1, :]
 
     u, v, w = basis(_start.astype(numpy.float64), _end.astype(numpy.float64))

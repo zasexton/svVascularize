@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     defaults:
       run:
         shell: bash
@@ -29,20 +29,82 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libx11-xcb1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1
+
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install cmake
 
       - name: Build svVascularize
         env:
           SVV_BUILD_MMG: "1"
         run: |
-          pip install .
+          # Disable build isolation so build-time tools (cmake, compilers) installed above
+          # are visible to setup.py when building MMG.
+          pip install . --no-build-isolation
+
+      - name: Verify MMG executables are installed
+        run: |
+          python - << 'PY'
+          import os
+          import sys
+          import svv
+
+          bin_dir = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
+          print("svv/bin:", bin_dir)
+          if not os.path.isdir(bin_dir):
+            raise SystemExit("svv/bin directory missing; MMG did not build/package correctly.")
+
+          names = set(os.listdir(bin_dir))
+          expected = {"mmg2d_O3", "mmg3d_O3", "mmgs_O3"}
+          if os.name == "nt":
+            expected = {e + ".exe" for e in expected}
+
+          missing = sorted(expected - names)
+          if missing:
+            raise SystemExit(f"Missing MMG executables in svv/bin: {missing}. Found: {sorted(names)}")
+
+          print("MMG executables present:", sorted(expected))
+          PY
 
       - name: Run basic smoke test
         run: |
-          python .github/scripts/basic_smoke_test.py
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a -s "-screen 0 1920x1080x24" python .github/scripts/basic_smoke_test.py
+          else
+            python .github/scripts/basic_smoke_test.py
+          fi
+        env:
+          SVV_TELEMETRY_DISABLED: "1"
+          SVV_GUI_GL_MODE: "software"
+          QT_X11_NO_MITSHM: "1"
+          SVV_USEARCH_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          VECLIB_MAXIMUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
 
       - name: Record job status
         if: always()
@@ -126,7 +188,7 @@ jobs:
             esac
           done
 
-          label="linux_${linux}-macos_${macos}-windows_${windows}"
+          message="linux ${linux} | macos ${macos} | windows ${windows}"
 
           if [ "$linux" = "ok" ] && [ "$macos" = "ok" ] && [ "$windows" = "ok" ]; then
             color="brightgreen"
@@ -136,7 +198,13 @@ jobs:
             color="lightgrey"
           fi
 
-          badge_url="https://img.shields.io/badge/svv_passing-${label}-${color}"
+          msg_enc=$(SMOKE_MSG="${message}" python - << 'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ["SMOKE_MSG"], safe=""))
+          PY
+          )
+          badge_url="https://img.shields.io/static/v1?label=svv%20passing&message=${msg_enc}&color=${color}"
           link="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/basic-smoke-test.yml?query=branch%3A${GITHUB_REF_NAME}"
           new_badge="[![SVV passing](${badge_url})](${link})"
 

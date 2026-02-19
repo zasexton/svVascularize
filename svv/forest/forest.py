@@ -1,9 +1,11 @@
 import numpy
 import os
 from copy import deepcopy
+from scipy.spatial import cKDTree
 from svv.tree.tree import Tree
 from svv.tree.data.data import TreeData
 from svv.tree.collision.tree_collision import tree_collision
+from svv.tree.utils.TreeManager import KDTreeManager, USearchTree
 from svv.forest.connect.geodesic import geodesic_constructor
 from svv.forest.connect.forest_connection import ForestConnection
 from svv.visualize.forest.show import show
@@ -139,62 +141,104 @@ class Forest(object):
         kwargs : dict
         """
         if len(args) == 0:
-            kwargs['start_points'] = self.start_points
-            kwargs['directions'] = self.directions
+            start_points = kwargs.pop('start_points', self.start_points)
+            directions = kwargs.pop('directions', self.directions)
         elif len(args) == 1:
-            kwargs['start_points'] = args[0]
-            kwargs['directions'] = self.directions
+            start_points = args[0]
+            directions = kwargs.pop('directions', self.directions)
         elif len(args) == 2:
-            kwargs['start_points'] = args[0]
-            kwargs['directions'] = args[1]
+            start_points = args[0]
+            directions = args[1]
         else:
             raise ValueError("Too many arguments.")
+        root_kwargs = kwargs.copy()
         tmp_roots = []
         tmp_root_maps = []
         tmp_connectivities = []
-        tmp_kdtms = []
-        tmp_hnsw_trees = []
-        tmp_hnsw_tree_ids = []
         tmp_probabilities = []
         tmp_tree_scales = []
+        # Lightweight spatial index for accepted root segments. Candidate roots
+        # are first screened with midpoint sphere overlap before exact OBB checks.
+        accepted_midpoints = []
+        accepted_prune_radii = []
+        accepted_midpoint_tree = None
+        accepted_max_radius = 0.0
         for i in range(self.n_networks):
             for j in range(self.n_trees_per_network[i]):
                 success = False
                 while not success:
-                    tmp_root, tmp_root_map,tmp_connecivity,tmp_kdtm,tmp_hnsw_tree,tmp_hnsw_tree_id,tmp_probability,tmp_tree_scale = self.networks[i][j].set_root(start=kwargs['start_points'][i][j],
-                                                                          direction=kwargs['directions'][i][j],
-                                                                          inplace=False)
-                    collisions = []
-                    for k in range(len(tmp_roots)):
-                        root_collision = tree_collision(tmp_roots[k], tmp_root, clearance=self.physical_clearance)
-                        collisions.append(root_collision)
+                    tmp_root, tmp_root_map, tmp_connecivity, _, _, _, tmp_probability, tmp_tree_scale = (
+                        self.networks[i][j].set_root(
+                            start=start_points[i][j],
+                            direction=directions[i][j],
+                            inplace=False,
+                            build_indices=False,
+                            **root_kwargs,
+                        )
+                    )
+                    candidate_midpoint = ((tmp_root[:, 0:3] + tmp_root[:, 3:6]) / 2).reshape(-1)
+                    candidate_radius = (
+                        0.01 * float(tmp_root[0, 20]) +
+                        float(tmp_root[0, 21]) +
+                        float(self.physical_clearance)
+                    )
+                    if accepted_midpoint_tree is None:
+                        nearby_ids = numpy.empty((0,), dtype=numpy.int64)
+                    else:
+                        search_radius = candidate_radius + accepted_max_radius
+                        rough_ids = accepted_midpoint_tree.query_ball_point(candidate_midpoint, search_radius)
+                        if len(rough_ids) == 0:
+                            nearby_ids = numpy.empty((0,), dtype=numpy.int64)
+                        else:
+                            rough_ids = numpy.array(rough_ids, dtype=numpy.int64)
+                            rough_midpoints = numpy.vstack([accepted_midpoints[idx] for idx in rough_ids])
+                            rough_radii = numpy.array([accepted_prune_radii[idx] for idx in rough_ids],
+                                                      dtype=numpy.float64)
+                            rough_distances = numpy.linalg.norm(
+                                rough_midpoints - candidate_midpoint.reshape(1, -1),
+                                axis=1
+                            )
+                            nearby_ids = rough_ids[rough_distances <= (rough_radii + candidate_radius)]
+                    has_collision = False
+                    for k in nearby_ids:
+                        root_collision = tree_collision(tmp_roots[int(k)], tmp_root,
+                                                        clearance=self.physical_clearance)
                         if root_collision:
+                            has_collision = True
                             break
-                    if not any(collisions):
+                    if not has_collision:
                         success = True
                 tmp_roots.append(tmp_root)
                 tmp_root_maps.append(tmp_root_map)
                 tmp_connectivities.append(tmp_connecivity)
-                tmp_kdtms.append(tmp_kdtm)
-                tmp_hnsw_trees.append(tmp_hnsw_tree)
-                tmp_hnsw_tree_ids.append(tmp_hnsw_tree_id)
                 tmp_probabilities.append(tmp_probability)
                 tmp_tree_scales.append(tmp_tree_scale)
+                accepted_midpoints.append(candidate_midpoint)
+                accepted_prune_radii.append(candidate_radius)
+                accepted_max_radius = max(accepted_max_radius, candidate_radius)
+                accepted_midpoint_tree = cKDTree(numpy.vstack(accepted_midpoints))
+        root_idx = 0
         for i in range(self.n_networks):
             for j in range(self.n_trees_per_network[i]):
-                self.networks[i][j].preallocate[0, :] = tmp_roots.pop(0)
-                self.networks[i][j].data = self.networks[i][j].preallocate[:1, :]
-                self.networks[i][j].vessel_map.update(tmp_root_maps.pop(0))
-                self.networks[i][j].n_terminals = 1
-                self.networks[i][j].max_distal_node = 1
-                self.networks[i][j].connectivity = tmp_connectivities.pop(0)
-                #self.networks[i][j].kdtm = tmp_kdtms.pop(0)
-                self.networks[i][j].hnsw_tree = tmp_hnsw_trees.pop(0)
-                self.networks[i][j].hnsw_tree_id = tmp_hnsw_tree_ids.pop(0)
-                self.networks[i][j].probability = tmp_probabilities.pop(0)
-                self.networks[i][j].tree_scale = tmp_tree_scales.pop(0)
-                self.networks[i][j].midpoints = (self.networks[i][j].data[:, 0:3] + self.networks[i][j].data[:, 3:6])/2
-                self.networks[i][j].segment_count = 1
+                tree = self.networks[i][j]
+                tree.preallocate[0, :] = tmp_roots[root_idx]
+                tree.data = tree.preallocate[:1, :]
+                tree.vessel_map.update(tmp_root_maps[root_idx])
+                tree.n_terminals = 1
+                tree.max_distal_node = 1
+                tree.connectivity = tmp_connectivities[root_idx]
+                tree.probability = tmp_probabilities[root_idx]
+                tree.tree_scale = tmp_tree_scales[root_idx]
+                tree.midpoints = (tree.data[:, 0:3] + tree.data[:, 3:6]) / 2
+                tree.kdtm = KDTreeManager(tree.midpoints.reshape(1, 3))
+                tree.hnsw_tree = USearchTree(tree.midpoints.reshape(1, 3).astype(numpy.float32))
+                tree.hnsw_tree_id = id(tree.hnsw_tree)
+                tree.segment_count = 1
+                if len(tree._idx_cache) == 0:
+                    tree._idx_cache.append(0)
+                if len(tree._col21_cache) == 0:
+                    tree._col21_cache.append(21)
+                root_idx += 1
 
     def add(self, *args, **kwargs):
         """
@@ -227,6 +271,13 @@ class Forest(object):
                         #tmp_new_vessels = numpy.vstack([self.networks[i][j].data, tmp_added_vessels[0], tmp_added_vessels[1]])
                         change_i = numpy.array(change_i, dtype=int)
                         change_j = numpy.array(change_j, dtype=int)
+                        required_rows = int(self.networks[i][j].segment_count) + 2
+                        if change_i.size:
+                            try:
+                                required_rows = max(required_rows, int(change_i.max()) + 1)
+                            except Exception:
+                                pass
+                        self.networks[i][j].ensure_preallocation(required_rows)
                         self.networks[i][j].preallocate[self.networks[i][j].segment_count, :] = tmp_added_vessels[0]
                         self.networks[i][j].preallocate[self.networks[i][j].segment_count+1, :] = tmp_added_vessels[1]
                         self.networks[i][j].preallocate[change_i, change_j] = numpy.array(new_tmp_data)
@@ -304,6 +355,9 @@ class Forest(object):
                     self.networks[i][j].tree_scale = self.networks[i][j].new_tree_scale
                     self.networks[i][j].n_terminals += 1
                     self.networks[i][j].segment_count += 2
+                    next_idxs = [len(self.networks[i][j]._idx_cache), len(self.networks[i][j]._idx_cache) + 1]
+                    self.networks[i][j]._idx_cache.extend(next_idxs)
+                    self.networks[i][j]._col21_cache.extend([21, 21])
 
     def connect(self, *args, **kwargs):
         self.connections = ForestConnection(self)
@@ -323,9 +377,16 @@ class Forest(object):
         """
         if isinstance(outdir, type(None)):
             outdir = '3d_tmp'
+        os.makedirs(outdir, exist_ok=True)
         for i in range(self.n_networks):
+            net_dir = os.path.join(outdir, f"network_{i}")
+            os.makedirs(net_dir, exist_ok=True)
             for j in range(self.n_trees_per_network[i]):
-                self.networks[i][j].export_solid(outdir=outdir, shell_thickness=shell_thickness)
+                self.networks[i][j].export_solid(outdir=net_dir, shell_thickness=shell_thickness)
+                tmp_path = os.path.join(net_dir, "tree_mesh.vtp")
+                dst_path = os.path.join(net_dir, f"tree_{j}_mesh.vtp")
+                if os.path.exists(tmp_path):
+                    os.replace(tmp_path, dst_path)
 
     def export_splines(self, outdir=None):
         """

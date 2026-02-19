@@ -3909,7 +3909,8 @@ class SolutionInspectorWidget(QWidget):
         self._try_import_pyvista()
         self._build_ui()
 
-    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", traceback_str: str | None = None, **tags) -> None:
+    def _record_telemetry(self, exc=None, message: Optional[str] = None, level: str = "error",
+                          traceback_str: Optional[str] = None, **tags) -> None:
         """
         Send errors or warnings to telemetry without impacting the UI.
 

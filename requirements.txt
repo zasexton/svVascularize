@@ -7,10 +7,12 @@ matplotlib>=3.8; python_version >= "3.12"
 Cython~=3.0.7
 usearch
 scikit-image
-tetgen
+tetgen<0.7.0; python_version < "3.10"
+tetgen<0.8.0; python_version >= "3.10" and python_version < "3.12"
+tetgen>=0.8.0; python_version >= "3.12"
 trimesh[all]
 meshio
-open3d
+open3d; python_version < "3.13"
 pyvista>=0.44.2
 scikit-learn
 tqdm
@@ -18,3 +20,6 @@ pymeshfix==0.17.0
 numexpr
 pyvistaqt>=0.11.0
 pyside6>=6.4.0
+vtk
+psutil>=5.9.0
+sentry-sdk>=1.0

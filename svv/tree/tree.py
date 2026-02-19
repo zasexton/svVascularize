@@ -27,7 +27,7 @@ class Tree(object):
         *,
         parameters: Optional[TreeParameters] = None,
         unit_system: Optional[UnitSystem] = None,
-        preallocation_step: int = int(4e6),
+        preallocation_step: int = int(1e5),
     ):
         """
         The Tree class defines a branching tree structure
@@ -56,6 +56,8 @@ class Tree(object):
         self.preallocation_step = int(preallocation_step)
         self.preallocate = TreeData((self.preallocation_step, 31))
         self.segment_count = 0
+        self._idx_cache = []
+        self._col21_cache = []
         #self.preallocate_connectivity = (np.ones((self.preallocation_step, 3)) * -1).astype(int)
         self.preallocate_midpoints = np.zeros((self.preallocation_step, 3))
         self.times = {'vessels':[],
@@ -87,6 +89,57 @@ class Tree(object):
                       'chunk_4_3':[],
                       'chunk_5':[],
                       'all':[]}
+
+    def ensure_preallocation(self, required_rows: int) -> None:
+        """
+        Ensure that growth preallocation buffers can hold `required_rows` rows.
+
+        Tree growth writes into `self.preallocate` and `self.preallocate_midpoints`
+        using direct indexing. Historically the default preallocation was very
+        large, which could lead to multi‑GB allocations for multi‑tree forests.
+        This helper allows smaller initial buffers while still supporting
+        arbitrarily large trees by resizing on demand.
+        """
+        try:
+            required = int(required_rows)
+        except Exception:
+            return
+        if required <= 0:
+            return
+
+        current = int(getattr(self.preallocate, "shape", (0,))[0]) or 0
+        if required <= current:
+            return
+
+        new_size = max(required, max(1, current * 2))
+
+        new_preallocate = TreeData((new_size, self.preallocate.shape[1]))
+        if current:
+            new_preallocate[:current, :] = self.preallocate[:current, :]
+        self.preallocate = new_preallocate
+
+        new_midpoints = np.zeros((new_size, 3))
+        old_midpoints = int(getattr(self.preallocate_midpoints, "shape", (0,))[0]) or 0
+        if old_midpoints:
+            new_midpoints[:old_midpoints, :] = self.preallocate_midpoints[:old_midpoints, :]
+        self.preallocate_midpoints = new_midpoints
+
+        self.preallocation_step = int(new_size)
+
+        # Refresh views that commonly point into the preallocated buffers.
+        try:
+            n_rows = int(getattr(self.data, "shape", (0,))[0]) or 0
+        except Exception:
+            n_rows = 0
+        if n_rows:
+            self.data = self.preallocate[:n_rows, :]
+
+        midpoints = getattr(self, "midpoints", None)
+        if isinstance(midpoints, np.ndarray):
+            if midpoints.ndim == 2 and midpoints.shape[1] == 3:
+                self.midpoints = self.preallocate_midpoints[:midpoints.shape[0], :]
+            elif midpoints.ndim == 1 and midpoints.shape[0] == 3:
+                self.midpoints = self.preallocate_midpoints[0, :]
 
     def set_domain(self, domain, convexity_tolerance=1e-2):
         """
@@ -141,14 +194,20 @@ class Tree(object):
         else:
             raise ValueError("Too many arguments.")
         inplace = kwargs.pop('inplace', True)
+        build_indices = kwargs.pop('build_indices', True)
         if not isinstance(kwargs.get('direction', None), type(None)):
             self.clamped_root = True
         if self.physical_clearance > 0.0:
             kwargs['interior_range'] = [-1.0, 0.0-self.domain_clearance]
         root, root_map = set_root(self, **kwargs)
+        midpoint = ((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3)
         if inplace:
             self.data = root
             self.preallocate[0, :] = root
+            if len(self._idx_cache) == 0:
+                self._idx_cache.append(0)
+            if len(self._col21_cache) == 0:
+                self._col21_cache.append(21)
             #self.data_copy = self.preallocate[:3, :]
             self.connectivity = np.nan_to_num(root[:, 15:18], nan=-1.0).astype(int).reshape(1, 3)
             #self.preallocate_connectivity[0, :] = self.connectivity
@@ -161,9 +220,14 @@ class Tree(object):
             #self.c_vessel_map = build_c_vessel_map(root_map)
             self.vessel_map_copy = deepcopy(self.vessel_map)
             self.n_terminals = 1
-            self.kdtm = KDTreeManager(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
-            self.hnsw_tree = USearchTree(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3).astype(np.float32))
-            self.hnsw_tree_id = id(self.hnsw_tree)
+            if build_indices:
+                self.kdtm = KDTreeManager(midpoint)
+                self.hnsw_tree = USearchTree(midpoint.astype(np.float32))
+                self.hnsw_tree_id = id(self.hnsw_tree)
+            else:
+                self.kdtm = None
+                self.hnsw_tree = None
+                self.hnsw_tree_id = None
             self.probability = np.array(self.domain.mesh.cell_data['probability'])
             self.max_distal_node = 1
             self.tree_scale = np.pi * root[0, 21]**self.parameters.radius_exponent*root[0, 20]**self.parameters.length_exponent
@@ -172,9 +236,14 @@ class Tree(object):
             #self.rtree.insert(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
         else:
             connectivity = np.nan_to_num(root[:, 15:18], nan=-1.0).astype(int).reshape(1, 3)
-            kdtm = KDTreeManager(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3))
-            hnsw_tree = USearchTree(((root[:, 0:3] + root[:, 3:6]) / 2).reshape(1, 3).astype(np.float32))
-            hnsw_tree_id = id(hnsw_tree)
+            if build_indices:
+                kdtm = KDTreeManager(midpoint)
+                hnsw_tree = USearchTree(midpoint.astype(np.float32))
+                hnsw_tree_id = id(hnsw_tree)
+            else:
+                kdtm = None
+                hnsw_tree = None
+                hnsw_tree_id = None
             probability = np.array(self.domain.mesh.cell_data['probability'])
             tree_scale = np.pi * root[0, 21] ** self.parameters.radius_exponent * root[
                 0, 20] ** self.parameters.length_exponent
@@ -208,9 +277,18 @@ class Tree(object):
             #end_5 = perf_counter()
             #self.times['chunk_5'].append(end_5-start_5)
             start_chunk_4_0 = perf_counter()
+            required_rows = int(self.segment_count) + 2
+            try:
+                required_rows = max(required_rows, int(np.max(change_i)) + 1)
+            except Exception:
+                pass
+            self.ensure_preallocation(required_rows)
             #new_data = np.vstack([self.data, added_vessels[0], added_vessels[1]])
             self.preallocate[self.segment_count,:] = added_vessels[0]
             self.preallocate[self.segment_count+1,:] = added_vessels[1]
+            next_idxs = [len(self._idx_cache), len(self._idx_cache) + 1]
+            self._idx_cache.extend(next_idxs)
+            self._col21_cache.extend([21,21])
             end_chunk_4_0 = perf_counter()
             self.times['chunk_4_0'].append(end_chunk_4_0 - start_chunk_4_0)
             start_chunk_4_1 = perf_counter()

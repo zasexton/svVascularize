@@ -9,13 +9,15 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDockWidget, QStatusBar,
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem, QTabWidget, QToolBar,
     QPlainTextEdit, QProgressBar, QProgressDialog, QFrame, QDialog, QFormLayout,
-    QDialogButtonBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QComboBox
+    QDialogButtonBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QComboBox,
+    QColorDialog, QMenu
 )
 from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QUrl
 from PySide6.QtGui import QAction, QKeySequence, QDesktopServices
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 import threading
+from typing import Optional
 from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.point_selector import PointSelectorWidget
 from svv.visualize.gui.parameter_panel import ParameterPanel
@@ -169,6 +171,8 @@ class ObjectBrowserWidget(QTreeWidget):
 
         self.setHeaderLabels(["Model Tree"])
         self.setAlternatingRowColors(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
         # Root items
         self.domain_item = None
@@ -248,6 +252,69 @@ class ObjectBrowserWidget(QTreeWidget):
         elif kind == "tree":
             mode, net_idx, tree_idx = data[1], data[2], data[3]
             vtk_widget.set_tree_visibility(mode, net_idx, tree_idx, checked)
+
+    def _show_context_menu(self, pos):
+        """Show a context menu for the clicked item."""
+        item = self.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(0, Qt.UserRole)
+        if not data or not isinstance(data, tuple):
+            return
+        kind = data[0]
+        if kind not in ("tree", "network"):
+            return
+
+        menu = QMenu(self)
+        color_action = menu.addAction("Change Color...")
+        action = menu.exec_(self.viewport().mapToGlobal(pos))
+        if action == color_action:
+            self._change_item_color(item, data)
+
+    @staticmethod
+    def _stored_color_to_qcolor(stored):
+        """Convert a stored color (name string or RGB tuple) to a QColor."""
+        from PySide6.QtGui import QColor
+        if isinstance(stored, tuple):
+            return QColor.fromRgbF(*stored[:3])
+        if isinstance(stored, str):
+            c = QColor(stored)
+            if c.isValid():
+                return c
+        return QColor(Qt.red)
+
+    def _change_item_color(self, item, data):
+        """Open a color dialog and apply the chosen color to the tree/network."""
+        vtk_widget = getattr(self.main_window, 'vtk_widget', None)
+        if not vtk_widget:
+            return
+
+        kind = data[0]
+        initial_color = self._stored_color_to_qcolor(None)
+
+        if kind == "tree":
+            mode, net_idx, tree_idx = data[1], data[2], data[3]
+            group_key = ("single", tree_idx) if mode == "single" else ("forest", net_idx, tree_idx)
+            stored = vtk_widget.tree_group_colors.get(group_key)
+            if stored is not None:
+                initial_color = self._stored_color_to_qcolor(stored)
+        elif kind == "network":
+            net_idx = data[1]
+            for key, col in vtk_widget.tree_group_colors.items():
+                if isinstance(key, tuple) and len(key) >= 3 and key[0] == "forest" and key[1] == net_idx:
+                    initial_color = self._stored_color_to_qcolor(col)
+                    break
+
+        chosen = QColorDialog.getColor(initial_color, self, "Choose Tree Color")
+        if not chosen.isValid():
+            return
+
+        rgb = (chosen.redF(), chosen.greenF(), chosen.blueF())
+
+        if kind == "tree":
+            vtk_widget.set_tree_color(group_key, rgb)
+        elif kind == "network":
+            vtk_widget.set_network_color(net_idx, rgb)
 
     def add_point(self, point_id, point_data):
         """Add a point to the tree."""
@@ -735,8 +802,8 @@ class VascularizeGUI(QMainWindow):
         export_solid_action.triggered.connect(self.export_solids_dialog)
         fabricate_menu.addAction(export_solid_action)
 
-        export_splines_action = QAction("Export Splines (Connected Forest)...", self)
-        export_splines_action.setStatusTip("Export B-spline centerlines for a connected forest to a text file")
+        export_splines_action = QAction("Export Splines...", self)
+        export_splines_action.setStatusTip("Export B-spline centerline samples for the current tree or forest")
         export_splines_action.triggered.connect(self.export_splines_dialog)
         fabricate_menu.addAction(export_splines_action)
 
@@ -1297,7 +1364,142 @@ class VascularizeGUI(QMainWindow):
                             pass
                 else:
                     # Forest or other object types: ignore watertight flag
-                    obj.export_solid(outdir=out_dir, shell_thickness=shell_thickness)
+                    from svv.forest.forest import Forest as _ForestType
+                    if isinstance(obj, _ForestType):
+                        import numpy as np
+                        import pyvista as pv
+
+                        def _build_independent_network_solid(net_idx: int, tree_idxs: Optional[list[int]]):
+                            solids = []
+
+                            def add_segment(p0, p1, radius):
+                                p0 = np.asarray(p0, dtype=float).reshape(-1)[:3]
+                                p1 = np.asarray(p1, dtype=float).reshape(-1)[:3]
+                                direction = p1 - p0
+                                length = float(np.linalg.norm(direction))
+                                if not np.isfinite(length) or length <= 0.0:
+                                    return
+                                radius = float(radius)
+                                if not np.isfinite(radius) or radius <= 0.0:
+                                    return
+                                direction = direction / length
+                                center = (p0 + p1) / 2.0
+                                solids.append(pv.Cylinder(center=center, direction=direction, radius=radius, height=length))
+
+                            if tree_idxs:
+                                include_trees = [t for t in tree_idxs if 0 <= t < len(obj.networks[net_idx])]
+                            else:
+                                include_trees = list(range(len(obj.networks[net_idx])))
+
+                            for tree_idx in include_trees:
+                                data = np.asarray(obj.networks[net_idx][tree_idx].data)
+                                if data.ndim != 2 or data.shape[0] == 0 or data.shape[1] < 22:
+                                    continue
+                                for row in data:
+                                    add_segment(row[0:3], row[3:6], row[21])
+
+                            if not solids:
+                                return None
+                            return pv.merge(solids)
+
+                        # Respect GUI visibility toggles: export only networks that are currently checked.
+                        selection: dict[int, list[int]] = {}
+                        saw_network_items = False
+                        browser = getattr(self, "object_browser", None)
+                        forests_item = getattr(browser, "forests_item", None) if browser is not None else None
+                        if forests_item is not None:
+                            try:
+                                for i in range(forests_item.childCount()):
+                                    net_item = forests_item.child(i)
+                                    data = net_item.data(0, Qt.UserRole)
+                                    if not data or not isinstance(data, tuple) or data[0] != "network":
+                                        continue
+                                    saw_network_items = True
+                                    net_idx = int(data[1])
+                                    if net_item.checkState(0) != Qt.Checked:
+                                        continue
+
+                                    # Tree selection is optional: when no trees are checked,
+                                    # we export the whole network.
+                                    tree_idxs: list[int] = []
+                                    for j in range(net_item.childCount()):
+                                        t_item = net_item.child(j)
+                                        t_data = t_item.data(0, Qt.UserRole)
+                                        if (
+                                            not t_data
+                                            or not isinstance(t_data, tuple)
+                                            or t_data[0] != "tree"
+                                            or t_data[1] != "forest"
+                                        ):
+                                            continue
+                                        tree_idx = int(t_data[3])
+                                        if t_item.checkState(0) == Qt.Checked:
+                                            tree_idxs.append(tree_idx)
+                                    selection[net_idx] = sorted(set(tree_idxs))
+                            except Exception:
+                                selection = {}
+                                saw_network_items = False
+
+                        # If we couldn't read GUI state, export all networks.
+                        if not saw_network_items:
+                            selection = {i: [] for i in range(int(getattr(obj, "n_networks", 0) or 0))}
+
+                        if not selection:
+                            QMessageBox.information(
+                                self,
+                                "No Visible Networks",
+                                "No visible networks are selected for export.\n\n"
+                                "Enable one or more Network checkboxes in the Model Tree and try again."
+                            )
+                            return
+
+                        connections = getattr(obj, "connections", None)
+                        tree_connections = getattr(connections, "tree_connections", None) if connections is not None else None
+                        has_connected = (
+                            tree_connections is not None
+                            and isinstance(tree_connections, list)
+                            and len(tree_connections) == obj.n_networks
+                        )
+
+                        exported_any = False
+                        for net_idx, tree_idxs in sorted(selection.items()):
+                            if net_idx < 0 or net_idx >= obj.n_networks:
+                                continue
+
+                            net_dir = os.path.join(out_dir, f"network_{net_idx}")
+                            os.makedirs(net_dir, exist_ok=True)
+
+                            model = None
+                            name = f"network_{net_idx}_mesh.vtp"
+                            if has_connected:
+                                tc = tree_connections[net_idx]
+                                if tc is not None:
+                                    model = tc.build_merged_solid(
+                                        tree_indices=(tree_idxs if tree_idxs else None),
+                                        include_connections=True,
+                                    )
+                                    name = f"network_{net_idx}_connected_mesh.vtp"
+                            if model is None:
+                                model = _build_independent_network_solid(net_idx, tree_idxs)
+
+                            if model is None:
+                                continue
+                            try:
+                                model.save(os.path.join(net_dir, name))
+                                exported_any = True
+                            except Exception:
+                                pass
+
+                        if not exported_any:
+                            QMessageBox.information(
+                                self,
+                                "Export Solids",
+                                "No solids were exported.\n\n"
+                                "Ensure one or more networks are visible and try again."
+                            )
+                            return
+                    else:
+                        obj.export_solid(outdir=out_dir, shell_thickness=shell_thickness)
             else:
                 raise ValueError("Selected object does not support solid export.")
             self.update_status(f"Solids exported to {out_dir}")
@@ -1616,31 +1818,21 @@ class VascularizeGUI(QMainWindow):
 
     def export_splines_dialog(self):
         """
-        Export spline samples for a connected Forest to a text file.
+        Export spline samples to a text file.
 
-        Uses svv.forest.export.export_spline.write_splines underneath. This
-        requires a Forest with non-None `connections`.
+        - Tree: exports per-branch spline samples (tree format)
+        - Forest:
+          - connected: exports connected-network spline samples (network format)
+          - unconnected: exports per-tree spline samples (tree format)
         """
         obj = self._require_synthetic_object()
         if obj is None:
             return
 
-        # Only connected forests are supported
+        from svv.tree.tree import Tree as _TreeType
         from svv.forest.forest import Forest as _ForestType
-        from svv.forest.export.export_spline import write_splines, export_spline
-        if not isinstance(obj, _ForestType) or getattr(obj, "connections", None) is None:
-            QMessageBox.warning(
-                self,
-                "Splines Not Available",
-                "Spline export is only available for connected Forest objects.\n\n"
-                "Generate a forest and use the Connect Forest option first."
-            )
-            self._record_telemetry(
-                message="Spline export requested without a connected Forest",
-                level="warning",
-                action="export_splines_unconnected",
-            )
-            return
+        is_tree = isinstance(obj, _TreeType)
+        is_forest = isinstance(obj, _ForestType)
 
         # Options dialog
         dlg = QDialog(self)
@@ -1683,34 +1875,110 @@ class VascularizeGUI(QMainWindow):
             return
 
         try:
-            # export_spline operates on TreeConnection objects from Forest.connections.tree_connections
-            # It returns: (interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals)
-            all_points = []
-            all_radii = []
-            for tc in obj.connections.tree_connections:
-                _, _, _, net_points, net_radii, _ = export_spline(tc)
-                all_points.extend(net_points)
-                all_radii.extend(net_radii)
+            from pathlib import Path as _Path
 
-            # Temporarily change working directory to target location for write_splines
-            cwd = os.getcwd()
-            target_dir = os.path.dirname(file_path) or cwd
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            try:
-                os.chdir(target_dir)
-                # write_splines writes 'network_{i}_b_splines.txt' in cwd; we adapt
-                write_splines(all_points, all_radii,
-                              spline_sample_points=spline_sample_points,
-                              seperate=seperate,
-                              write_splines=True)
-                # If only one network, rename the default file to requested name
-                default_path = os.path.join(target_dir, "network_0_b_splines.txt")
-                if os.path.exists(default_path):
-                    os.replace(default_path, file_path)
-            finally:
-                os.chdir(cwd)
+            import numpy as np
+            from scipy.interpolate import splev
+            from svv.tree.export.write_splines import get_interpolated_sv_data
 
-            self.update_status(f"Splines exported to {file_path}")
+            out_path = _Path(file_path)
+            if not out_path.suffix:
+                out_path = out_path.with_suffix(".txt")
+
+            def _write_tree_splines(tree: _TreeType, dst: _Path) -> None:
+                if getattr(tree, "data", None) is None:
+                    raise ValueError("Tree has no data to export.")
+                *_, interp_xyzr = get_interpolated_sv_data(tree.data)
+                if not interp_xyzr:
+                    raise ValueError("Tree has no spline branches to export.")
+                t = np.linspace(0, 1, num=spline_sample_points)
+                with dst.open("w", encoding="utf-8") as spline_file:
+                    for vessel in range(len(interp_xyzr)):
+                        spline_file.write(f"Vessel: {vessel}, Number of Points: {spline_sample_points}\n\n")
+                        data = splev(t, interp_xyzr[vessel][0])
+                        for k in range(spline_sample_points):
+                            if seperate:
+                                label = 1 if k > spline_sample_points // 2 else 0
+                                spline_file.write(
+                                    f"{data[0][k]}, {data[1][k]}, {data[2][k]}, {data[3][k]}, {label}\n"
+                                )
+                            else:
+                                spline_file.write(
+                                    f"{data[0][k]}, {data[1][k]}, {data[2][k]}, {data[3][k]}\n"
+                                )
+                        spline_file.write("\n")
+
+            if is_tree:
+                _write_tree_splines(obj, out_path)
+                self.update_status(f"Tree splines exported to {out_path}")
+                return
+
+            if is_forest and getattr(obj, "connections", None) is not None:
+                from svv.forest.export.export_spline import write_splines, export_spline
+
+                # export_spline operates on TreeConnection objects from Forest.connections.tree_connections
+                # It returns: (interp_xyz, interp_radii, interp_normals, all_points, all_radii, all_normals)
+                all_points = []
+                all_radii = []
+                for tc in obj.connections.tree_connections:
+                    _, _, _, net_points, net_radii, _ = export_spline(tc)
+                    all_points.extend(net_points)
+                    all_radii.extend(net_radii)
+
+                # Temporarily change working directory to target location for write_splines
+                cwd = os.getcwd()
+                target_dir = str(out_path.parent) if str(out_path.parent) else cwd
+                try:
+                    os.chdir(target_dir)
+                    # write_splines writes 'network_{i}_b_splines.txt' in cwd; we adapt
+                    write_splines(
+                        all_points,
+                        all_radii,
+                        spline_sample_points=spline_sample_points,
+                        seperate=seperate,
+                        write_splines=True,
+                    )
+                    default_path = os.path.join(target_dir, "network_0_b_splines.txt")
+                    if os.path.exists(default_path):
+                        os.replace(default_path, str(out_path))
+                finally:
+                    os.chdir(cwd)
+
+                self.update_status(f"Connected forest splines exported to {out_path}")
+                return
+
+            if is_forest:
+                # Forest without connections: export each Tree independently using the tree spline format.
+                trees = []
+                for net_idx, network in enumerate(getattr(obj, "networks", []) or []):
+                    for tree_idx, tree in enumerate(network):
+                        trees.append((net_idx, tree_idx, tree))
+                if not trees:
+                    raise ValueError("Forest contains no trees to export.")
+
+                if len(trees) == 1:
+                    _, _, tree = trees[0]
+                    _write_tree_splines(tree, out_path)
+                    self.update_status(f"Tree splines exported to {out_path}")
+                    return
+
+                stem = out_path.stem or "splines"
+                suffix = out_path.suffix or ".txt"
+                written = []
+                for net_idx, tree_idx, tree in trees:
+                    dst = out_path.with_name(f"{stem}_network{net_idx}_tree{tree_idx}{suffix}")
+                    _write_tree_splines(tree, dst)
+                    written.append(dst)
+
+                QMessageBox.information(
+                    self,
+                    "Splines Exported",
+                    f"Exported {len(written)} tree spline file(s) to:\n{out_path.parent}"
+                )
+                self.update_status(f"Exported {len(written)} tree spline file(s)")
+                return
+
+            raise ValueError("Unsupported object type for spline export.")
         except Exception as e:
             self._record_telemetry(e, action="export_splines")
             QMessageBox.critical(
@@ -1731,7 +1999,8 @@ class VascularizeGUI(QMainWindow):
             "© SimVascular"
         )
 
-    def _record_telemetry(self, exc=None, message: str | None = None, level: str = "error", traceback_str: str | None = None, **tags):
+    def _record_telemetry(self, exc=None, message: Optional[str] = None, level: str = "error",
+                          traceback_str: Optional[str] = None, **tags):
         """
         Send errors or warnings to telemetry without interrupting the GUI.
 
@@ -2046,8 +2315,8 @@ class VascularizeGUI(QMainWindow):
         event.accept()
 
     # ---- Background domain loading ----
-    def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Queue | None = None,
-                          build_resolution: int | None = None):
+    def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Optional[Queue] = None,
+                          build_resolution: Optional[int] = None):
         def report_progress(value, label=None):
             """Report progress value and optionally update the label text."""
             if progress_queue is not None:
