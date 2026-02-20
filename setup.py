@@ -27,6 +27,7 @@ import multiprocessing
 num_cores = multiprocessing.cpu_count() // 2
 
 from setuptools.command.build_ext import build_ext
+from setuptools.command.install import install as _install
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 class BDistWheelCmd(_bdist_wheel):
@@ -36,6 +37,8 @@ class BDistWheelCmd(_bdist_wheel):
         # must not be tagged as a pure-Python `py3-none-any` wheel.
         if not ACCEL_COMPANION:
             self.root_is_pure = False
+            # Ensure wheel files are installed to "platlib" (not "purelib") so
+            # auditwheel can repair/tag the wheel. See InstallCmd below.
 
     def get_tag(self):
         python_tag, abi_tag, plat_tag = super().get_tag()
@@ -50,6 +53,17 @@ class BDistWheelCmd(_bdist_wheel):
         #build_mmg()
         self.run_command("build_ext")
         super().run()
+
+
+class InstallCmd(_install):
+    def finalize_options(self):
+        super().finalize_options()
+        # Force base `svv` wheel contents into platlib during bdist_wheel so
+        # auditwheel can repair/tag the wheel. Otherwise, wheel/setuptools
+        # will place our packaged ELF/Mach-O executables under `.data/purelib/`,
+        # which auditwheel rejects for binary wheels.
+        if not ACCEL_COMPANION:
+            self.install_lib = self.install_platlib
         
 def env_flag(name: str, default: bool = False) -> bool:
     val = os.environ.get(name)
@@ -720,6 +734,7 @@ setup_info = dict(
     cmdclass={
         'build_ext': DownloadAndBuildExt,
         'bdist_wheel': BDistWheelCmd,
+        'install': InstallCmd,
     },
 )
 

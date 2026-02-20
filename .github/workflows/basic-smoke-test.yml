@@ -79,26 +79,30 @@ jobs:
           python - << 'PY'
           import os
           import subprocess
+          import tempfile
+
+          # Ensure we validate the *installed* package, not the repo checkout
+          # (stdin execution puts the current working directory on sys.path).
+          os.chdir(tempfile.mkdtemp(prefix="svv-mmg-verify-"))
 
           from svv.utils.remeshing.mmg import get_mmg_exe
 
           for tool in ("mmg2d", "mmg3d", "mmgs"):
             exe = get_mmg_exe(tool)
-            print(f"{tool} -> {exe}")
+            print(f"{tool} -> {exe}", flush=True)
             if os.name != "nt" and not os.access(exe, os.X_OK):
               raise SystemExit(f"{exe} is not marked executable")
 
-          exe = get_mmg_exe("mmgs")
-          # MMG tools often return a non-zero code for help/usage (e.g. 2), so
-          # don't treat that as a failure; we only want to ensure the binary runs.
-          proc = subprocess.run(
-            [str(exe), "--help"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            check=False,
-          )
-          print("mmgs --help exit:", proc.returncode)
+            # MMG tools often return a non-zero code for help/usage (commonly 1 or 2),
+            # so don't treat that as a failure; we only want to ensure the binary runs.
+            proc = subprocess.run(
+              [str(exe), "-h"],
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+              timeout=10,
+              check=False,
+            )
+            print(f"{tool} -h exit: {proc.returncode}", flush=True)
           PY
 
       - name: Run basic smoke test

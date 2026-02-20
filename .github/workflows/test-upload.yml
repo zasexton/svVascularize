@@ -15,6 +15,9 @@ on:
 jobs:
   build_wheels_base:
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -68,19 +71,25 @@ jobs:
           wheel=$(ls dist/svv-*.whl | head -n 1)
           python -m pip install --no-deps "$wheel"
           python - <<'PY'
+          import os
           import subprocess
+          import tempfile
+
+          # Validate the installed wheel, not the repo checkout.
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
+
           from svv.utils.remeshing.mmg import get_mmg_exe
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
           proc = subprocess.run(
-            [str(exe), "--help"],
+            [str(exe), "-h"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
             check=False,
           )
-          print("mmgs --help exit:", proc.returncode)
+          print("mmgs -h exit:", proc.returncode)
           PY
 
       - name: Validate built wheel(s) (Windows)
@@ -93,19 +102,24 @@ jobs:
           wheel=$(ls dist/svv-*.whl | head -n 1)
           python -m pip install --no-deps "$wheel"
           python - <<'PY'
+          import os
           import subprocess
+          import tempfile
+
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
+
           from svv.utils.remeshing.mmg import get_mmg_exe
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
           proc = subprocess.run(
-            [str(exe), "--help"],
+            [str(exe), "-h"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
             check=False,
           )
-          print("mmgs --help exit:", proc.returncode)
+          print("mmgs -h exit:", proc.returncode)
           PY
 
       - name: Validate built wheel(s) (Linux x86_64 + aarch64)
@@ -121,19 +135,24 @@ jobs:
           wheel_x86=$(ls dist/svv-*x86_64.whl | head -n 1)
           python -m pip install --no-deps "$wheel_x86"
           python - <<'PY'
+          import os
           import subprocess
+          import tempfile
+
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
+
           from svv.utils.remeshing.mmg import get_mmg_exe
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
           proc = subprocess.run(
-            [str(exe), "--help"],
+            [str(exe), "-h"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
             check=False,
           )
-          print("mmgs --help exit:", proc.returncode)
+          print("mmgs -h exit:", proc.returncode)
           PY
           deactivate
 
@@ -145,7 +164,7 @@ jobs:
             set -euo pipefail; \
             /opt/python/cp39-cp39/bin/python -m pip install -U pip; \
             /opt/python/cp39-cp39/bin/python -m pip install --no-deps /dist/$wheel_arm_base; \
-            /opt/python/cp39-cp39/bin/python - <<'PY'\nimport subprocess\nfrom svv.utils.remeshing.mmg import get_mmg_exe\nexe = get_mmg_exe('mmgs')\nprint('MMG selected:', exe)\nproc = subprocess.run([str(exe), '--help'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)\nprint('mmgs --help exit:', proc.returncode)\nPY"
+            /opt/python/cp39-cp39/bin/python - <<'PY'\nimport os\nimport subprocess\nimport tempfile\n\nos.chdir(tempfile.mkdtemp(prefix='svv-wheel-validate-'))\n\nfrom svv.utils.remeshing.mmg import get_mmg_exe\n\nexe = get_mmg_exe('mmgs')\nprint('MMG selected:', exe)\nproc = subprocess.run([str(exe), '-h'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)\nprint('mmgs -h exit:', proc.returncode)\nPY"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
