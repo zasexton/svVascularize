@@ -73,7 +73,15 @@ jobs:
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
-          subprocess.check_call([str(exe), "-h"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          # MMG may return non-zero for help/usage; only validate it executes.
+          proc = subprocess.run(
+            [str(exe), "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs --help exit:", proc.returncode)
           PY
 
       - name: Validate built wheel(s) (Windows)
@@ -91,7 +99,14 @@ jobs:
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
-          subprocess.check_call([str(exe), "-h"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          proc = subprocess.run(
+            [str(exe), "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs --help exit:", proc.returncode)
           PY
 
       - name: Validate built wheel(s) (Linux x86_64 + aarch64)
@@ -112,7 +127,14 @@ jobs:
 
           exe = get_mmg_exe("mmgs")
           print("MMG selected:", exe)
-          subprocess.check_call([str(exe), "-h"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          proc = subprocess.run(
+            [str(exe), "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs --help exit:", proc.returncode)
           PY
           deactivate
 
@@ -124,7 +146,7 @@ jobs:
             set -euo pipefail; \
             /opt/python/cp39-cp39/bin/python -m pip install -U pip; \
             /opt/python/cp39-cp39/bin/python -m pip install --no-deps /dist/$wheel_arm_base; \
-            /opt/python/cp39-cp39/bin/python - <<'PY'\nimport subprocess\nfrom svv.utils.remeshing.mmg import get_mmg_exe\nexe = get_mmg_exe('mmgs')\nprint('MMG selected:', exe)\nsubprocess.check_call([str(exe), '-h'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\nPY"
+            /opt/python/cp39-cp39/bin/python - <<'PY'\nimport subprocess\nfrom svv.utils.remeshing.mmg import get_mmg_exe\nexe = get_mmg_exe('mmgs')\nprint('MMG selected:', exe)\nproc = subprocess.run([str(exe), '--help'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)\nprint('mmgs --help exit:', proc.returncode)\nPY"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

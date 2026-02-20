@@ -77,6 +77,7 @@ jobs:
       - name: Verify MMG executables are installed
         run: |
           python - << 'PY'
+          import os
           import subprocess
 
           from svv.utils.remeshing.mmg import get_mmg_exe
@@ -84,9 +85,20 @@ jobs:
           for tool in ("mmg2d", "mmg3d", "mmgs"):
             exe = get_mmg_exe(tool)
             print(f"{tool} -> {exe}")
+            if os.name != "nt" and not os.access(exe, os.X_OK):
+              raise SystemExit(f"{exe} is not marked executable")
 
           exe = get_mmg_exe("mmgs")
-          subprocess.check_call([str(exe), "-h"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          # MMG tools often return a non-zero code for help/usage (e.g. 2), so
+          # don't treat that as a failure; we only want to ensure the binary runs.
+          proc = subprocess.run(
+            [str(exe), "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs --help exit:", proc.returncode)
           PY
 
       - name: Run basic smoke test
