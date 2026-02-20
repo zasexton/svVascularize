@@ -1,22 +1,16 @@
 # Remeshing utility based on MMG executables
 
 import os
-import stat
-import platform
 import subprocess
-import errno
 import pyvista as pv
 import pymeshfix
 import meshio
 import numpy
 import numpy as np
 from copy import deepcopy
-import svv
 from typing import Sequence, Optional
 
-filepath = os.path.abspath(__file__)
-dirpath = os.path.dirname(filepath)
-modulepath = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
+from .mmg import run_mmg
 
 def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, verbosity=1,
                    hmax=None, hmin=None, hsiz=None, noinsert=None, nomove=None, nosurf=True,
@@ -235,67 +229,41 @@ def remesh_surface_2d(boundary, autofix=False, ar=None, hausd=None, hgrad=None, 
         mesh = meshio.Mesh(points, lines)
         meshio.write("tmp.mesh", mesh)
         boundary = [boundary]
-    if platform.system() == 'Windows':
-        if os.path.exists(modulepath + os.sep + "mmg2d_O3.exe"):
-            _EXE_ = modulepath + os.sep + "mmg2d_O3.exe"
-        else:
-            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg2d_O3.exe"
-    elif platform.system() == "Linux":
-        if os.path.exists(modulepath + os.sep + "mmg2d_O3"):
-            _EXE_ = modulepath + os.sep + "mmg2d_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg2d_O3"
-    elif platform.system() == "Darwin":
-        if os.path.exists(modulepath + os.sep + "mmg2d_O3"):
-            _EXE_ = modulepath + os.sep + "mmg2d_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg2d_O3"
-    else:
-        raise NotImplementedError("Operating system not supported.")
-    devnull = open(os.devnull, 'w')
-    executable_list = [_EXE_, "tmp.mesh"]
+    args = ["tmp.mesh"]
     if ar is not None:
-        executable_list.extend(["-ar", str(ar)])
+        args.extend(["-ar", str(ar)])
     if hausd is not None:
-        executable_list.extend(["-hausd", str(hausd)])
+        args.extend(["-hausd", str(hausd)])
     if hgrad is not None:
-        executable_list.extend(["-hgrad", str(hgrad)])
+        args.extend(["-hgrad", str(hgrad)])
     if verbosity is not None:
-        executable_list.extend(["-v", str(verbosity)])
+        args.extend(["-v", str(verbosity)])
     if hmax is not None:
-        executable_list.extend(["-hmax", str(hmax)])
+        args.extend(["-hmax", str(hmax)])
     if hmin is not None:
-        executable_list.extend(["-hmin", str(hmin)])
+        args.extend(["-hmin", str(hmin)])
     if hsiz is not None:
-        executable_list.extend(["-hsiz", str(hsiz)])
+        args.extend(["-hsiz", str(hsiz)])
     if noinsert is not None:
-        executable_list.extend(["-noinsert"])
+        args.extend(["-noinsert"])
     if nomove is not None:
-        executable_list.extend(["-nomove"])
+        args.extend(["-nomove"])
     if nosurf is not None:
-        executable_list.extend(["-nosurf"])
+        args.extend(["-nosurf"])
     if noswap is not None:
-        executable_list.extend(["-noswap"])
+        args.extend(["-noswap"])
     if nr is not None:
-        executable_list.extend(["-nr"])
+        args.extend(["-nr"])
     if optim is not None:
-        executable_list.extend(["-optim", str(optim)])
+        args.extend(["-optim", str(optim)])
     if rn is not None:
-        executable_list.extend(["-rn", str(rn)])
+        args.extend(["-rn", str(rn)])
     if nsd is not None:
-        executable_list.extend(["-nsd", str(nsd)])
+        args.extend(["-nsd", str(nsd)])
     if verbosity == 0:
-        try:
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
+        run_mmg("mmg2d", args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        try:
-            subprocess.check_call(executable_list)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list)
+        run_mmg("mmg2d", args)
     clean_medit("tmp.o.mesh")
     remesh_data = meshio.read("tmp.o.mesh")
     vertices = remesh_data.points
@@ -441,25 +409,8 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
     pv.save_meshio("tmp.mesh", _mesh_)
     if not isinstance(required_triangles, type(None)):
         add_required("tmp.mesh", required_triangles)
-    if platform.system() == 'Windows':
-        if os.path.exists(modulepath + os.sep + "mmgs_O3.exe"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3.exe"
-        else:
-            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmgs_O3.exe"
-    elif platform.system() == "Linux":
-        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmgs_O3"
-    elif platform.system() == "Darwin":
-        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmgs_O3"
-    else:
-        raise NotImplementedError("Operating system not supported.")
-    devnull = open(os.devnull, 'w')
-    executable_list = [_EXE_, "tmp.mesh"]
+
+    args = ["tmp.mesh"]
     # If caller prepared a sizing function file in the working directory,
     # detect and pass it through to MMG.
     sol_path = None
@@ -468,98 +419,40 @@ def remesh_surface(pv_polydata_object, autofix=True, ar=None, hausd=None, hgrad=
             sol_path = "in.sol"
     except Exception:
         sol_path = None
-    if ar is not None:
-        executable_list.extend(["-ar", str(ar)])
-    if hausd is not None:
-        executable_list.extend(["-hausd", str(hausd)])
-    if hgrad is not None:
-        executable_list.extend(["-hgrad", str(hgrad)])
-    if verbosity is not None:
-        executable_list.extend(["-v", str(verbosity)])
-    if hmax is not None:
-        executable_list.extend(["-hmax", str(hmax)])
-    if hmin is not None:
-        executable_list.extend(["-hmin", str(hmin)])
-    if hsiz is not None:
-        executable_list.extend(["-hsiz", str(hsiz)])
-    if noinsert is not None:
-        executable_list.extend(["-noinsert"])
-    if nomove is not None:
-        executable_list.extend(["-nomove"])
-    if nosurf is not None:
-        executable_list.extend(["-nosurf"])
-    if noswap is not None:
-        executable_list.extend(["-noswap"])
-    if nr is not None:
-        executable_list.extend(["-nr"])
-    if optim:
-        executable_list.extend(["-optim"])
-    if rn is not None:
-        executable_list.extend(["-rn", str(rn)])
     if sol_path:
-        executable_list.extend(["-sol", sol_path])
+        args.extend(["-sol", sol_path])
+    if ar is not None:
+        args.extend(["-ar", str(ar)])
+    if hausd is not None:
+        args.extend(["-hausd", str(hausd)])
+    if hgrad is not None:
+        args.extend(["-hgrad", str(hgrad)])
+    if verbosity is not None:
+        args.extend(["-v", str(verbosity)])
+    if hmax is not None:
+        args.extend(["-hmax", str(hmax)])
+    if hmin is not None:
+        args.extend(["-hmin", str(hmin)])
+    if hsiz is not None:
+        args.extend(["-hsiz", str(hsiz)])
+    if noinsert is not None:
+        args.extend(["-noinsert"])
+    if nomove is not None:
+        args.extend(["-nomove"])
+    if nosurf is not None:
+        args.extend(["-nosurf"])
+    if noswap is not None:
+        args.extend(["-noswap"])
+    if nr is not None:
+        args.extend(["-nr"])
+    if optim:
+        args.extend(["-optim"])
+    if rn is not None:
+        args.extend(["-rn", str(rn)])
     if verbosity == 0:
-        try:
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except OSError as e:
-            # Exec format error means the bundled MMGS binary is not
-            # compatible with this platform (e.g., wrong architecture).
-            # Fall back to returning the input surface (optionally
-            # auto-fixed) so callers can still proceed.
-            if e.errno == errno.ENOEXEC:
-                devnull.close()
-                for fname in ("tmp.mesh", "tmp.o.sol", "tmp.o.mesh"):
-                    try:
-                        os.remove(fname)
-                    except FileNotFoundError:
-                        pass
-                    except Exception:
-                        pass
-                if sol_path and os.path.exists(sol_path):
-                    try:
-                        os.remove(sol_path)
-                    except Exception:
-                        pass
-                remeshed_surface = pv_polydata_object
-                if autofix:
-                    fix = pymeshfix.MeshFix(remeshed_surface)
-                    fix.repair(verbose=False)
-                    remeshed_surface = fix.mesh
-                return remeshed_surface
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except Exception:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
+        run_mmg("mmgs", args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        try:
-            subprocess.check_call(executable_list)
-        except OSError as e:
-            if e.errno == errno.ENOEXEC:
-                devnull.close()
-                for fname in ("tmp.mesh", "tmp.o.sol", "tmp.o.mesh"):
-                    try:
-                        os.remove(fname)
-                    except FileNotFoundError:
-                        pass
-                    except Exception:
-                        pass
-                if sol_path and os.path.exists(sol_path):
-                    try:
-                        os.remove(sol_path)
-                    except Exception:
-                        pass
-                remeshed_surface = pv_polydata_object
-                if autofix:
-                    fix = pymeshfix.MeshFix(remeshed_surface)
-                    fix.repair(verbose=True)
-                    remeshed_surface = fix.mesh
-                return remeshed_surface
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list)
-        except Exception:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list)
+        run_mmg("mmgs", args)
     clean_medit("tmp.o.mesh")
     remesh_data = meshio.read("tmp.o.mesh")
     vertices = remesh_data.points
@@ -671,65 +564,39 @@ def remesh_volume(pv_unstructured_mesh, auto=True, ar=None, hausd=None, hgrad=No
     >>> remeshed_volume = remesh_volume(volume_mesh, hmax=0.1)
     """
     pv.save_meshio("tmp.mesh", pv_unstructured_mesh)
-    if platform.system() == 'Windows':
-        if os.path.exists(modulepath + os.sep + "mmg3d_O3.exe"):
-            _EXE_ = modulepath + os.sep + "mmg3d_O3.exe"
-        else:
-            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmg3d_O3.exe"
-    elif platform.system() == "Linux":
-        if os.path.exists(modulepath + os.sep + "mmg3d_O3"):
-            _EXE_ = modulepath + os.sep + "mmg3d_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmg3d_O3"
-    elif platform.system() == "Darwin":
-        if os.path.exists(modulepath + os.sep + "mmg3d_O3"):
-            _EXE_ = modulepath + os.sep + "mmg3d_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmg3d_O3"
-    else:
-        raise NotImplementedError("Operating system not supported.")
-    devnull = open(os.devnull, 'w')
-    executable_list = [_EXE_, "tmp.mesh"]
+    args = ["tmp.mesh"]
     if ar is not None:
-        executable_list.extend(["-ar", str(ar)])
+        args.extend(["-ar", str(ar)])
     if hausd is not None:
-        executable_list.extend(["-hausd", str(hausd)])
+        args.extend(["-hausd", str(hausd)])
     if hgrad is not None:
-        executable_list.extend(["-hgrad", str(hgrad)])
+        args.extend(["-hgrad", str(hgrad)])
     if verbosity is not None:
-        executable_list.extend(["-v", str(verbosity)])
+        args.extend(["-v", str(verbosity)])
     if hmax is not None:
-        executable_list.extend(["-hmax", str(hmax)])
+        args.extend(["-hmax", str(hmax)])
     if hmin is not None:
-        executable_list.extend(["-hmin", str(hmin)])
+        args.extend(["-hmin", str(hmin)])
     if hsiz is not None:
-        executable_list.extend(["-hsiz", str(hsiz)])
+        args.extend(["-hsiz", str(hsiz)])
     if noinsert is not None:
-        executable_list.extend(["-noinsert"])
+        args.extend(["-noinsert"])
     if nomove is not None:
-        executable_list.extend(["-nomove"])
+        args.extend(["-nomove"])
     if nosurf is not None:
-        executable_list.extend(["-nosurf"])
+        args.extend(["-nosurf"])
     if noswap is not None:
-        executable_list.extend(["-noswap"])
+        args.extend(["-noswap"])
     if nr is not None:
-        executable_list.extend(["-nr"])
+        args.extend(["-nr"])
     if optim is not None:
-        executable_list.extend(["-optim", str(optim)])
+        args.extend(["-optim", str(optim)])
     if rn is not None:
-        executable_list.extend(["-rn", str(rn)])
+        args.extend(["-rn", str(rn)])
     if verbosity == 0:
-        try:
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
+        run_mmg("mmg3d", args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        try:
-            subprocess.check_call(executable_list)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list)
+        run_mmg("mmg3d", args)
     clean_medit("tmp.o.mesh")
     remeshed_data = meshio.read("tmp.o.mesh")
     vertices = remeshed_data.points
@@ -1024,65 +891,39 @@ def sphere_refinement(
     pv.save_meshio("tmp.mesh", out)
     if not isinstance(required_triangles, type(None)):
         add_required("tmp.mesh", required_triangles)
-    if platform.system() == 'Windows':
-        if os.path.exists(modulepath + os.sep + "mmgs_O3.exe"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3.exe"
-        else:
-            _EXE_ = dirpath+os.sep+"Windows"+os.sep+"mmgs_O3.exe"
-    elif platform.system() == "Linux":
-        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Linux"+os.sep+"mmgs_O3"
-    elif platform.system() == "Darwin":
-        if os.path.exists(modulepath + os.sep + "mmgs_O3"):
-            _EXE_ = modulepath + os.sep + "mmgs_O3"
-        else:
-            _EXE_ = dirpath+os.sep+"Mac"+os.sep+"mmgs_O3"
-    else:
-        raise NotImplementedError("Operating system not supported.")
-    devnull = open(os.devnull, 'w')
-    executable_list = [_EXE_, "tmp.mesh", "-sol", "in.sol"]
+    args = ["tmp.mesh", "-sol", "in.sol"]
     if ar is not None:
-        executable_list.extend(["-ar", str(ar)])
+        args.extend(["-ar", str(ar)])
     if hausd is not None:
-        executable_list.extend(["-hausd", str(hausd)])
+        args.extend(["-hausd", str(hausd)])
     if hgrad is not None:
-        executable_list.extend(["-hgrad", str(hgrad)])
+        args.extend(["-hgrad", str(hgrad)])
     if verbosity is not None:
-        executable_list.extend(["-v", str(verbosity)])
+        args.extend(["-v", str(verbosity)])
     if hmax is not None:
-        executable_list.extend(["-hmax", str(hmax)])
+        args.extend(["-hmax", str(hmax)])
     if hmin is not None:
-        executable_list.extend(["-hmin", str(hmin)])
+        args.extend(["-hmin", str(hmin)])
     if hsiz is not None:
-        executable_list.extend(["-hsiz", str(hsiz)])
+        args.extend(["-hsiz", str(hsiz)])
     if noinsert is not None:
-        executable_list.extend(["-noinsert"])
+        args.extend(["-noinsert"])
     if nomove is not None:
-        executable_list.extend(["-nomove"])
+        args.extend(["-nomove"])
     if nosurf is not None:
-        executable_list.extend(["-nosurf"])
+        args.extend(["-nosurf"])
     if noswap is not None:
-        executable_list.extend(["-noswap"])
+        args.extend(["-noswap"])
     if nr is not None:
-        executable_list.extend(["-nr"])
+        args.extend(["-nr"])
     if optim:
-        executable_list.extend(["-optim"])
+        args.extend(["-optim"])
     if rn is not None:
-        executable_list.extend(["-rn", str(rn)])
+        args.extend(["-rn", str(rn)])
     if verbosity == 0:
-        try:
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list, stdout=devnull, stderr=devnull)
+        run_mmg("mmgs", args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        try:
-            subprocess.check_call(executable_list)
-        except:
-            os.chmod(_EXE_, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-            subprocess.check_call(executable_list)
+        run_mmg("mmgs", args)
     clean_medit("tmp.o.mesh")
     remesh_data = meshio.read("tmp.o.mesh")
     vertices = remesh_data.points

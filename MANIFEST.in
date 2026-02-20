@@ -7,19 +7,15 @@ recursive-include svv/tree/utils *.pyx
 recursive-include svv/domain/routines *.pyx
 recursive-include svv/simulation/utils *.pyx
 
-# Include all remesher executables
-include svv/utils/remeshing/Linux/mmg2d_O3
-include svv/utils/remeshing/Linux/mmg3d_O3
-include svv/utils/remeshing/Linux/mmgs_O3
+# Include remesher executables (arch-aware layout)
+recursive-include svv/utils/remeshing/Linux/x86_64 *
+recursive-include svv/utils/remeshing/Linux/aarch64 *
+recursive-include svv/utils/remeshing/Mac/universal2 *
+recursive-include svv/utils/remeshing/Mac/x86_64 *
+recursive-include svv/utils/remeshing/Windows/x86_64 *
 
-include svv/utils/remeshing/Mac/mmg2d_O3
-include svv/utils/remeshing/Mac/mmg3d_O3
-include svv/utils/remeshing/Mac/mmgs_O3
+# Include locally-built tools (optional; used by some dev/CI flows)
 recursive-include svv/bin *
-
-include svv/utils/remeshing/Windows/mmg2d_O3.exe
-include svv/utils/remeshing/Windows/mmg3d_O3.exe
-include svv/utils/remeshing/Windows/mmgs_O3.exe
  
 # Include GUI assets (theme tokens, icons, etc.)
 recursive-include svv/visualize/gui *.json *.qss *.png *.svg

@@ -21,14 +21,6 @@ if sys.platform.startswith("linux"):
 # Never prompt for telemetry consent in CI.
 os.environ.setdefault("SVV_TELEMETRY_DISABLED", "1")
 
-import pyvista as pv
-
-from svv.domain.domain import Domain
-from svv.forest.forest import Forest
-from svv.tree.tree import Tree
-from svv.simulation.simulation import Simulation
-from svv.utils.remeshing.remesh import remesh_surface
-
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
@@ -118,7 +110,25 @@ def _smoke_gui(timeout_s: int = 45) -> None:
 
 
 def main() -> None:
+    import pyvista as pv
+
+    from svv.domain.domain import Domain
+    from svv.forest.forest import Forest
+    from svv.tree.tree import Tree
+    from svv.simulation.simulation import Simulation
+    from svv.utils.remeshing.mmg import get_mmg_candidates, get_mmg_exe
+    from svv.utils.remeshing.remesh import remesh_surface
+
     _log("SMOKE: starting")
+
+    # Log MMG selection candidates early so platform/arch mismatches are obvious.
+    for tool in ("mmg2d", "mmg3d", "mmgs"):
+        sel = get_mmg_candidates(tool)
+        _log(f"SMOKE: {tool}: os={sel.os_dir} arch={sel.arch}")
+        for p in sel.candidates:
+            _log(f"SMOKE: {tool}: candidate: {p}")
+        _log(f"SMOKE: {tool}: selected: {get_mmg_exe(tool)}")
+
     # Domain build (geometry + implicit function + tetrahedral mesh)
     _log("SMOKE: domain: create/solve/build")
     cube = Domain(pv.Cube().triangulate())
