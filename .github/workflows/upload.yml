@@ -13,35 +13,177 @@ on:
           - "false"
 
 jobs:
-  build_base_wheel:
-    # Build the pure-Python wheel once (no platform matrix needed)
-    runs-on: ubuntu-latest
+  build_wheels_base:
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest, windows-latest]
+    env:
+      # Base `svv` wheel: build once per platform (tagged py3-none-<plat>)
+      CIBW_BUILD: "cp39-*"
+      CIBW_ARCHS_LINUX: "x86_64 aarch64"
+      CIBW_ARCHS_MACOS: "universal2"
+      CIBW_ARCHS_WINDOWS: "AMD64"
+      CIBW_BUILD_VERBOSITY: 3
+      # Ensure a broad Linux compatibility baseline (glibc 2.17)
+      CIBW_MANYLINUX_X86_64: "manylinux2014"
+      CIBW_MANYLINUX_AARCH64: "manylinux2014"
+      # Build MMG v5.8.0 (Release, -O3) into the package layout before wheel build
+      CIBW_BEFORE_BUILD_LINUX: "python -m pip install -U pip setuptools wheel cmake && python .github/scripts/build_mmg.py --version 5.8.0 --jobs 2"
+      CIBW_BEFORE_BUILD_MACOS: "python -m pip install -U pip setuptools wheel cmake && python .github/scripts/build_mmg.py --version 5.8.0 --arch universal2 --jobs 2"
+      CIBW_BEFORE_BUILD_WINDOWS: "python -m pip install -U pip setuptools wheel cmake && python .github/scripts/build_mmg.py --version 5.8.0 --arch x86_64 --jobs 2"
+      # Enforce that the expected MMG executables exist at wheel-build time
+      CIBW_ENVIRONMENT_LINUX: "PIP_NO_CACHE_DIR=1 SVV_REQUIRE_MMG=1"
+      CIBW_ENVIRONMENT_WINDOWS: "PIP_NO_CACHE_DIR=1 SVV_REQUIRE_MMG=1"
+      CIBW_ENVIRONMENT_MACOS: "PIP_NO_CACHE_DIR=1 SVV_REQUIRE_MMG=1 SVV_MMG_ARCH=universal2 MACOSX_DEPLOYMENT_TARGET=11.0"
+
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: python -m pip install --upgrade pip && python -m pip install cibuildwheel
+
+      - name: Set up QEMU (Linux only)
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build wheels (svv)
+        run: cibuildwheel --output-dir dist
+
+      - name: Validate built wheel(s) (macOS)
+        if: runner.os == 'macOS'
         run: |
-          python -m pip install --upgrade pip && pip install build
+          set -euo pipefail
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip
+          wheel=$(ls dist/svv-*.whl | head -n 1)
+          python -m pip install --no-deps "$wheel"
+          python - <<'PY'
+          import os
+          import subprocess
+          import tempfile
 
-      - name: Build base wheel (pure-Python svv)
-        run: python -m build --wheel --outdir dist
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
 
-      - name: Upload base wheel artifact
+          from svv.utils.remeshing.mmg import get_mmg_exe
+
+          exe = get_mmg_exe("mmgs")
+          print("MMG selected:", exe)
+          # MMG may return non-zero for help/usage; only validate it executes.
+          proc = subprocess.run(
+            [str(exe), "-h"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs -h exit:", proc.returncode)
+          PY
+
+      - name: Validate built wheel(s) (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          source .venv/Scripts/activate
+          python -m pip install -U pip
+          wheel=$(ls dist/svv-*win_amd64.whl | head -n 1)
+          python -m pip install --no-deps "$wheel"
+          python - <<'PY'
+          import os
+          import subprocess
+          import tempfile
+
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
+
+          from svv.utils.remeshing.mmg import get_mmg_exe
+
+          exe = get_mmg_exe("mmgs")
+          print("MMG selected:", exe)
+          proc = subprocess.run(
+            [str(exe), "-h"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs -h exit:", proc.returncode)
+          PY
+
+      - name: Validate built wheel(s) (Linux x86_64 + aarch64)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          ls -la dist
+
+          # Validate native x86_64 wheel on the host runner
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip
+          wheel_x86=$(ls dist/svv-*x86_64.whl | head -n 1)
+          python -m pip install --no-deps "$wheel_x86"
+          python - <<'PY'
+          import os
+          import subprocess
+          import tempfile
+
+          os.chdir(tempfile.mkdtemp(prefix="svv-wheel-validate-"))
+
+          from svv.utils.remeshing.mmg import get_mmg_exe
+
+          exe = get_mmg_exe("mmgs")
+          print("MMG selected:", exe)
+          proc = subprocess.run(
+            [str(exe), "-h"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+          )
+          print("mmgs -h exit:", proc.returncode)
+          PY
+          deactivate
+
+          # Validate aarch64 wheel inside a manylinux2014_aarch64 container (QEMU)
+          wheel_arm=$(ls dist/svv-*aarch64.whl | head -n 1)
+          wheel_arm_base=$(basename "$wheel_arm")
+          echo "Validating ARM wheel: $wheel_arm"
+          docker run --rm --platform linux/arm64 -v "$PWD/dist:/dist" quay.io/pypa/manylinux2014_aarch64 /bin/bash -lc "\
+            set -euo pipefail; \
+            /opt/python/cp39-cp39/bin/python -m pip install -U pip; \
+            /opt/python/cp39-cp39/bin/python -m pip install --no-deps /dist/$wheel_arm_base; \
+            /opt/python/cp39-cp39/bin/python -c \"import os, subprocess, tempfile; os.chdir(tempfile.mkdtemp(prefix='svv-wheel-validate-')); from svv.utils.remeshing.mmg import get_mmg_exe; exe = get_mmg_exe('mmgs'); print('MMG selected:', exe); proc = subprocess.run([str(exe), '-h'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False); print('mmgs -h exit:', proc.returncode)\" \
+          "
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: base-wheel
-          path: dist/*.whl
+          name: cibw-wheels-base-${{ matrix.os }}
+          path: dist
 
   build_wheels_accelerated:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macOS-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     env:
       CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
       CIBW_ARCHS_LINUX: "x86_64 aarch64"
       CIBW_ARCHS_MACOS: "universal2"
+      CIBW_ARCHS_WINDOWS: "AMD64"
       CIBW_BUILD_VERBOSITY: 3
       # Install build deps before building each wheel (use python -m pip for Windows compatibility)
       CIBW_BEFORE_BUILD: "python -m pip install -U pip setuptools wheel cython numpy cmake"
@@ -71,7 +213,6 @@ jobs:
           path: dist
 
   build_sdist:
-    needs: [build_base_wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +230,7 @@ jobs:
           path: dist/*.tar.gz
 
   upload_pypi:
-    needs: [build_base_wheel, build_wheels_accelerated, build_sdist]
+    needs: [build_wheels_base, build_wheels_accelerated, build_sdist]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -108,7 +249,7 @@ jobs:
       - name: Upload base package (svv) to PyPI
         run: |
           set -euo pipefail
-          files=$(ls dist/svv-*.whl dist/svv-*.tar.gz 2>/dev/null | grep -v 'svv-accelerated' || true)
+          files=$(ls dist/svv-*.whl dist/svv-*.tar.gz 2>/dev/null | grep -v 'svv[-_]accelerated' || true)
           if [ -z "$files" ]; then
             echo "No base svv artifacts found; skipping upload."
             exit 0
@@ -144,10 +285,8 @@ jobs:
         id: extract_version
         run: |
           set -euo pipefail
-          file=$(ls dist/svv-*-py3-none-any.whl 2>/dev/null || true)
-          if [ -z "$file" ]; then
-            file=$(ls dist/svv-*.tar.gz 2>/dev/null | head -n1 || true)
-          fi
+          file=$(ls dist/svv-*.whl 2>/dev/null | head -n1 || true)
+          if [ -z "$file" ]; then file=$(ls dist/svv-*.tar.gz 2>/dev/null | head -n1 || true); fi
           if [ -z "$file" ]; then
             echo "::error title=Version detection failed::No base svv artifact found to determine version."; exit 1
           fi

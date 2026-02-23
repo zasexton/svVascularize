@@ -34,6 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            xvfb \
             libegl1 \
             libgl1 \
             libx11-xcb1 \
@@ -56,36 +57,52 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install cmake
 
-      - name: Build svVascularize
-        env:
-          SVV_BUILD_MMG: "1"
+      - name: Build MMG (v5.8.0, Release, -O3)
         run: |
-          # Disable build isolation so build-time tools (cmake, compilers) installed above
-          # are visible to setup.py when building MMG.
-          pip install . --no-build-isolation
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            python .github/scripts/build_mmg.py --version 5.8.0 --arch universal2 --jobs 2
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            python .github/scripts/build_mmg.py --version 5.8.0 --arch x86_64 --jobs 2
+          else
+            python .github/scripts/build_mmg.py --version 5.8.0 --arch x86_64 --jobs 2
+          fi
+
+      - name: Install svVascularize
+        env:
+          SVV_REQUIRE_MMG: "1"
+          SVV_MMG_ARCH: ${{ runner.os == 'macOS' && 'universal2' || '' }}
+        run: |
+          python -m pip install .
 
       - name: Verify MMG executables are installed
         run: |
           python - << 'PY'
           import os
-          import sys
-          import svv
+          import subprocess
+          import tempfile
 
-          bin_dir = os.path.join(os.path.dirname(os.path.abspath(svv.__file__)), "bin")
-          print("svv/bin:", bin_dir)
-          if not os.path.isdir(bin_dir):
-            raise SystemExit("svv/bin directory missing; MMG did not build/package correctly.")
+          # Ensure we validate the *installed* package, not the repo checkout
+          # (stdin execution puts the current working directory on sys.path).
+          os.chdir(tempfile.mkdtemp(prefix="svv-mmg-verify-"))
 
-          names = set(os.listdir(bin_dir))
-          expected = {"mmg2d_O3", "mmg3d_O3", "mmgs_O3"}
-          if os.name == "nt":
-            expected = {e + ".exe" for e in expected}
+          from svv.utils.remeshing.mmg import get_mmg_exe
 
-          missing = sorted(expected - names)
-          if missing:
-            raise SystemExit(f"Missing MMG executables in svv/bin: {missing}. Found: {sorted(names)}")
+          for tool in ("mmg2d", "mmg3d", "mmgs"):
+            exe = get_mmg_exe(tool)
+            print(f"{tool} -> {exe}", flush=True)
+            if os.name != "nt" and not os.access(exe, os.X_OK):
+              raise SystemExit(f"{exe} is not marked executable")
 
-          print("MMG executables present:", sorted(expected))
+            # MMG tools often return a non-zero code for help/usage (commonly 1 or 2),
+            # so don't treat that as a failure; we only want to ensure the binary runs.
+            proc = subprocess.run(
+              [str(exe), "-h"],
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+              timeout=10,
+              check=False,
+            )
+            print(f"{tool} -h exit: {proc.returncode}", flush=True)
           PY
 
       - name: Run basic smoke test
@@ -97,6 +114,7 @@ jobs:
           fi
         env:
           SVV_TELEMETRY_DISABLED: "1"
+          SVV_GUI_DISABLE_VTK: "1"
           SVV_GUI_GL_MODE: "software"
           QT_X11_NO_MITSHM: "1"
           SVV_USEARCH_THREADS: "1"

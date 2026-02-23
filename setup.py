@@ -27,14 +27,43 @@ import multiprocessing
 num_cores = multiprocessing.cpu_count() // 2
 
 from setuptools.command.build_ext import build_ext
+from setuptools.command.install import install as _install
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 class BDistWheelCmd(_bdist_wheel):
+    def finalize_options(self):
+        super().finalize_options()
+        # Base `svv` wheel contains platform-specific MMG executables, so it
+        # must not be tagged as a pure-Python `py3-none-any` wheel.
+        if not ACCEL_COMPANION:
+            self.root_is_pure = False
+            # Ensure wheel files are installed to "platlib" (not "purelib") so
+            # auditwheel can repair/tag the wheel. See InstallCmd below.
+
+    def get_tag(self):
+        python_tag, abi_tag, plat_tag = super().get_tag()
+        # Keep `svv-accelerated` tags as CPython/ABI-specific (normal behavior).
+        if ACCEL_COMPANION:
+            return python_tag, abi_tag, plat_tag
+        # Base `svv` wheel: platform-specific, but Python/ABI-independent.
+        return "py3", "none", plat_tag
+
     def run(self):
         # Ensure build_ext (which calls build_mmg) runs first
         #build_mmg()
         self.run_command("build_ext")
         super().run()
+
+
+class InstallCmd(_install):
+    def finalize_options(self):
+        super().finalize_options()
+        # Force base `svv` wheel contents into platlib during bdist_wheel so
+        # auditwheel can repair/tag the wheel. Otherwise, wheel/setuptools
+        # will place our packaged ELF/Mach-O executables under `.data/purelib/`,
+        # which auditwheel rejects for binary wheels.
+        if not ACCEL_COMPANION:
+            self.install_lib = self.install_platlib
         
 def env_flag(name: str, default: bool = False) -> bool:
     val = os.environ.get(name)
@@ -590,6 +619,71 @@ if not _build_accel_flag and not ACCEL_COMPANION:
     # For the main package, filter out Cython unless explicitly requested
     REQUIREMENTS = [r for r in REQUIREMENTS if not r.strip().lower().startswith('cython')]
 
+def _mmg_os_dir() -> str:
+    sysname = platform.system()
+    if sysname == "Linux":
+        return "Linux"
+    if sysname == "Windows":
+        return "Windows"
+    if sysname == "Darwin":
+        return "Mac"
+    raise RuntimeError(f"Unsupported OS for MMG packaging: {sysname}")
+
+
+def _mmg_arch_dir(os_dir: str) -> str:
+    override = os.environ.get("SVV_MMG_ARCH", "").strip()
+    if override:
+        ov = override.lower()
+        if ov in {"x86_64", "amd64"}:
+            return "x86_64"
+        if ov in {"aarch64", "arm64"}:
+            return "aarch64"
+        if ov == "universal2":
+            return "universal2"
+        return override
+
+    # If a universal2 directory is populated, prefer it on macOS.
+    if os_dir == "Mac":
+        repo_root = Path(__file__).resolve().parent
+        uni_dir = repo_root / "svv" / "utils" / "remeshing" / "Mac" / "universal2"
+        expected = ["mmg2d_O3", "mmg3d_O3", "mmgs_O3"]
+        if any((uni_dir / n).is_file() for n in expected):
+            return "universal2"
+
+    m = platform.machine().strip().lower()
+    if m in {"x86_64", "amd64"}:
+        return "x86_64"
+    if m in {"aarch64", "arm64"}:
+        return "aarch64"
+    return m or "unknown"
+
+
+def _mmg_expected_filenames(os_dir: str, arch_dir: str) -> list:
+    names = ["mmg2d_O3", "mmg3d_O3", "mmgs_O3"]
+    if os_dir == "Windows":
+        names = [n + ".exe" for n in names]
+    return names
+
+
+def _mmg_package_patterns() -> list:
+    if ACCEL_COMPANION:
+        return []
+
+    os_dir = _mmg_os_dir()
+    arch_dir = _mmg_arch_dir(os_dir)
+
+    if env_flag("SVV_REQUIRE_MMG", False):
+        repo_root = Path(__file__).resolve().parent
+        base = repo_root / "svv" / "utils" / "remeshing" / os_dir / arch_dir
+        missing = [n for n in _mmg_expected_filenames(os_dir, arch_dir) if not (base / n).is_file()]
+        if missing:
+            raise RuntimeError(
+                "MMG executables missing for this build. "
+                f"Expected in {base}:\n  - " + "\n  - ".join(missing)
+            )
+
+    return [f"{os_dir}/{arch_dir}/*"]
+
 
 KEYWORDS = ["modeling",
             "simulation",
@@ -615,13 +709,13 @@ setup_info = dict(
     ext_modules=cythonize(extensions) if (extensions and HAS_CYTHON) else [],
     package_data=(
         {
-            'svv.bin': ['*'],
             'svv.visualize.gui': [
                 'design_tokens.json',
                 'theme.qss',
                 'svIcon.png',
                 'icons/*.svg',
             ],
+            'svv.utils.remeshing': _mmg_package_patterns(),
         }
         if not ACCEL_COMPANION
         else {}
@@ -629,7 +723,7 @@ setup_info = dict(
     exclude_package_data=(
         {"svv": ["*.so", "*.pyd", "*.dylib", "*.dll"]} if not ACCEL_COMPANION else {}
     ),
-    include_package_data=True,
+    include_package_data=False,
     zip_safe=False,
     install_requires=REQUIREMENTS,
     extras_require=(
@@ -640,6 +734,7 @@ setup_info = dict(
     cmdclass={
         'build_ext': DownloadAndBuildExt,
         'bdist_wheel': BDistWheelCmd,
+        'install': InstallCmd,
     },
 )
 
