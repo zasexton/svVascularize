@@ -8,10 +8,13 @@ so it can be used in lightweight CI checks and during wheel build validation.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import platform
+import shutil
 import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -74,6 +77,63 @@ def _is_exec_format_error(e: BaseException) -> bool:
         if getattr(e, "winerror", None) == 193:
             return True
     return False
+
+
+def _uid_suffix() -> str:
+    try:
+        return str(os.getuid())
+    except Exception:
+        return "unknown"
+
+
+def _user_cache_dir() -> Optional[Path]:
+    try:
+        if os.name == "nt":
+            base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+            if not base:
+                return None
+            return Path(base) / "svv" / "mmg"
+        base = os.environ.get("XDG_CACHE_HOME")
+        if base:
+            return Path(base) / "svv" / "mmg"
+        return Path.home() / ".cache" / "svv" / "mmg"
+    except Exception:
+        return None
+
+
+def _mmg_run_roots() -> Tuple[Path, ...]:
+    roots: List[Path] = []
+    env_root = os.environ.get("SVV_MMG_RUN_DIR")
+    if env_root:
+        roots.append(Path(env_root).expanduser())
+    try:
+        roots.append(Path(tempfile.gettempdir()))
+    except Exception:
+        pass
+    cache = _user_cache_dir()
+    if cache is not None:
+        roots.append(cache)
+    # De-duplicate while preserving order
+    uniq: List[Path] = []
+    seen = set()
+    for r in roots:
+        key = str(r)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    return tuple(uniq)
+
+
+def _sha256_short(path: Path) -> Optional[str]:
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()[:12]
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)
@@ -184,6 +244,7 @@ def run_mmg(
     *,
     stdout=None,
     stderr=None,
+    cwd=None,
 ) -> Path:
     """
     Execute the requested MMG tool, trying platform/arch candidates as needed.
@@ -198,14 +259,49 @@ def run_mmg(
             continue
         try:
             _ensure_executable(exe)
-            subprocess.check_call([str(exe), *map(str, args)], stdout=stdout, stderr=stderr)
+            subprocess.check_call([str(exe), *map(str, args)], stdout=stdout, stderr=stderr, cwd=cwd)
             return exe
         except subprocess.CalledProcessError:
             # Tool ran but failed; this is not an architecture-selection issue.
             raise
+        except PermissionError as e:
+            # If we can't exec in-place (missing +x, read-only site-packages, or a noexec mount),
+            # try copying the executable into a user-writable run directory and executing from there.
+            last_exec_error = e
+            digest = _sha256_short(exe)
+            for root in _mmg_run_roots():
+                try:
+                    base = root / f"svv-mmg-{_uid_suffix()}" / sel.os_dir / sel.arch
+                    if digest:
+                        base = base / digest
+                    base.mkdir(parents=True, exist_ok=True)
+                    if os.name != "nt":
+                        try:
+                            base.chmod(0o700)
+                        except Exception:
+                            pass
+                    cached = base / exe.name
+                    try:
+                        if (not cached.is_file()) or (cached.stat().st_size != exe.stat().st_size):
+                            shutil.copy2(exe, cached)
+                    except Exception:
+                        # If copy/overwrite fails (permissions, races), try running whatever exists.
+                        pass
+                    _ensure_executable(cached)
+                    subprocess.check_call([str(cached), *map(str, args)], stdout=stdout, stderr=stderr, cwd=cwd)
+                    return cached
+                except subprocess.CalledProcessError:
+                    raise
+                except BaseException as copy_exc:
+                    if isinstance(copy_exc, (FileNotFoundError, PermissionError)) or _is_exec_format_error(copy_exc):
+                        last_exec_error = copy_exc
+                        continue
+                    # Non-exec-related error: surface it.
+                    raise
+            continue
         except BaseException as e:
-            # Exec-format mismatch / permissions: try another candidate.
-            if _is_exec_format_error(e) or isinstance(e, PermissionError):
+            # Exec-format mismatch: try another candidate.
+            if _is_exec_format_error(e):
                 last_exec_error = e
                 continue
             raise
@@ -220,4 +316,3 @@ def run_mmg(
     raise FileNotFoundError(
         f"MMG executable not found for tool={tool!r} (os={sel.os_dir}, arch={sel.arch}). Tried:\n  - {tried}"
     )
-
