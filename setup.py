@@ -430,6 +430,46 @@ def build_0d(num_cores=None):
     subprocess.check_call(install_cmd)
     print(f"svZeroDSolver executables have been installed into: {install_tmp_prefix}")
 
+    print("Copying svZeroDSolver executable into packaged layout")
+    os_dir = _solver_0d_os_dir()
+    arch_dir = _solver_0d_arch_dir(os_dir)
+    install_prefix = os.path.join("svv", "utils", "solvers", "0D", os_dir, arch_dir)
+    os.makedirs(install_prefix, exist_ok=True)
+    expected_name = _solver_0d_expected_filenames(os_dir, arch_dir)[0]
+
+    executables = find_executables(install_tmp_prefix)
+    candidates = [
+        exe
+        for exe in executables
+        if "zerodsolver" in get_filename_without_ext(exe).lower()
+    ]
+    if not candidates:
+        raise RuntimeError(
+            "svZeroDSolver build succeeded but no executable was found in install output."
+        )
+
+    # Prefer exact stem name if present; otherwise take the first candidate.
+    candidates_sorted = sorted(
+        candidates,
+        key=lambda p: (get_filename_without_ext(p).lower() != "svzerodsolver", len(p)),
+    )
+    src = candidates_sorted[0]
+    dst = os.path.join(install_prefix, expected_name)
+    shutil.copy2(src, dst)
+    if os.name != "nt":
+        try:
+            mode = os.stat(dst).st_mode
+            os.chmod(dst, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except Exception:
+            pass
+    print(f"Staged svZeroDSolver executable: {dst}")
+
+    remove_directory_tree(install_tmp_prefix)
+    if os.path.isfile(tarball_path_0d):
+        os.remove(tarball_path_0d)
+    remove_directory_tree(build_dir_0d)
+    remove_directory_tree(source_path_0d)
+
 
 def install_igl_backend():
     """
@@ -685,6 +725,73 @@ def _mmg_package_patterns() -> list:
     return [f"{os_dir}/{arch_dir}/*"]
 
 
+def _solver_0d_os_dir() -> str:
+    sysname = platform.system()
+    if sysname == "Linux":
+        return "Linux"
+    if sysname == "Windows":
+        return "Windows"
+    if sysname == "Darwin":
+        return "Mac"
+    raise RuntimeError(f"Unsupported OS for svZeroDSolver packaging: {sysname}")
+
+
+def _solver_0d_arch_dir(os_dir: str) -> str:
+    override = os.environ.get("SVV_SOLVER_0D_ARCH", "").strip()
+    if override:
+        ov = override.lower()
+        if ov in {"x86_64", "amd64"}:
+            return "x86_64"
+        if ov in {"aarch64", "arm64"}:
+            return "aarch64"
+        if ov == "universal2":
+            return "universal2"
+        return override
+
+    # If a universal2 directory is populated, prefer it on macOS.
+    if os_dir == "Mac":
+        repo_root = Path(__file__).resolve().parent
+        uni_dir = repo_root / "svv" / "utils" / "solvers" / "0D" / "Mac" / "universal2"
+        expected = ["svzerodsolver"]
+        if any((uni_dir / n).is_file() for n in expected):
+            return "universal2"
+
+    m = platform.machine().strip().lower()
+    if m in {"x86_64", "amd64"}:
+        return "x86_64"
+    if m in {"aarch64", "arm64"}:
+        return "aarch64"
+    return m or "unknown"
+
+
+def _solver_0d_expected_filenames(os_dir: str, arch_dir: str) -> list:
+    del arch_dir
+    name = "svzerodsolver"
+    if os_dir == "Windows":
+        name += ".exe"
+    return [name]
+
+
+def _solver_0d_package_patterns() -> list:
+    if ACCEL_COMPANION:
+        return []
+
+    os_dir = _solver_0d_os_dir()
+    arch_dir = _solver_0d_arch_dir(os_dir)
+
+    if env_flag("SVV_REQUIRE_SOLVER_0D", False):
+        repo_root = Path(__file__).resolve().parent
+        base = repo_root / "svv" / "utils" / "solvers" / "0D" / os_dir / arch_dir
+        missing = [n for n in _solver_0d_expected_filenames(os_dir, arch_dir) if not (base / n).is_file()]
+        if missing:
+            raise RuntimeError(
+                "svZeroDSolver executable missing for this build. "
+                f"Expected in {base}:\n  - " + "\n  - ".join(missing)
+            )
+
+    return [f"0D/{os_dir}/{arch_dir}/*"]
+
+
 KEYWORDS = ["modeling",
             "simulation",
             "tissue-engineering",
@@ -716,6 +823,7 @@ setup_info = dict(
                 'icons/*.svg',
             ],
             'svv.utils.remeshing': _mmg_package_patterns(),
+            'svv.utils.solvers': _solver_0d_package_patterns(),
         }
         if not ACCEL_COMPANION
         else {}

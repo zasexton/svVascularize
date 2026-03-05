@@ -2,6 +2,8 @@ import numpy as np
 import os
 import json
 import platform
+from svv.simulation.fluid.rom.zero_d.process import run_0d_script
+from svv.utils.solvers.solver_0d import get_solver_0d_exe
 
 def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number_cardiac_cycles=1,flow=None,
                          number_time_pts_per_cycle=5 ,density=1.06 ,viscosity=0.04 ,material="olufsen",
@@ -98,14 +100,15 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
 
     # Ensure the target directory exists without failing if it already does.
     os.makedirs(outdir, exist_ok=True)
+    resolved_solver_0d = None
     if get_0d_solver:
-        #if path_to_0d_solver is None:
-        #    path_to_0d_solver = locate_0d_solver()
-        #else:
-        #    path_to_0d_solver = locate_0d_solver(windows_drive=path_to_0d_solver ,linux_drive=path_to_0d_solver)
-        path_to_0d_solver = None
-    else:
-        path_to_0d_solver = None
+        try:
+            resolved_solver_0d = str(get_solver_0d_exe())
+            print(f"Using packaged svZeroDSolver executable: {resolved_solver_0d}")
+        except Exception as e:
+            print(f"WARNING: Could not locate packaged svZeroDSolver executable ({e})")
+    elif path_to_0d_solver is not None:
+        resolved_solver_0d = path_to_0d_solver
     input_file = {'description' :{'description of case' :None,
                                  'analytical results' :None},
                   'boundary_conditions' :[],
@@ -234,7 +237,7 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
             if path_to_0d_solver is not None:
                 solver_path = path_to_0d_solver.replace(os.sep, os.sep + os.sep)
             else:
-                solver_path = path_to_0d_solver
+                solver_path = ""
                 print("WARNING: Solver location will have to be given manually")
                 print("Current solver path is: {}".format(solver_path))
             solver_file = (outdir + os.sep + filename).replace(os.sep, os.sep + os.sep)
@@ -242,11 +245,16 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
             if path_to_0d_solver is not None:
                 solver_path = path_to_0d_solver
             else:
-                solver_path = path_to_0d_solver
+                solver_path = ""
                 print("WARNING: Solver location will have to be given manually")
                 print("Current solver path is: {}".format(solver_path))
-            solver_file = outdir + os.sep + "solver_0d.in"
-        #file.write(run_0d_script.format(solver_path, solver_file))
+            solver_file = outdir + os.sep + filename
+
+        if resolved_solver_0d is not None:
+            cmd_file = outdir + os.sep + ("cmd_run.bat" if platform.system() == "Windows" else "cmd_run.bash")
+            with open(cmd_file, "w") as cmd:
+                cmd.write(f"\"{resolved_solver_0d}\" \"{filename}\"")
+        file.write(run_0d_script.format(solver_path, solver_file))
     file.close()
 
     geom = np.zeros((tree.data.shape[0], 8))

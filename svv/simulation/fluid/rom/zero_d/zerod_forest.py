@@ -2,11 +2,10 @@ import os
 import numpy as np
 import json
 import platform
-import svv
 from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data, collate_timeseries_to_pvd
-from svv.simulation.fluid.rom.zero_d.process import run_0d_script, run_0d_cmdline
+from svv.simulation.fluid.rom.zero_d.process import run_0d_script
 from svv.simulation.fluid.inflow.waveform import generate_physiologic_wave
-from pathlib import Path
+from svv.utils.solvers.solver_0d import get_solver_0d_exe
 
 def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, folder="0d_tmp", number_cardiac_cycles=1,
                             flow=None, number_time_pts_per_cycle=5,material="olufsen",
@@ -107,7 +106,15 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
 
     # Ensure the target directory exists without failing if it already does.
     os.makedirs(outdir, exist_ok=True)
-    path_to_0d_solver = None
+    resolved_solver_0d = None
+    if get_0d_solver:
+        try:
+            resolved_solver_0d = str(get_solver_0d_exe())
+            print(f"Using packaged svZeroDSolver executable: {resolved_solver_0d}")
+        except Exception as e:
+            print(f"WARNING: Could not locate packaged svZeroDSolver executable ({e})")
+    elif path_to_0d_solver is not None:
+        resolved_solver_0d = path_to_0d_solver
     input_file = {'description': {'description of case': None,
                                   'analytical results': None},
                   'boundary_conditions': [],
@@ -302,7 +309,7 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
             if path_to_0d_solver is not None:
                 solver_path = path_to_0d_solver.replace(os.sep, os.sep + os.sep)
             else:
-                solver_path = path_to_0d_solver
+                solver_path = ""
                 print("WARNING: Solver location will have to be given manually")
                 print("Current solver path is: {}".format(solver_path))
             solver_file = (outdir + os.sep + "solver_0d.in").replace(os.sep, os.sep + os.sep)
@@ -310,15 +317,15 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
             if path_to_0d_solver is not None:
                 solver_path = path_to_0d_solver
             else:
-                solver_path = path_to_0d_solver
+                solver_path = ""
                 print("WARNING: Solver location will have to be given manually")
                 print("Current solver path is: {}".format(solver_path))
-            if os.path.exists(os.path.join(Path(svv.__file__).parent, "solvers", "svzerodsolver")):
-                cmd_solver_path = str(os.path.join(Path(svv.__file__).parent, "solvers", "svzerodsolver"))
-                cmd_file = open(outdir + os.sep + "cmd_run.bash", "w+")
-                cmd_file.write(run_0d_cmdline.format(cmd_solver_path))
-                cmd_file.close()
             solver_file = outdir + os.sep + "solver_0d.in"
+
+        if resolved_solver_0d is not None:
+            cmd_file = outdir + os.sep + ("cmd_run.bat" if platform.system() == "Windows" else "cmd_run.bash")
+            with open(cmd_file, "w") as cmd:
+                cmd.write(f"\"{resolved_solver_0d}\" \"solver_0d.in\"")
         file.write(run_0d_script.format(solver_path, solver_file))
     file.close()
     # DETERMINE NUMBER OF ROWS FOR GEOM
