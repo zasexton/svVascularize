@@ -21,6 +21,7 @@ import tarfile
 import json
 import stat
 import re
+import inspect
 from pathlib import Path
 import multiprocessing
 
@@ -28,7 +29,12 @@ num_cores = multiprocessing.cpu_count() // 2
 
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install as _install
-from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+try:
+    # Setuptools >= 70.1 ships bdist_wheel directly.
+    from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
+except Exception:
+    # Fallback for older environments.
+    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 class BDistWheelCmd(_bdist_wheel):
     def finalize_options(self):
@@ -84,8 +90,22 @@ def remove_directory_tree(directory_path):
     """
     if os.path.exists(directory_path) and os.path.isdir(directory_path):
         shutil.rmtree(directory_path)
+
+
+def _tar_safe_extract(t: tarfile.TarFile, dest: str) -> None:
+    """
+    Extract tar archive safely and avoid Python 3.14 extractall deprecation warnings.
+    """
+    dest_path = Path(dest).resolve()
+    for member in t.getmembers():
+        member_path = (dest_path / member.name).resolve()
+        if not str(member_path).startswith(str(dest_path) + os.sep):
+            raise RuntimeError(f"Unsafe tar path: {member.name}")
+    extractall_sig = inspect.signature(t.extractall)
+    if "filter" in extractall_sig.parameters:
+        t.extractall(dest, filter="data")
     else:
-        print(f"Directory does not exist or is not a directory: {directory_path}")
+        t.extractall(dest)
 
 def find_executables(top_level_folder):
     """
@@ -242,7 +262,7 @@ def build_mmg(num_cores=None):
     if not os.path.exists(source_extract_root):
         print("Extracting mmg...")
         with tarfile.open(tarball_path_mmg, "r:gz") as t:
-            t.extractall(source_extract_root)
+            _tar_safe_extract(t, source_extract_root)
 
     # Typically the archive extracts into a folder named "mmg-5.8.0" under "mmg/"
     subdirs = os.listdir(source_extract_root)
@@ -252,10 +272,12 @@ def build_mmg(num_cores=None):
 
     # Prepare build directory
     build_dir_mmg = os.path.abspath(os.path.join("bin", "mmg"))
+    if os.path.isdir(build_dir_mmg):
+        shutil.rmtree(build_dir_mmg, ignore_errors=True)
     os.makedirs(build_dir_mmg, exist_ok=True)
 
     # Build up our cmake configure command
-    cmake_cmd = ["cmake"]
+    cmake_cmd = ["cmake", "-Wno-dev", "-Wno-deprecated"]
 
     # On Windows, pick a Visual Studio generator if possible
     if platform.system().lower().startswith("win"):
@@ -269,6 +291,9 @@ def build_mmg(num_cores=None):
     # Add standard arguments
     cmake_cmd += [
         "-DCMAKE_BUILD_TYPE=Release",
+        # Avoid linking against environment VTK/OpenGL stacks (e.g., conda),
+        # which frequently causes ABI/linker mismatches in local builds.
+        "-DCMAKE_DISABLE_FIND_PACKAGE_VTK=TRUE",
         "-B", build_dir_mmg,
         "-S", mmg_subdir
     ]
@@ -353,7 +378,7 @@ def build_0d(num_cores=None):
     source_path_0d = os.path.abspath("svZeroDSolver")
 
     # Build up our cmake configure command
-    cmake_cmd = ["cmake"]
+    cmake_cmd = ["cmake", "-Wno-dev", "-Wno-deprecated"]
 
     try:
         if not os.path.exists(tarball_path_0d):
@@ -365,7 +390,7 @@ def build_0d(num_cores=None):
     try:
         if not os.path.exists(source_path_0d):
             with tarfile.open(tarball_path_0d, "r:gz") as t:
-                t.extractall(source_path_0d)
+                _tar_safe_extract(t, source_path_0d)
     except Exception as e:
         raise RuntimeError("Error extracting svZeroDSolver archive.") from e
 
@@ -450,7 +475,7 @@ def build_0d(num_cores=None):
     ]
     if not candidates:
         raise RuntimeError(
-            "svZeroDSolver build succeeded but no executable was found in install output."
+            "svZeroDSolver build succeeded but no executable was found in build/install outputs."
         )
 
     # Prefer exact stem name if present; otherwise take the first candidate.
@@ -509,10 +534,58 @@ def install_igl_backend():
 
 
 class DownloadAndBuildExt(build_ext):
+    user_options = build_ext.user_options + [
+        (
+            "build-native-binaries",
+            None,
+            "build and stage MMG + svZeroDSolver executables for this platform",
+        ),
+        (
+            "build-mmg",
+            None,
+            "build and stage MMG executables for this platform",
+        ),
+        (
+            "build-solver-0d",
+            None,
+            "build and stage svZeroDSolver executable for this platform",
+        ),
+    ]
+    boolean_options = build_ext.boolean_options + [
+        "build-native-binaries",
+        "build-mmg",
+        "build-solver-0d",
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.build_native_binaries = False
+        self.build_mmg = False
+        self.build_solver_0d = False
+
     def run(self):
         # Make external tool builds opt-in to avoid brittle installs and network fetches
-        build_mmg_flag = env_flag("SVV_BUILD_MMG", False)
-        build_0d_flag = env_flag("SVV_BUILD_SOLVER_0D", False) or env_flag("SVV_BUILD_SOLVERS", False)
+        build_mmg_flag = (
+            env_flag("SVV_BUILD_MMG", False)
+            or bool(self.build_native_binaries)
+            or bool(self.build_mmg)
+        )
+        build_0d_flag = (
+            env_flag("SVV_BUILD_SOLVER_0D", False)
+            or env_flag("SVV_BUILD_SOLVERS", False)
+            or bool(self.build_native_binaries)
+            or bool(self.build_solver_0d)
+        )
+
+        if self.build_native_binaries:
+            print("Building native binaries: MMG + svZeroDSolver")
+        elif self.build_mmg or self.build_solver_0d:
+            selected = []
+            if self.build_mmg:
+                selected.append("MMG")
+            if self.build_solver_0d:
+                selected.append("svZeroDSolver")
+            print("Building native binaries:", " + ".join(selected))
 
         if build_mmg_flag:
             try:
@@ -626,7 +699,6 @@ with open("README.md", "r", encoding="utf-8") as file:
     DESCRIPTION = file.read()
 
 CLASSIFIERS = ['Intended Audience :: Science/Research',
-               'License :: OSI Approved :: MIT License',
                'Programming Language :: Python :: 3.9',
                'Programming Language :: Python :: 3.10',
                'Programming Language :: Python :: 3.11',

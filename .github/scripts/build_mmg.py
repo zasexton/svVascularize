@@ -115,6 +115,8 @@ def build_mmg(*, version: str, os_name: str, arch: str, out_dir: Path, jobs: int
             "-B",
             str(build_dir),
             "-DCMAKE_BUILD_TYPE=Release",
+            # Avoid linking against environment VTK/OpenGL stacks by default.
+            "-DCMAKE_DISABLE_FIND_PACKAGE_VTK=TRUE",
             f"-DCMAKE_INSTALL_PREFIX={install_dir}",
             "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG",
         ]
