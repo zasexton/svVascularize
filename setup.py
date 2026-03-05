@@ -413,23 +413,6 @@ def build_0d(num_cores=None):
     except subprocess.CalledProcessError as e:
         raise RuntimeError("CMake build failed for svZeroDSolver.") from e
 
-    install_tmp_prefix = os.path.join("svv", "tmp")
-    os.makedirs(install_tmp_prefix, exist_ok=True)
-    install_cmd = [
-        "cmake",
-        "--install", build_dir_0d,
-        "--prefix", os.path.abspath(install_tmp_prefix),
-    ]
-
-    # For multi-configuration generators on Windows (like Visual Studio),
-    # specify `--config Release` explicitly if you built in Release mode.
-    if platform.system().lower().startswith("win"):
-        install_cmd += ["--config", "Release"]
-
-    print("Installing svZeroDSolver with CMake:", " ".join(install_cmd))
-    subprocess.check_call(install_cmd)
-    print(f"svZeroDSolver executables have been installed into: {install_tmp_prefix}")
-
     print("Copying svZeroDSolver executable into packaged layout")
     os_dir = _solver_0d_os_dir()
     arch_dir = _solver_0d_arch_dir(os_dir)
@@ -437,7 +420,29 @@ def build_0d(num_cores=None):
     os.makedirs(install_prefix, exist_ok=True)
     expected_name = _solver_0d_expected_filenames(os_dir, arch_dir)[0]
 
-    executables = find_executables(install_tmp_prefix)
+    executables = find_executables(build_dir_0d)
+
+    # Some upstream svZeroDSolver CMake configs don't install `svzerodsolver`.
+    # If we didn't find it in the build tree, try install-tree discovery.
+    install_tmp_prefix = os.path.join("svv", "tmp")
+    if not any("zerodsolver" in get_filename_without_ext(exe).lower() for exe in executables):
+        os.makedirs(install_tmp_prefix, exist_ok=True)
+        install_cmd = [
+            "cmake",
+            "--install", build_dir_0d,
+            "--prefix", os.path.abspath(install_tmp_prefix),
+        ]
+
+        # For multi-configuration generators on Windows (like Visual Studio),
+        # specify `--config Release` explicitly if you built in Release mode.
+        if platform.system().lower().startswith("win"):
+            install_cmd += ["--config", "Release"]
+
+        print("Installing svZeroDSolver with CMake:", " ".join(install_cmd))
+        subprocess.check_call(install_cmd)
+        print(f"svZeroDSolver install tree generated at: {install_tmp_prefix}")
+        executables.extend(find_executables(install_tmp_prefix))
+
     candidates = [
         exe
         for exe in executables

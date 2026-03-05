@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import os
 import platform
 import shutil
@@ -41,7 +42,11 @@ def _tar_safe_extract(t: tarfile.TarFile, dest: Path) -> None:
         member_path = (dest / member.name).resolve()
         if not str(member_path).startswith(str(dest) + os.sep):
             raise RuntimeError(f"Unsafe tar path: {member.name}")
-    t.extractall(dest)
+    extractall_sig = inspect.signature(t.extractall)
+    if "filter" in extractall_sig.parameters:
+        t.extractall(dest, filter="data")
+    else:
+        t.extractall(dest)
 
 
 def _chmod_x(path: Path) -> None:
@@ -64,10 +69,14 @@ def _find_built_solver_0d_exes(prefix: Path) -> list[Path]:
     for p in prefix.rglob("*"):
         if not p.is_file():
             continue
-        if os.name == "nt" and p.suffix.lower() != ".exe":
+        if os.name == "nt":
+            if p.suffix.lower() != ".exe":
+                continue
+            if p.stem.lower() == "svzerodsolver":
+                found.append(p)
             continue
-        stem = p.stem.lower() if p.suffix.lower() == ".exe" else p.name.lower()
-        if "zerodsolver" in stem:
+
+        if p.name == "svzerodsolver":
             found.append(p)
     return found
 
@@ -88,10 +97,8 @@ def build_solver_0d(*, version: str, os_name: str, arch: str, out_dir: Path, job
         tar_path = tmp / "svZeroDSolver.tar.gz"
         src_root = tmp / "src"
         build_dir = tmp / "build"
-        install_dir = tmp / "install"
         src_root.mkdir(parents=True, exist_ok=True)
         build_dir.mkdir(parents=True, exist_ok=True)
-        install_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Downloading svZeroDSolver v{version}...", flush=True)
         urlretrieve(url, tar_path)  # nosec - trusted upstream in CI/release flows
@@ -112,7 +119,7 @@ def build_solver_0d(*, version: str, os_name: str, arch: str, out_dir: Path, job
             "-B",
             str(build_dir),
             "-DCMAKE_BUILD_TYPE=Release",
-            f"-DCMAKE_INSTALL_PREFIX={install_dir}",
+            "-Wno-dev",
         ]
 
         if os_name == "Mac" and arch == "universal2":
@@ -132,14 +139,27 @@ def build_solver_0d(*, version: str, os_name: str, arch: str, out_dir: Path, job
             build_cmd += ["--config", "Release"]
         _run(build_cmd)
 
-        install_cmd = ["cmake", "--install", str(build_dir)]
-        if os_name == "Windows":
-            install_cmd += ["--config", "Release"]
-        _run(install_cmd)
+        # Prefer executable directly from the build tree. Some upstream
+        # svZeroDSolver CMake configs don't install `svzerodsolver`.
+        found = _find_built_solver_0d_exes(build_dir)
+        search_roots = [build_dir]
 
-        found = _find_built_solver_0d_exes(install_dir)
         if not found:
-            raise RuntimeError("svZeroDSolver build succeeded but executable was not found")
+            install_dir = tmp / "install"
+            install_dir.mkdir(parents=True, exist_ok=True)
+            install_cmd = ["cmake", "--install", str(build_dir), "--prefix", str(install_dir)]
+            if os_name == "Windows":
+                install_cmd += ["--config", "Release"]
+            _run(install_cmd)
+            found = _find_built_solver_0d_exes(install_dir)
+            search_roots.append(install_dir)
+
+        if not found:
+            roots = ", ".join(str(p) for p in search_roots)
+            raise RuntimeError(
+                "svZeroDSolver build succeeded but executable `svzerodsolver` was not found. "
+                f"Searched: {roots}"
+            )
 
         found = sorted(
             found,
