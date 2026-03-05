@@ -2,6 +2,13 @@ import numpy as np
 import os
 import json
 import platform
+from svv.simulation.fluid.inflow.waveform import generate_physiologic_wave
+from svv.simulation.fluid.rom.zero_d.post import (
+    collate_timeseries_to_pvd,
+    make_results,
+    post_data,
+    view_plots,
+)
 from svv.simulation.fluid.rom.zero_d.process import run_0d_script
 from svv.utils.solvers.solver_0d import get_solver_0d_exe
 
@@ -101,14 +108,16 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
     # Ensure the target directory exists without failing if it already does.
     os.makedirs(outdir, exist_ok=True)
     resolved_solver_0d = None
-    if get_0d_solver:
+    if path_to_0d_solver is not None:
+        resolved_solver_0d = path_to_0d_solver
+        print(f"Using explicit svZeroDSolver path: {resolved_solver_0d}")
+    else:
         try:
             resolved_solver_0d = str(get_solver_0d_exe())
-            print(f"Using packaged svZeroDSolver executable: {resolved_solver_0d}")
+            print(f"Using svZeroDSolver executable: {resolved_solver_0d}")
         except Exception as e:
-            print(f"WARNING: Could not locate packaged svZeroDSolver executable ({e})")
-    elif path_to_0d_solver is not None:
-        resolved_solver_0d = path_to_0d_solver
+            print(f"WARNING: No svZeroDSolver executable found ({e})")
+            print("Generated run.py will include setup instructions to install/build solver support.")
     input_file = {'description' :{'description of case' :None,
                                  'analytical results' :None},
                   'boundary_conditions' :[],
@@ -171,26 +180,25 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
             bc['bc_type'] = "FLOW"
             bc_values = {}
             if steady:
+                q_in = float(tree.data[vessel, 22]) if isinstance(flow, type(None)) else float(flow)
+                bc_values["Q"] = [q_in, q_in]
+                bc_values["t"] = [0, 1]
+            else:
                 if isinstance(flow, type(None)):
-                    bc_values["Q"] = [float(tree.data[vessel, 22]), float(tree.data[vessel, 22])]
-                    bc_values["t"] = [0, 1]
+                    time, flow_wave = generate_physiologic_wave(tree.data[vessel, 22], tree.data[vessel, 21] * 2)
+                    bc_values["Q"] = np.asarray(flow_wave, dtype=float).tolist()
+                    bc_values["t"] = np.asarray(time, dtype=float).tolist()
                 else:
-                    bc_values["Q"] = [flow, flow]
+                    q_in = float(flow)
+                    bc_values["Q"] = [q_in, q_in]
                     bc_values["t"] = [0, 1]
-                with open(outdir + os.sep + "inflow.flow", "w") as file:
-                    for i in range(len(bc_values["t"])):
-                        file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
-                file.close()
-            #else:
-            #    time, flow = wave(tree.data[vessel, 22], tree.data[vessel, 21] * 2)  # changed wave function
-            #    bc_values["Q"] = flow.tolist()
-            #    bc_values["t"] = time.tolist()
-            #    bc_values["Q"][-1] = bc_values["Q"][0]
-            #    simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
-            #    with open(outdir + os.sep + "inflow.flow", "w") as file:
-            #        for i in range(len(bc_values["t"])):
-            #            file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
-            #    file.close()
+                if bc_values["Q"]:
+                    bc_values["Q"][-1] = bc_values["Q"][0]
+                simulation_parameters["number_of_time_pts_per_cardiac_cycle"] = len(bc_values["Q"])
+            with open(outdir + os.sep + "inflow.flow", "w") as file:
+                for i in range(len(bc_values["t"])):
+                    file.write("{}  {}\n".format(bc_values["t"][i], bc_values["Q"][i]))
+            file.close()
             bc['bc_values'] = bc_values
             input_file['boundary_conditions'].append(bc)
             tmp['boundary_conditions'] = {'inlet': "INFLOW"}
@@ -224,37 +232,28 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
         file.write(obj)
     file.close()
 
-    #with open(outdir + os.sep + "plot_0d_results_to_3d.py", "w") as file:
-    #    file.write(make_results)
-    #file.close()
+    with open(outdir + os.sep + "plot_0d_results_to_3d.py", "w") as file:
+        file.write(make_results)
+    file.close()
 
-    #with open(outdir + os.sep + "plot_0d_results_at_slices.py", "w") as file:
-    #    file.write(view_plots)
-    #file.close()
+    with open(outdir + os.sep + "plot_0d_results_at_slices.py", "w") as file:
+        file.write(view_plots)
+    file.close()
+
+    with open(outdir + os.sep + "post_process.py", "w") as file:
+        file.write(post_data)
+    file.close()
+
+    with open(outdir + os.sep + "collate_timeseries_to_pvd.py", "w") as file:
+        file.write(collate_timeseries_to_pvd)
+    file.close()
 
     with open(outdir + os.sep + "run.py", "w") as file:
-        if platform.system() == "Windows":
-            if path_to_0d_solver is not None:
-                solver_path = path_to_0d_solver.replace(os.sep, os.sep + os.sep)
-            else:
-                solver_path = ""
-                print("WARNING: Solver location will have to be given manually")
-                print("Current solver path is: {}".format(solver_path))
-            solver_file = (outdir + os.sep + filename).replace(os.sep, os.sep + os.sep)
-        else:
-            if path_to_0d_solver is not None:
-                solver_path = path_to_0d_solver
-            else:
-                solver_path = ""
-                print("WARNING: Solver location will have to be given manually")
-                print("Current solver path is: {}".format(solver_path))
-            solver_file = outdir + os.sep + filename
-
         if resolved_solver_0d is not None:
             cmd_file = outdir + os.sep + ("cmd_run.bat" if platform.system() == "Windows" else "cmd_run.bash")
             with open(cmd_file, "w") as cmd:
                 cmd.write(f"\"{resolved_solver_0d}\" \"{filename}\"")
-        file.write(run_0d_script.format(solver_path, solver_file))
+        file.write(run_0d_script.format(solver_exe=resolved_solver_0d, input_filename=filename))
     file.close()
 
     geom = np.zeros((tree.data.shape[0], 8))

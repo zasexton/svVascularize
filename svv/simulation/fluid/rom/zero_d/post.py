@@ -64,11 +64,15 @@ for idx in tqdm(range(len(data['time'][0][0])),desc="Building Timeseries ",posit
         for kdx in range(number_segments):
             center = (1/2)*direction*length + start
             vessel = pv.Cylinder(center=center,direction=direction,height=length,radius=radius)
-            vessel = vessel.elevation(low_point=end,high_point=start,scalar_range=[data['pressure_out'][vdx][kdx][idx]/1333.33, data['pressure_in'][vdx][kdx][idx]/1333.33])
-            if data['pressure_in'][vdx][kdx][idx]/1333.33 > max_pressure:
-                max_pressure = data['pressure_in'][vdx][kdx][idx]/1333.33
-            if data['pressure_out'][vdx][kdx][idx]/1333.33 < min_pressure:
-                min_pressure = data['pressure_out'][vdx][kdx][idx]/1333.33
+            p_in = data['pressure_in'][vdx][kdx][idx]/1333.33
+            p_out = data['pressure_out'][vdx][kdx][idx]/1333.33
+            p_low = min(p_in, p_out)
+            p_high = max(p_in, p_out)
+            vessel = vessel.elevation(low_point=end,high_point=start,scalar_range=[p_low, p_high])
+            if p_high > max_pressure:
+                max_pressure = p_high
+            if p_low < min_pressure:
+                min_pressure = p_low
             vessel.rename_array('Elevation','Pressure [mmHg]',preference='point')
             vessel.cell_data['Flow [mL/s]'] = data['flow_in'][vdx][kdx][idx]
             re = (1.06*2*radius*((data['flow_in'][vdx][kdx][idx]/(np.pi*radius**2))/2))/0.04
