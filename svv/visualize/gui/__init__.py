@@ -3,6 +3,9 @@ import sys
 
 # CRITICAL: Set GL environment BEFORE any Qt/VTK imports
 # This must happen at module import time
+if sys.platform == 'darwin':
+    os.environ.setdefault('QT_MAC_WANTS_LAYER', '1')
+
 if sys.platform.startswith('linux'):
     # If running on Wayland but lack the plugin, fall back to xcb early
     if 'WAYLAND_DISPLAY' in os.environ and not os.environ.get('QT_QPA_PLATFORM'):
