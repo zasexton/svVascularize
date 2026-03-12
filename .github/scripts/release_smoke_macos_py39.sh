@@ -20,11 +20,19 @@ python - <<'PY'
 import importlib.metadata as md
 import os
 import tempfile
+import numpy as np
 
 tetgen_version = md.version("tetgen")
 print("tetgen version:", tetgen_version, flush=True)
 if tetgen_version != "0.6.4":
     raise SystemExit(f"Expected tetgen 0.6.4 on macOS Python 3.9, got {tetgen_version}")
+
+numpy_version = np.__version__
+print("numpy version:", numpy_version, flush=True)
+if int(numpy_version.split(".", 1)[0]) >= 2:
+    raise SystemExit(
+        f"Expected NumPy 1.x for macOS Python 3.9 TetGen compatibility, got {numpy_version}"
+    )
 
 os.chdir(tempfile.mkdtemp(prefix="svv-release-smoke-"))
 
