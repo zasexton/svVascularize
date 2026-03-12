@@ -510,6 +510,31 @@ class VTKWidget(QWidget):
         super().showEvent(event)
         self._ensure_plotter_initialized()
 
+    @staticmethod
+    def _qt_platform_name() -> str:
+        """Return the active Qt platform plugin name when available."""
+        env_name = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
+        if env_name:
+            return env_name
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                return (app.platformName() or "").strip().lower()
+        except Exception:
+            pass
+        return ""
+
+    @classmethod
+    def _qt_platform_disables_vtk(cls) -> bool:
+        """
+        Return True when the active Qt backend cannot host a VTK viewport.
+
+        In headless checks we often run with Qt's ``offscreen`` or ``minimal``
+        platform plugins. Creating a PyVista plotter in those modes can crash
+        the process on macOS before the GUI has a chance to degrade gracefully.
+        """
+        return cls._qt_platform_name() in {"offscreen", "minimal", "minimalegl"}
+
     def _ensure_plotter_initialized(self):
         disable_vtk = os.environ.get("SVV_GUI_DISABLE_VTK", "").strip().lower() in {
             "1",
@@ -522,6 +547,21 @@ class VTKWidget(QWidget):
                 self._vtk_placeholder.setText(
                     "3D visualization disabled (SVV_GUI_DISABLE_VTK=1).\n\n"
                     "The GUI will run with limited 3D viewport features."
+                )
+                self._vtk_placeholder.setStyleSheet(
+                    "padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;"
+                )
+            self._plotter_init_failed = True
+            self._plotter_init_in_progress = False
+            return
+
+        if self._qt_platform_disables_vtk():
+            platform_name = self._qt_platform_name() or "unknown"
+            if getattr(self, "_vtk_placeholder", None) is not None:
+                self._vtk_placeholder.setText(
+                    "3D visualization disabled for the active Qt platform "
+                    f"({platform_name}).\n\n"
+                    "Use a windowed Qt backend to enable the VTK viewport."
                 )
                 self._vtk_placeholder.setStyleSheet(
                     "padding: 20px; background-color: #FFF3CD; border: 1px solid #FFC107;"

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem, QTabWidget, QToolBar,
     QPlainTextEdit, QProgressBar, QProgressDialog, QFrame, QDialog, QFormLayout,
     QDialogButtonBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QComboBox,
+    QApplication,
     QColorDialog, QMenu
 )
 from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QUrl
@@ -420,6 +421,7 @@ class VascularizeGUI(QMainWindow):
 
         # Apply CAD theme
         self.setStyleSheet(CADTheme.get_stylesheet())
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
 
         self.setWindowTitle("svVascularize - Vascular Design")
         self.setGeometry(100, 100, 1600, 1000)
@@ -2166,6 +2168,8 @@ class VascularizeGUI(QMainWindow):
 
         # Shut down background executors
         try:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
             self._executor.shutdown(wait=False)
         except Exception:
             pass
@@ -2214,6 +2218,12 @@ class VascularizeGUI(QMainWindow):
 
         # Accept the close event
         event.accept()
+
+        # On macOS, relying on the default last-window-closed behavior can
+        # leave the application resident in the Dock longer than expected.
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
 
     # ---- Background domain loading ----
     def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Optional[Queue] = None,
