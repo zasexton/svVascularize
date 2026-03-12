@@ -30,13 +30,14 @@ def test_vtk_widget_disables_vtk_for_offscreen_qt(monkeypatch):
     app.processEvents()
 
 
-def test_vtk_widget_does_not_force_offscreen_for_macos_conda(monkeypatch):
+def test_vtk_widget_prefers_offscreen_for_macos_arm64_conda(monkeypatch):
     monkeypatch.setattr(vtk_widget_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(vtk_widget_mod.platform, "machine", lambda: "arm64")
     monkeypatch.setenv("CONDA_PREFIX", "/tmp/svv-conda")
     monkeypatch.delenv("SVV_GUI_FORCE_OFFSCREEN_VTK", raising=False)
     monkeypatch.delenv("SVV_GUI_FORCE_EMBEDDED_VTK", raising=False)
 
-    assert VTKWidget._should_use_offscreen() is False
+    assert VTKWidget._should_use_offscreen() is True
 
 
 def test_vtk_widget_force_offscreen_env(monkeypatch):

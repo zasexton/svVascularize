@@ -2,6 +2,7 @@
 VTK/PyVista widget for 3D domain visualization.
 """
 import os
+import platform
 import sys
 
 # macOS: force layer-backed views to avoid Qt/VTK view initialization deadlocks.
@@ -589,13 +590,25 @@ class VTKWidget(QWidget):
 
     @staticmethod
     def _should_use_offscreen():
-        """Return True only when the user explicitly forces the offscreen path."""
+        """
+        Return True for the known-bad macOS ARM + conda environment.
+
+        Constructing ``QtInteractor`` can block the UI thread on this setup,
+        which means a later fallback is never reached. Default to the
+        offscreen/blit path there unless the user explicitly forces embedded.
+        """
         def _env_true(name):
             return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
         if _env_true("SVV_GUI_FORCE_EMBEDDED_VTK"):
             return False
-        return _env_true("SVV_GUI_FORCE_OFFSCREEN_VTK")
+        if _env_true("SVV_GUI_FORCE_OFFSCREEN_VTK"):
+            return True
+        return (
+            sys.platform == "darwin"
+            and platform.machine().lower() == "arm64"
+            and bool(os.environ.get("CONDA_PREFIX"))
+        )
 
     def _init_plotter(self):
         if self._plotter_init_done or self._plotter_init_failed:
