@@ -5,6 +5,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import sys
+
+if sys.platform == "darwin":
+    os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDockWidget, QStatusBar,
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem, QTabWidget, QToolBar,
