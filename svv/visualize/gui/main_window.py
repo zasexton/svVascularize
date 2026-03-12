@@ -233,7 +233,7 @@ class ObjectBrowserWidget(QTreeWidget):
             if actor is None or plotter is None:
                 return
             actor.SetVisibility(bool(checked))
-            plotter.render()
+            vtk_widget.request_render()
             return
 
         # Network / tree visibility toggles
