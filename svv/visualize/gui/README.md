@@ -37,6 +37,7 @@ pip install PySide6 pyvista PyVistaQt
 Notes:
 - On Linux, the GUI prefers software rendering (Mesa llvmpipe) to avoid GPU/driver issues. These settings are applied only on Linux and do not affect Windows or macOS. You can opt out with `SVV_GUI_GL_MODE=system`.
 - On Windows and macOS, no Mesa-specific setup is required.
+- On macOS, the GUI now attempts the embedded VTK interactor first, even inside conda environments. If you need the older compatibility path for troubleshooting, set `SVV_GUI_FORCE_OFFSCREEN_VTK=1`. To prevent fallback and require the embedded path, set `SVV_GUI_FORCE_EMBEDDED_VTK=1`.
 
 ## Usage
 
