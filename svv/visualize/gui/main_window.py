@@ -2309,17 +2309,32 @@ class VascularizeGUI(QMainWindow):
     # ---- Background domain loading ----
     def _load_domain_file(self, file_path: str, cancel_event: threading.Event, progress_queue: Optional[Queue] = None,
                           build_resolution: Optional[int] = None):
-        def report_progress(value, label=None):
-            """Report progress value and optionally update the label text."""
+        def report_progress(value=None, label=None, indeterminate=None):
+            """Report progress value and optionally update the dialog state."""
             if progress_queue is not None:
                 try:
-                    # Send tuple of (value, label) if label provided, else just value
+                    payload = {}
+                    if value is not None:
+                        payload["value"] = int(value)
                     if label is not None:
-                        progress_queue.put((value, label))
-                    else:
-                        progress_queue.put(value)
+                        payload["label"] = label
+                    if indeterminate is not None:
+                        payload["indeterminate"] = bool(indeterminate)
+                    progress_queue.put(payload if payload else value)
                 except Exception:
                     pass
+
+        def make_stage_reporter(start, end):
+            span = end - start
+
+            def _stage_report(progress=None, label=None, indeterminate=None):
+                value = None
+                if progress is not None:
+                    clamped = max(0.0, min(1.0, float(progress)))
+                    value = round(start + span * clamped)
+                report_progress(value, label, indeterminate)
+
+            return _stage_report
 
         try:
             from svv.domain.domain import Domain
@@ -2350,10 +2365,11 @@ class VascularizeGUI(QMainWindow):
                     # Step 2: Build (tetrahedralize and extract boundary)
                     report_progress(35, "Building domain (tetrahedralization + boundary extraction)...")
                     try:
+                        build_progress = make_stage_reporter(35, 90)
                         if build_resolution is not None:
-                            domain.build(resolution=build_resolution)
+                            domain.build(resolution=build_resolution, progress_callback=build_progress)
                         else:
-                            domain.build()
+                            domain.build(progress_callback=build_progress)
                         report_progress(90, "Domain built successfully")
                     except Exception as exc:
                         # If build fails (e.g., TetGen errors) continue with loaded
@@ -2386,14 +2402,14 @@ class VascularizeGUI(QMainWindow):
                 # Step 2: Create domain
                 report_progress(10, "Creating domain (initializing implicit function)...")
                 domain = Domain(mesh)
-                domain.create()
+                domain.create(progress_callback=make_stage_reporter(10, 30))
                 if cancel_event.is_set():
                     return None
                 report_progress(30, "Domain created")
 
                 # Step 3: Solve (compute fast evaluation structures)
                 report_progress(35, "Solving domain (computing evaluation structures)...")
-                domain.solve()
+                domain.solve(progress_callback=make_stage_reporter(35, 60))
                 if cancel_event.is_set():
                     return None
                 report_progress(60, "Domain solved")
@@ -2403,10 +2419,11 @@ class VascularizeGUI(QMainWindow):
                 build_failed = False
                 build_error_msg = None
                 try:
+                    build_progress = make_stage_reporter(65, 90)
                     if build_resolution is not None:
-                        domain.build(resolution=build_resolution)
+                        domain.build(resolution=build_resolution, progress_callback=build_progress)
                     else:
-                        domain.build()
+                        domain.build(progress_callback=build_progress)
                     report_progress(90, "Domain built successfully")
                 except Exception as exc:
                     build_failed = True
@@ -2430,7 +2447,7 @@ class VascularizeGUI(QMainWindow):
 
             if domain.boundary is None and hasattr(domain, 'patches') and len(domain.patches) > 0:
                 report_progress(92, "Building boundary from patches...")
-                domain.build()
+                domain.build(progress_callback=make_stage_reporter(92, 98))
                 report_progress(98, "Boundary built")
 
             domain.filename = file_path
@@ -2523,13 +2540,31 @@ class VascularizeGUI(QMainWindow):
                 except Exception:
                     break
                 try:
+                    if isinstance(item, dict):
+                        indeterminate = item.get("indeterminate")
+                        if indeterminate is True:
+                            self._load_progress.setRange(0, 0)
+                        elif indeterminate is False and self._load_progress.maximum() == 0:
+                            self._load_progress.setRange(0, 100)
+                        label = item.get("label")
+                        if label:
+                            self._load_progress.setLabelText(label)
+                        if "value" in item:
+                            if self._load_progress.maximum() == 0 and indeterminate is not True:
+                                self._load_progress.setRange(0, 100)
+                            if self._load_progress.maximum() != 0:
+                                self._load_progress.setValue(int(item["value"]))
                     # Handle both plain values and (value, label) tuples
-                    if isinstance(item, tuple):
+                    elif isinstance(item, tuple):
                         value, label = item
+                        if self._load_progress.maximum() == 0:
+                            self._load_progress.setRange(0, 100)
                         self._load_progress.setValue(int(value))
                         if label:
                             self._load_progress.setLabelText(label)
                     else:
+                        if self._load_progress.maximum() == 0:
+                            self._load_progress.setRange(0, 100)
                         self._load_progress.setValue(int(item))
                 except Exception:
                     pass
