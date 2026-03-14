@@ -108,3 +108,87 @@ def test_solution_inspector_open_solution_sets_path_and_calls_loader(monkeypatch
     assert loaded == ["/tmp/example.pvd"]
 
     _close_gui(app, gui)
+
+
+def test_solution_inspector_field_change_updates_auto_colorbar_label(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+    render_calls = []
+
+    monkeypatch.setattr(
+        inspector,
+        "_render_current_mesh",
+        lambda *, reset_camera=False: render_calls.append(reset_camera),
+    )
+
+    inspector.scalar_label_edit.setText("pressure")
+    inspector._scalar_label_auto_text = "pressure"
+
+    inspector._on_scalar_changed("velocity")
+
+    assert inspector.scalar_label_edit.text() == "velocity"
+    assert render_calls == [False]
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_field_change_keeps_custom_colorbar_label(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+    render_calls = []
+
+    monkeypatch.setattr(
+        inspector,
+        "_render_current_mesh",
+        lambda *, reset_camera=False: render_calls.append(reset_camera),
+    )
+
+    inspector.scalar_label_edit.setText("Custom Label")
+    inspector._scalar_label_auto_text = "pressure"
+
+    inspector._on_scalar_changed("velocity")
+
+    assert inspector.scalar_label_edit.text() == "Custom Label"
+    assert render_calls == [False]
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_scalar_label_edit_rerenders_live(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+    render_calls = []
+
+    monkeypatch.setattr(
+        inspector,
+        "_render_current_mesh",
+        lambda *, reset_camera=False: render_calls.append(reset_camera),
+    )
+
+    inspector._on_scalar_label_edited("Flow")
+
+    assert render_calls == [False]
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_plotter_ready_replays_pending_camera_reset(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+    render_calls = []
+
+    monkeypatch.setattr(
+        inspector,
+        "_render_current_mesh",
+        lambda *, reset_camera=False: render_calls.append(reset_camera),
+    )
+
+    inspector._current_mesh = object()
+    inspector._pending_camera_reset = True
+
+    inspector._on_vtk_plotter_ready()
+
+    assert render_calls == [True]
+    assert inspector._pending_camera_reset is False
+
+    _close_gui(app, gui)

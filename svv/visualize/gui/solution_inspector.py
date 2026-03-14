@@ -3839,6 +3839,8 @@ class SolutionInspectorWidget(QWidget):
         self._current_cmap: str = "coolwarm"
         self._global_ranges = {}
         self._colorbar_visible: bool = True
+        self._scalar_label_auto_text: str = ""
+        self._pending_camera_reset: bool = False
         self._background_options_dialog: Optional[BackgroundOptionsDialog] = None
         self._background_settings = {
             "mode": "Gradient",
@@ -4255,6 +4257,7 @@ class SolutionInspectorWidget(QWidget):
 
         # Left: 3D viewport
         self.vtk_widget = VTKWidget(self)
+        self.vtk_widget.plotter_ready.connect(self._on_vtk_plotter_ready)
         main_layout.addWidget(self.vtk_widget, stretch=3)
 
         # Right: scrollable properties panel
@@ -4400,6 +4403,7 @@ class SolutionInspectorWidget(QWidget):
 
         self.scalar_label_edit = QLineEdit()
         self.scalar_label_edit.setPlaceholderText("Colorbar label (optional)")
+        self.scalar_label_edit.textEdited.connect(self._on_scalar_label_edited)
         self.scalar_label_edit.editingFinished.connect(self._on_scalar_label_changed)
         scalar_layout.addRow("Label:", self.scalar_label_edit)
 
@@ -4796,7 +4800,7 @@ class SolutionInspectorWidget(QWidget):
         if plotter:
             plotter.view_yz()
             plotter.camera.azimuth = 0
-            plotter.render()
+            self._request_view_render()
 
     def _view_minus_x(self) -> None:
         """View from -X direction."""
@@ -4804,7 +4808,7 @@ class SolutionInspectorWidget(QWidget):
         if plotter:
             plotter.view_yz()
             plotter.camera.azimuth = 180
-            plotter.render()
+            self._request_view_render()
 
     def _view_plus_y(self) -> None:
         """View from +Y direction."""
@@ -4812,7 +4816,7 @@ class SolutionInspectorWidget(QWidget):
         if plotter:
             plotter.view_xz()
             plotter.camera.azimuth = 90
-            plotter.render()
+            self._request_view_render()
 
     def _view_minus_y(self) -> None:
         """View from -Y direction."""
@@ -4820,14 +4824,14 @@ class SolutionInspectorWidget(QWidget):
         if plotter:
             plotter.view_xz()
             plotter.camera.azimuth = -90
-            plotter.render()
+            self._request_view_render()
 
     def _view_plus_z(self) -> None:
         """View from +Z direction (top)."""
         plotter = getattr(self.vtk_widget, "plotter", None)
         if plotter:
             plotter.view_xy()
-            plotter.render()
+            self._request_view_render()
 
     def _view_minus_z(self) -> None:
         """View from -Z direction (bottom)."""
@@ -4835,7 +4839,7 @@ class SolutionInspectorWidget(QWidget):
         if plotter:
             plotter.view_xy()
             plotter.camera.elevation = -90
-            plotter.render()
+            self._request_view_render()
 
     def _show_camera_presets_dialog(self) -> None:
         """Show the camera presets popup dialog."""
@@ -5022,7 +5026,7 @@ class SolutionInspectorWidget(QWidget):
                 pass
 
         try:
-            plotter.render()
+            self._request_view_render()
         except Exception:
             pass
 
@@ -5061,7 +5065,7 @@ class SolutionInspectorWidget(QWidget):
             checked = not plotter.camera.GetParallelProjection()
 
         plotter.camera.SetParallelProjection(checked)
-        plotter.render()
+        self._request_view_render()
 
         # Sync UI
         self.parallel_proj_action.setChecked(checked)
@@ -5327,7 +5331,7 @@ class SolutionInspectorWidget(QWidget):
                 pickable=False,
             )
             self._probe_actors.append(actor)
-            plotter.render()
+            self._request_view_render()
         except Exception:
             pass
 
@@ -5378,7 +5382,7 @@ class SolutionInspectorWidget(QWidget):
         self._renumber_probe_points()
 
         if plotter:
-            plotter.render()
+            self._request_view_render()
 
         n_remaining = len(self._probed_points)
         self.probe_label.setText(f"Removed {len(indices_to_remove)} point(s). {n_remaining} remaining.")
@@ -5423,7 +5427,7 @@ class SolutionInspectorWidget(QWidget):
         self._probed_point = None
 
         if plotter:
-            plotter.render()
+            self._request_view_render()
 
         self.probe_label.setText("All probe points cleared.")
 
@@ -5700,7 +5704,8 @@ class SolutionInspectorWidget(QWidget):
                 except Exception:
                     pass
                 self._slice_actor = None
-            plotter.render() if plotter else None
+            if plotter:
+                self._request_view_render()
 
     def _update_slice(self) -> None:
         """Update the slice plane."""
@@ -5741,7 +5746,7 @@ class SolutionInspectorWidget(QWidget):
         except Exception:
             pass
 
-        plotter.render()
+        self._request_view_render()
 
     # ------------------------------------------------------------------
     # Threshold filtering
@@ -5796,7 +5801,7 @@ class SolutionInspectorWidget(QWidget):
             if thresholded.n_points > 0:
                 self._add_mesh_to_plotter(plotter, thresholded)
 
-            plotter.render()
+            self._request_view_render()
         except Exception:
             # Fall back to normal rendering
             self._render_current_mesh()
@@ -5882,7 +5887,7 @@ class SolutionInspectorWidget(QWidget):
                 name="vector_glyphs",
             )
 
-            plotter.render()
+            self._request_view_render()
 
         except Exception:
             pass
@@ -6099,7 +6104,7 @@ class SolutionInspectorWidget(QWidget):
                 kwargs["render_lines_as_tubes"] = True
 
             self._streamline_actor = plotter.add_mesh(display_mesh, **kwargs)
-            plotter.render()
+            self._request_view_render()
 
             # Update status
             n_lines = streamlines.n_lines if hasattr(streamlines, 'n_lines') else "?"
@@ -6206,7 +6211,7 @@ class SolutionInspectorWidget(QWidget):
             except Exception:
                 pass
             self._streamline_actor = None
-            plotter.render()
+            self._request_view_render()
 
         self._streamline_enabled = False
         self.streamline_status_label.setText("No streamlines generated")
@@ -6857,6 +6862,44 @@ class SolutionInspectorWidget(QWidget):
 
         self.open_solution(path)
 
+    def _request_view_render(self, *, delay_ms: Optional[int] = None) -> None:
+        """Render through the VTK widget so macOS offscreen mode blits updates."""
+        if hasattr(self, "vtk_widget") and self.vtk_widget is not None:
+            try:
+                if delay_ms is None:
+                    self.vtk_widget.request_render()
+                else:
+                    self.vtk_widget.request_render(delay_ms=delay_ms)
+                return
+            except Exception:
+                pass
+
+        plotter = getattr(self.vtk_widget, "plotter", None)
+        if plotter is None:
+            return
+        try:
+            plotter.render()
+        except Exception:
+            pass
+
+    def _on_vtk_plotter_ready(self) -> None:
+        """Replay any pending mesh draw after the plotter initializes."""
+        if self._current_mesh is None:
+            self._request_view_render()
+            return
+
+        reset_camera = self._pending_camera_reset
+        self._pending_camera_reset = False
+        self._render_current_mesh(reset_camera=reset_camera)
+
+    def _sync_scalar_label_with_field(self, name: Optional[str]) -> None:
+        """Keep the colorbar title following the active field until customized."""
+        text = (name or "").strip()
+        current = self.scalar_label_edit.text().strip()
+        if not current or current == self._scalar_label_auto_text:
+            self.scalar_label_edit.setText(text)
+        self._scalar_label_auto_text = text
+
     def open_solution(self, path: str) -> bool:
         """Load a solution file into the inspector and update the file path field."""
         if not path:
@@ -6879,6 +6922,9 @@ class SolutionInspectorWidget(QWidget):
         self._time_values = list(getattr(reader, "time_values", []) or [])
         self._global_ranges.clear()
         self._time_series_data.clear()
+        self._current_scalar_name = None
+        self._scalar_label_auto_text = ""
+        self.scalar_label_edit.clear()
 
         if self._time_values:
             self.time_slider.setEnabled(True)
@@ -6891,7 +6937,8 @@ class SolutionInspectorWidget(QWidget):
             self.time_slider.setRange(0, 0)
             self.time_label.setText("Time: --")
 
-        self._update_mesh_from_reader(time_index=0)
+        self._pending_camera_reset = True
+        self._update_mesh_from_reader(time_index=0, reset_camera=True)
         self._populate_scalar_fields()
         self._populate_vector_fields()
         self._update_statistics()
@@ -6916,9 +6963,9 @@ class SolutionInspectorWidget(QWidget):
             return
         self._current_time_index = index
         self._update_time_label(index)
-        self._update_mesh_from_reader(time_index=index)
+        self._update_mesh_from_reader(time_index=index, reset_camera=False)
 
-    def _update_mesh_from_reader(self, time_index: Optional[int] = None) -> None:
+    def _update_mesh_from_reader(self, time_index: Optional[int] = None, *, reset_camera: bool = False) -> None:
         if self._reader is None or self._pv is None:
             return
 
@@ -6938,7 +6985,7 @@ class SolutionInspectorWidget(QWidget):
 
         self._current_mesh = mesh
         self._update_scalar_range()
-        self._render_current_mesh()
+        self._render_current_mesh(reset_camera=reset_camera)
 
         # Update slice if active
         if self._slice_enabled:
@@ -6990,7 +7037,7 @@ class SolutionInspectorWidget(QWidget):
 
         self._current_scalar_name = unique_names[0]
         self.scalar_combo.setCurrentText(self._current_scalar_name)
-        self.scalar_label_edit.setText(self._current_scalar_name)
+        self._sync_scalar_label_with_field(self._current_scalar_name)
 
         # Check if selected field is a vector (3 components)
         self._check_vector_field()
@@ -7174,8 +7221,7 @@ class SolutionInspectorWidget(QWidget):
         if not name:
             return
         self._current_scalar_name = name
-        if not self.scalar_label_edit.text().strip():
-            self.scalar_label_edit.setText(name)
+        self._sync_scalar_label_with_field(name)
         self._check_vector_field()
         self._update_scalar_range()
         self._render_current_mesh()
@@ -7196,6 +7242,9 @@ class SolutionInspectorWidget(QWidget):
         vmax = self.scalar_max_spin.value()
         if vmax <= vmin:
             return
+        self._render_current_mesh()
+
+    def _on_scalar_label_edited(self, _text: str) -> None:
         self._render_current_mesh()
 
     def _on_scalar_label_changed(self) -> None:
@@ -7446,22 +7495,29 @@ class SolutionInspectorWidget(QWidget):
 
         return scalar_bar_args
 
-    def _render_current_mesh(self) -> None:
+    def _render_current_mesh(self, *, reset_camera: bool = False) -> None:
         plotter = getattr(self.vtk_widget, "plotter", None)
         mesh = self._current_mesh
 
         if plotter is None:
+            self._pending_camera_reset = self._pending_camera_reset or reset_camera
             return
 
+        self._pending_camera_reset = False
+        saved_state = None if reset_camera else self._save_plotter_state(plotter)
         plotter.clear()
         if mesh is None:
-            plotter.render()
+            self._request_view_render()
             return
 
         self._add_mesh_to_plotter(plotter, mesh)
 
-        plotter.reset_camera()
-        plotter.render()
+        if reset_camera:
+            plotter.reset_camera()
+        elif saved_state is not None:
+            self._restore_plotter_state(plotter, saved_state)
+
+        self._request_view_render()
 
         # Re-add glyphs if active
         if self._vector_field_name:
@@ -7861,7 +7917,7 @@ class SolutionInspectorWidget(QWidget):
             self._render_current_mesh()
         else:
             plotter.reset_camera()
-            plotter.render()
+            self._request_view_render()
 
     def _toggle_side_panel(self, visible: bool = None) -> None:
         """Toggle visibility of the side panel."""

@@ -450,6 +450,7 @@ class VTKWidget(QWidget):
 
     # Signals
     point_picked = Signal(object)  # Emitted when a point is picked (numpy array)
+    plotter_ready = Signal()  # Emitted when the PyVista plotter is initialized
 
     def __init__(self, parent=None):
         """
@@ -756,6 +757,7 @@ class VTKWidget(QWidget):
 
         self._plotter_init_done = True
         self._plotter_init_in_progress = False
+        self.plotter_ready.emit()
 
     def _remove_placeholder(self):
         """Remove the initial viewport placeholder."""
