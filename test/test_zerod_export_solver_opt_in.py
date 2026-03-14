@@ -40,6 +40,11 @@ def test_tree_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, tm
     assert (outdir / "solver_0d.in").is_file()
     assert (outdir / "run.py").is_file()
     assert not (outdir / "cmd_run.bash").exists()
+    run_text = (outdir / "run.py").read_text(encoding="utf-8")
+    plot_text = (outdir / "plot_0d_results_to_3d.py").read_text(encoding="utf-8")
+    assert "CHILD_PID_FILE" in run_text
+    assert "signal.signal" in run_text
+    assert "SVV_0D_DISABLE_TQDM" in plot_text
 
 
 def test_forest_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, tmp_path):
@@ -69,3 +74,5 @@ def test_forest_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, 
     assert (outdir / "solver_0d.in").is_file()
     assert (outdir / "run.py").is_file()
     assert not (outdir / "cmd_run.bash").exists()
+    run_text = (outdir / "run.py").read_text(encoding="utf-8")
+    assert "CHILD_PID_FILE" in run_text

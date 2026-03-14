@@ -3,8 +3,10 @@ Unified CAD-style main GUI window for svVascularize.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 import os
+import signal
 import sys
 
 if sys.platform == "darwin":
@@ -18,7 +20,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QColorDialog, QMenu
 )
-from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QUrl
+from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QUrl, QProcess, QProcessEnvironment
 from PySide6.QtGui import QAction, QKeySequence, QDesktopServices
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
@@ -32,6 +34,37 @@ import svv.tree.tree as _svv_tree_mod
 import svv.forest.forest as _svv_forest_mod
 from svv.telemetry import capture_exception, capture_message
 from svv.visualize.spline_export import export_spline_files
+
+
+@dataclass
+class _ZeroDExportOptions:
+    steady: bool
+    number_cardiac_cycles: int
+    number_time_pts_per_cycle: int
+    folder: str
+    material: str
+    viscosity_model: str
+    vivo: bool
+    distal_pressure: float
+    capacitance: bool
+    inductance: bool
+    get_0d_solver: bool
+    path_to_0d_solver: Optional[str] = None
+    density: Optional[float] = None
+    viscosity: Optional[float] = None
+    filename: str = "solver_0d.in"
+    geom_filename: str = "geom.csv"
+    network_id: Optional[int] = None
+    inlets: Optional[list[int]] = None
+
+
+@dataclass
+class _ZeroDPipelineStep:
+    name: str
+    log_prefix: str
+    program: str
+    args: list[str]
+    env: dict[str, str] = field(default_factory=dict)
 
 
 class SystemMonitorWidget(QFrame):
@@ -420,6 +453,18 @@ class VascularizeGUI(QMainWindow):
         self._load_progress = None
         self._load_cancel_event = None
         self._load_progress_queue = None
+        self._zerod_process: Optional[QProcess] = None
+        self._zerod_pipeline_steps: list[_ZeroDPipelineStep] = []
+        self._zerod_pipeline_step_index = -1
+        self._zerod_pipeline_export_path: Optional[str] = None
+        self._zerod_pipeline_log_path: Optional[str] = None
+        self._zerod_pipeline_log_handle = None
+        self._zerod_pipeline_auto_open = False
+        self._zerod_pipeline_cancel_requested = False
+        self._zerod_pipeline_close_requested = False
+        self._zerod_progress_dialog: Optional[QProgressDialog] = None
+        self._zerod_stdout_buffer = ""
+        self._zerod_stderr_buffer = ""
 
         # Persistent layout
         self.settings = QSettings("SimVascular", "svVascularize")
@@ -818,10 +863,17 @@ class VascularizeGUI(QMainWindow):
         # Simulate menu - export simulation setup files
         simulate_menu = menubar.addMenu("&Simulate")
 
-        export_0d_action = QAction("Export 0D Simulation...", self)
-        export_0d_action.setStatusTip("Export 0D lumped parameter simulation files for the current tree or forest")
-        export_0d_action.triggered.connect(self.export_0d_simulation_dialog)
-        simulate_menu.addAction(export_0d_action)
+        self.export_0d_action = QAction("Export 0D Simulation...", self)
+        self.export_0d_action.setStatusTip("Export 0D lumped parameter simulation files for the current tree or forest")
+        self.export_0d_action.triggered.connect(self.export_0d_simulation_dialog)
+        simulate_menu.addAction(self.export_0d_action)
+
+        self.build_and_simulate_0d_action = QAction("Build & Simulate 0D...", self)
+        self.build_and_simulate_0d_action.setStatusTip(
+            "Export 0D files, run the solver pipeline in the background, and open the generated .pvd results"
+        )
+        self.build_and_simulate_0d_action.triggered.connect(self.build_and_simulate_0d_dialog)
+        simulate_menu.addAction(self.build_and_simulate_0d_action)
 
         export_3d_action = QAction("Export 3D Simulation...", self)
         export_3d_action.setStatusTip("Build meshes and export 3D simulation setup for the current tree or forest")
@@ -1521,20 +1573,59 @@ class VascularizeGUI(QMainWindow):
 
     def export_0d_simulation_dialog(self):
         """Export 0D simulation files for the current Tree/Forest."""
+        self._run_0d_workflow(run_pipeline=False)
+
+    def build_and_simulate_0d_dialog(self):
+        """Export 0D files and run the generated solver/postprocess pipeline."""
+        self._run_0d_workflow(run_pipeline=True)
+
+    def _run_0d_workflow(self, run_pipeline: bool):
+        if run_pipeline and self._zerod_pipeline_is_active():
+            QMessageBox.information(
+                self,
+                "0D Pipeline Running",
+                "A 0D Build & Simulate run is already in progress."
+            )
+            return
+
         obj = self._require_synthetic_object()
         if obj is None:
             return
-        from svv.simulation.simulation import Simulation
 
+        options = self._prompt_0d_export_options(obj)
+        if options is None:
+            return
+
+        target = self._select_0d_output_directory(options.folder)
+        if target is None:
+            return
+        out_dir, folder, export_path = target
+
+        action_name = "build_and_simulate_0d" if run_pipeline else "export_0d"
+        try:
+            export_path = self._export_0d_simulation(obj, options, out_dir, folder)
+            self.log_output(f"[0D] exported files to {export_path}")
+            self.update_status(f"0D simulation files exported to {export_path}")
+        except Exception as exc:
+            self._record_telemetry(exc, action=action_name)
+            QMessageBox.critical(
+                self,
+                "Export 0D Simulation Failed",
+                f"Failed to export 0D simulation files:\n\n{exc}"
+            )
+            return
+
+        if run_pipeline:
+            self._start_0d_pipeline(export_path)
+
+    def _prompt_0d_export_options(self, obj) -> Optional[_ZeroDExportOptions]:
         is_tree = isinstance(obj, _svv_tree_mod.Tree)
         is_forest = isinstance(obj, _svv_forest_mod.Forest)
 
-        # ---- Build options dialog ----
         dlg = QDialog(self)
         dlg.setWindowTitle("0D Simulation Options")
         form = QFormLayout()
 
-        # Common options
         steady_cb = QCheckBox("Steady inflow")
         steady_cb.setChecked(True)
         form.addRow("Inflow type:", steady_cb)
@@ -1555,7 +1646,6 @@ class VascularizeGUI(QMainWindow):
         folder_edit.setToolTip("Folder name inside the output directory to hold 0D files.")
         form.addRow("Folder name:", folder_edit)
 
-        # Tree-specific fluid properties
         density_spin = None
         viscosity_spin = None
         if is_tree:
@@ -1575,21 +1665,18 @@ class VascularizeGUI(QMainWindow):
             viscosity_spin.setToolTip("Fluid viscosity in CGS units.")
             form.addRow("Viscosity:", viscosity_spin)
 
-        # Material model
         material_combo = QComboBox()
         material_combo.addItems(["olufsen", "linear"])
         material_combo.setCurrentText("olufsen")
         material_combo.setToolTip("Wall material model for vessel compliance.")
         form.addRow("Material:", material_combo)
 
-        # Viscosity model
         viscosity_model_combo = QComboBox()
         viscosity_model_combo.addItems(["constant", "modified viscosity law"])
         viscosity_model_combo.setCurrentText("constant")
         viscosity_model_combo.setToolTip("Viscosity model for blood rheology.")
         form.addRow("Viscosity model:", viscosity_model_combo)
 
-        # Solver and BC-related options
         vivo_cb = QCheckBox("In vivo conditions")
         vivo_cb.setChecked(True)
         form.addRow("Mode:", vivo_cb)
@@ -1618,7 +1705,6 @@ class VascularizeGUI(QMainWindow):
         solver_path_edit.setPlaceholderText("Optional explicit path to 0D solver")
         form.addRow("Solver path:", solver_path_edit)
 
-        # Tree-specific filenames
         filename_edit = None
         geom_filename_edit = None
         if is_tree:
@@ -1630,7 +1716,6 @@ class VascularizeGUI(QMainWindow):
             geom_filename_edit.setToolTip("Filename for exported vessel geometry CSV.")
             form.addRow("Geometry filename:", geom_filename_edit)
 
-        # Forest-specific network/inlet options
         network_spin = None
         inlets_edit = None
         if is_forest:
@@ -1654,26 +1739,7 @@ class VascularizeGUI(QMainWindow):
         dlg.setLayout(layout)
 
         if dlg.exec() != QDialog.Accepted:
-            return
-
-        # Collect options
-        steady = steady_cb.isChecked()
-        number_cardiac_cycles = cycles_spin.value()
-        number_time_pts_per_cycle = pts_spin.value()
-        folder = folder_edit.text().strip() or "0d_tmp"
-        material = material_combo.currentText()
-        viscosity_model = viscosity_model_combo.currentText()
-        vivo = vivo_cb.isChecked()
-        distal_pressure = float(distal_pressure_spin.value())
-        capacitance = capacitance_cb.isChecked()
-        inductance = inductance_cb.isChecked()
-        get_0d_solver = get_solver_cb.isChecked()
-        path_to_0d_solver = solver_path_edit.text().strip() or None
-
-        density = float(density_spin.value()) if density_spin is not None else None
-        viscosity = float(viscosity_spin.value()) if viscosity_spin is not None else None
-        filename = filename_edit.text().strip() if filename_edit is not None else "solver_0d.in"
-        geom_filename = geom_filename_edit.text().strip() if geom_filename_edit is not None else "geom.csv"
+            return None
 
         network_id = network_spin.value() if network_spin is not None else None
         inlets = None
@@ -1681,7 +1747,7 @@ class VascularizeGUI(QMainWindow):
             txt = inlets_edit.text().strip()
             if txt:
                 try:
-                    inlets = [int(part.strip()) for part in txt.split(",") if part.strip() != ""]
+                    inlets = [int(part.strip()) for part in txt.split(",") if part.strip()]
                 except ValueError:
                     QMessageBox.warning(
                         self,
@@ -1693,23 +1759,49 @@ class VascularizeGUI(QMainWindow):
                         level="warning",
                         action="export_0d_invalid_inlets",
                     )
-                    return
+                    return None
+        if is_forest and not inlets:
+            QMessageBox.warning(
+                self,
+                "Missing Inlets",
+                "Forest 0D export requires at least one inlet tree index."
+            )
+            return None
 
+        return _ZeroDExportOptions(
+            steady=steady_cb.isChecked(),
+            number_cardiac_cycles=cycles_spin.value(),
+            number_time_pts_per_cycle=pts_spin.value(),
+            folder=folder_edit.text().strip() or "0d_tmp",
+            material=material_combo.currentText(),
+            viscosity_model=viscosity_model_combo.currentText(),
+            vivo=vivo_cb.isChecked(),
+            distal_pressure=float(distal_pressure_spin.value()),
+            capacitance=capacitance_cb.isChecked(),
+            inductance=inductance_cb.isChecked(),
+            get_0d_solver=get_solver_cb.isChecked(),
+            path_to_0d_solver=solver_path_edit.text().strip() or None,
+            density=float(density_spin.value()) if density_spin is not None else None,
+            viscosity=float(viscosity_spin.value()) if viscosity_spin is not None else None,
+            filename=filename_edit.text().strip() if filename_edit is not None else "solver_0d.in",
+            geom_filename=geom_filename_edit.text().strip() if geom_filename_edit is not None else "geom.csv",
+            network_id=network_id,
+            inlets=inlets,
+        )
+
+    def _select_0d_output_directory(self, requested_folder: str) -> Optional[tuple[str, str, str]]:
         out_dir = QFileDialog.getExistingDirectory(
             self,
             "Select Output Directory for 0D Simulation",
             ""
         )
         if not out_dir:
-            return
+            return None
 
-        # Find a non-conflicting subfolder name (e.g., "0d_tmp (1)") inside the
-        # selected output directory and create it up front.
-        base_folder_name = folder
-        candidate = base_folder_name
+        candidate = requested_folder
         suffix = 1
         while os.path.exists(os.path.join(out_dir, candidate)):
-            candidate = f"{base_folder_name} ({suffix})"
+            candidate = f"{requested_folder} ({suffix})"
             suffix += 1
         target_path = os.path.join(out_dir, candidate)
         try:
@@ -1721,71 +1813,469 @@ class VascularizeGUI(QMainWindow):
                 "Output Folder Error",
                 f"Could not create output folder for 0D export:\n\n{exc}"
             )
-            return
+            return None
 
-        if candidate != base_folder_name:
+        if candidate != requested_folder:
             QMessageBox.information(
                 self,
                 "Output Folder Renamed",
-                f"The folder '{base_folder_name}' already exists in the selected directory.\n"
+                f"The folder '{requested_folder}' already exists in the selected directory.\n"
                 f"Using '{candidate}' instead.\n\nFiles will be written to:\n{target_path}"
             )
+        return out_dir, candidate, target_path
 
-        folder = candidate
+    def _export_0d_simulation(self, obj, options: _ZeroDExportOptions, out_dir: str, folder: str) -> str:
+        from svv.simulation.simulation import Simulation
 
-        export_path = target_path
+        sim = Simulation(obj, directory=out_dir)
+        common_kwargs = {
+            "outdir": out_dir,
+            "folder": folder,
+            "steady": options.steady,
+            "number_cardiac_cycles": options.number_cardiac_cycles,
+            "flow": None,
+            "number_time_pts_per_cycle": options.number_time_pts_per_cycle,
+            "material": options.material,
+            "get_0d_solver": options.get_0d_solver,
+            "path_to_0d_solver": options.path_to_0d_solver,
+            "viscosity_model": options.viscosity_model,
+            "vivo": options.vivo,
+            "distal_pressure": options.distal_pressure,
+            "capacitance": options.capacitance,
+            "inductance": options.inductance,
+        }
+
+        if isinstance(obj, _svv_tree_mod.Tree):
+            common_kwargs.update(
+                density=options.density if options.density is not None else 1.06,
+                viscosity=options.viscosity if options.viscosity is not None else 0.04,
+                filename=options.filename,
+                geom_filename=options.geom_filename,
+            )
+            return sim.export_0d_fluid_simulation(**common_kwargs)
+
+        if isinstance(obj, _svv_forest_mod.Forest):
+            if options.network_id is None or options.inlets is None:
+                raise ValueError("Network ID and inlets are required for forest 0D export.")
+            return sim.export_0d_fluid_simulation(options.network_id, options.inlets, **common_kwargs)
+
+        raise ValueError("Unsupported object type for 0D export.")
+
+    def _zerod_pipeline_is_active(self) -> bool:
+        if self._zerod_process is not None:
+            return True
+        return bool(self._zerod_pipeline_steps)
+
+    def _set_0d_actions_enabled(self, enabled: bool) -> None:
+        for attr in ("export_0d_action", "build_and_simulate_0d_action"):
+            action = getattr(self, attr, None)
+            if action is not None:
+                action.setEnabled(enabled)
+
+    def _build_0d_pipeline_steps(self, export_path: str) -> list[_ZeroDPipelineStep]:
+        base_env = {"PYTHONUNBUFFERED": "1"}
+        return [
+            _ZeroDPipelineStep(
+                name="Run 0D solver",
+                log_prefix="solver",
+                program=sys.executable,
+                args=["-u", os.path.join(export_path, "run.py")],
+                env=dict(base_env),
+            ),
+            _ZeroDPipelineStep(
+                name="Map 0D results to 3D",
+                log_prefix="plot",
+                program=sys.executable,
+                args=["-u", os.path.join(export_path, "plot_0d_results_to_3d.py")],
+                env={
+                    **base_env,
+                    "SVV_0D_RENDER_SCREENSHOTS": "0",
+                    "SVV_0D_DISABLE_TQDM": "1",
+                },
+            ),
+            _ZeroDPipelineStep(
+                name="Collate time series to PVD",
+                log_prefix="collate",
+                program=sys.executable,
+                args=["-u", os.path.join(export_path, "collate_timeseries_to_pvd.py")],
+                env=dict(base_env),
+            ),
+        ]
+
+    def _start_0d_pipeline(self, export_path: str) -> None:
+        if self._zerod_pipeline_is_active():
+            QMessageBox.information(
+                self,
+                "0D Pipeline Running",
+                "A 0D Build & Simulate run is already in progress."
+            )
+            return
+
+        self._zerod_pipeline_steps = self._build_0d_pipeline_steps(export_path)
+        self._zerod_pipeline_step_index = -1
+        self._zerod_pipeline_export_path = export_path
+        self._zerod_pipeline_log_path = os.path.join(export_path, "0d_pipeline.log")
+        self._zerod_pipeline_auto_open = True
+        self._zerod_pipeline_cancel_requested = False
+        self._zerod_pipeline_close_requested = False
+        self._zerod_stdout_buffer = ""
+        self._zerod_stderr_buffer = ""
+        self._set_0d_actions_enabled(False)
 
         try:
-            sim = Simulation(obj, directory=out_dir)
-            sim.file_path = export_path
-            if is_tree:
-                sim.export_0d_fluid_simulation(
-                    steady=steady,
-                    number_cardiac_cycles=number_cardiac_cycles,
-                    flow=None,
-                    number_time_pts_per_cycle=number_time_pts_per_cycle,
-                    density=density if density is not None else 1.06,
-                    viscosity=viscosity if viscosity is not None else 0.04,
-                    material=material,
-                    get_0d_solver=get_0d_solver,
-                    path_to_0d_solver=path_to_0d_solver,
-                    viscosity_model=viscosity_model,
-                    vivo=vivo,
-                    distal_pressure=distal_pressure,
-                    capacitance=capacitance,
-                    inductance=inductance,
-                    filename=filename,
-                    geom_filename=geom_filename,
-                )
-            elif is_forest:
-                if network_id is None or inlets is None:
-                    raise ValueError("Network ID and inlets are required for forest 0D export.")
-                sim.export_0d_fluid_simulation(
-                    network_id,
-                    inlets,
-                    steady=steady,
-                    number_cardiac_cycles=number_cardiac_cycles,
-                    flow=None,
-                    number_time_pts_per_cycle=number_time_pts_per_cycle,
-                    material=material,
-                    get_0d_solver=get_0d_solver,
-                    path_to_0d_solver=path_to_0d_solver,
-                    viscosity_model=viscosity_model,
-                    vivo=vivo,
-                    distal_pressure=distal_pressure,
-                    capacitance=capacitance,
-                    inductance=inductance,
-                )
-            else:
-                raise ValueError("Unsupported object type for 0D export.")
-            self.update_status(f"0D simulation files exported to {export_path}")
-        except Exception as e:
-            self._record_telemetry(e, action="export_0d")
-            QMessageBox.critical(
-                self,
-                "Export 0D Simulation Failed",
-                f"Failed to export 0D simulation files:\n\n{e}"
+            self._zerod_pipeline_log_handle = open(self._zerod_pipeline_log_path, "a", encoding="utf-8")
+        except Exception as exc:
+            self._zerod_pipeline_log_handle = None
+            self._record_telemetry(exc, action="zerod_pipeline_log_open")
+
+        self._show_output_console()
+        self._append_0d_log_line(f"[0D] starting Build & Simulate pipeline in {export_path}")
+        self.update_status("Starting 0D Build & Simulate...")
+
+        self._zerod_progress_dialog = QProgressDialog(
+            "Preparing 0D pipeline...",
+            "Cancel",
+            0,
+            len(self._zerod_pipeline_steps),
+            self,
+        )
+        self._zerod_progress_dialog.setWindowTitle("0D Build & Simulate")
+        self._zerod_progress_dialog.setWindowModality(Qt.WindowModal)
+        self._zerod_progress_dialog.setMinimumDuration(0)
+        self._zerod_progress_dialog.setAutoClose(False)
+        self._zerod_progress_dialog.setAutoReset(False)
+        self._zerod_progress_dialog.setValue(0)
+        self._zerod_progress_dialog.canceled.connect(self._cancel_0d_pipeline)
+        self._zerod_progress_dialog.show()
+
+        self._start_next_0d_pipeline_step()
+
+    def _start_next_0d_pipeline_step(self) -> None:
+        if self._zerod_pipeline_cancel_requested:
+            self._finish_0d_pipeline(
+                success=False,
+                message="0D Build & Simulate canceled",
+                canceled=True,
             )
+            return
+
+        next_index = self._zerod_pipeline_step_index + 1
+        if next_index >= len(self._zerod_pipeline_steps):
+            self._finish_0d_pipeline(
+                success=True,
+                message="0D Build & Simulate completed successfully",
+            )
+            return
+
+        step = self._zerod_pipeline_steps[next_index]
+        self._zerod_pipeline_step_index = next_index
+        self._zerod_stdout_buffer = ""
+        self._zerod_stderr_buffer = ""
+
+        process = QProcess(self)
+        process.setWorkingDirectory(self._zerod_pipeline_export_path or "")
+        env = QProcessEnvironment.systemEnvironment()
+        for key, value in step.env.items():
+            env.insert(key, value)
+        process.setProcessEnvironment(env)
+        process.readyReadStandardOutput.connect(self._on_0d_process_stdout)
+        process.readyReadStandardError.connect(self._on_0d_process_stderr)
+        process.finished.connect(self._on_0d_process_finished)
+        process.errorOccurred.connect(self._on_0d_process_error)
+        self._zerod_process = process
+
+        step_count = len(self._zerod_pipeline_steps)
+        if self._zerod_progress_dialog is not None:
+            self._zerod_progress_dialog.setValue(next_index)
+            self._zerod_progress_dialog.setLabelText(f"{step.name} ({next_index + 1}/{step_count})...")
+
+        cmd_display = " ".join([step.program, *step.args])
+        self._append_0d_log_line(f"[0D] step {next_index + 1}/{step_count}: {step.name}")
+        self._append_0d_log_line(f"[0D {step.log_prefix}] $ {cmd_display}")
+        self.update_status(f"{step.name}...")
+        process.start(step.program, step.args)
+
+    def _current_0d_step(self) -> Optional[_ZeroDPipelineStep]:
+        idx = self._zerod_pipeline_step_index
+        if idx < 0 or idx >= len(self._zerod_pipeline_steps):
+            return None
+        return self._zerod_pipeline_steps[idx]
+
+    def _show_output_console(self) -> None:
+        if hasattr(self, "info_tabs") and hasattr(self, "output_console"):
+            self.info_tabs.setCurrentWidget(self.output_console)
+            self.info_dock.show()
+
+    def _append_0d_log_line(self, message: str) -> None:
+        self.log_output(message)
+        if self._zerod_pipeline_log_handle is not None:
+            try:
+                self._zerod_pipeline_log_handle.write(message + "\n")
+                self._zerod_pipeline_log_handle.flush()
+            except Exception:
+                pass
+
+    def _consume_0d_output(self, text: str, *, is_stderr: bool) -> None:
+        if not text:
+            return
+        buffer_attr = "_zerod_stderr_buffer" if is_stderr else "_zerod_stdout_buffer"
+        current = getattr(self, buffer_attr)
+        current += text
+        lines = current.splitlines(keepends=True)
+        remainder = ""
+        prefix = "0D"
+        step = self._current_0d_step()
+        if step is not None:
+            prefix = f"0D {step.log_prefix}"
+        if is_stderr:
+            prefix += " stderr"
+        for line in lines:
+            if line.endswith("\n") or line.endswith("\r"):
+                clean = line.rstrip("\r\n")
+                if clean:
+                    self._append_0d_log_line(f"[{prefix}] {clean}")
+            else:
+                remainder = line
+        setattr(self, buffer_attr, remainder)
+
+    def _flush_0d_output_buffers(self) -> None:
+        for attr, is_stderr in (("_zerod_stdout_buffer", False), ("_zerod_stderr_buffer", True)):
+            remainder = getattr(self, attr)
+            if remainder:
+                prefix = "0D"
+                step = self._current_0d_step()
+                if step is not None:
+                    prefix = f"0D {step.log_prefix}"
+                if is_stderr:
+                    prefix += " stderr"
+                self._append_0d_log_line(f"[{prefix}] {remainder}")
+                setattr(self, attr, "")
+
+    def _on_0d_process_stdout(self) -> None:
+        if self._zerod_process is None:
+            return
+        text = bytes(self._zerod_process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        self._consume_0d_output(text, is_stderr=False)
+
+    def _on_0d_process_stderr(self) -> None:
+        if self._zerod_process is None:
+            return
+        text = bytes(self._zerod_process.readAllStandardError()).decode("utf-8", errors="replace")
+        self._consume_0d_output(text, is_stderr=True)
+
+    def _on_0d_process_error(self, _error) -> None:
+        process = self._zerod_process
+        if process is None:
+            return
+        if self._zerod_pipeline_cancel_requested:
+            return
+        err = process.errorString()
+        step = self._current_0d_step()
+        prefix = step.log_prefix if step is not None else "process"
+        if _error == QProcess.FailedToStart:
+            if err:
+                self._append_0d_log_line(f"[0D {prefix} stderr] process error: {err}")
+            process.deleteLater()
+            self._zerod_process = None
+            self._finish_0d_pipeline(
+                success=False,
+                message=f"{step.name if step is not None else '0D step'} failed to start",
+            )
+            return
+        if err:
+            self._append_0d_log_line(f"[0D {prefix} stderr] process error: {err}")
+
+    def _on_0d_process_finished(self, exit_code: int, exit_status) -> None:
+        process = self._zerod_process
+        step = self._current_0d_step()
+        step_name = step.name if step is not None else "0D step"
+        step_prefix = step.log_prefix if step is not None else "process"
+        self._flush_0d_output_buffers()
+
+        if process is not None:
+            process.deleteLater()
+        self._zerod_process = None
+
+        if self._zerod_pipeline_cancel_requested:
+            self._append_0d_log_line(f"[0D {step_prefix}] canceled")
+            self._finish_0d_pipeline(
+                success=False,
+                message="0D Build & Simulate canceled",
+                canceled=True,
+            )
+            return
+
+        normal_exit = exit_status == QProcess.NormalExit
+        if (not normal_exit) or exit_code != 0:
+            self._append_0d_log_line(
+                f"[0D {step_prefix} stderr] {step_name} failed with exit code {exit_code}"
+            )
+            self._finish_0d_pipeline(
+                success=False,
+                message=f"{step_name} failed with exit code {exit_code}",
+            )
+            return
+
+        if self._zerod_progress_dialog is not None:
+            self._zerod_progress_dialog.setValue(self._zerod_pipeline_step_index + 1)
+        self._append_0d_log_line(f"[0D {step_prefix}] completed")
+        QTimer.singleShot(0, self._start_next_0d_pipeline_step)
+
+    def _cancel_0d_pipeline(self) -> None:
+        if self._zerod_pipeline_cancel_requested:
+            return
+        self._zerod_pipeline_cancel_requested = True
+        self._append_0d_log_line("[0D] cancel requested")
+        self.update_status("Canceling 0D Build & Simulate...")
+
+        process = self._zerod_process
+        if process is None or process.state() == QProcess.NotRunning:
+            self._finish_0d_pipeline(
+                success=False,
+                message="0D Build & Simulate canceled",
+                canceled=True,
+            )
+            return
+
+        process.terminate()
+        QTimer.singleShot(3000, lambda proc=process: self._force_kill_0d_process(proc))
+
+    def _force_kill_0d_process(self, process: QProcess) -> None:
+        if process is not self._zerod_process:
+            return
+        if process.state() == QProcess.NotRunning:
+            return
+        step = self._current_0d_step()
+        prefix = step.log_prefix if step is not None else "process"
+        self._append_0d_log_line(f"[0D {prefix} stderr] terminate timed out; killing process")
+        self._signal_0d_child_from_pidfile(force=True)
+        process.kill()
+
+    def _signal_0d_child_from_pidfile(self, *, force: bool) -> None:
+        export_path = self._zerod_pipeline_export_path
+        if not export_path or os.name == "nt":
+            return
+
+        pid_path = os.path.join(export_path, ".svv_0d_solver.pid")
+        if not os.path.isfile(pid_path):
+            return
+        try:
+            with open(pid_path, "r", encoding="utf-8") as pid_file:
+                pid = int(pid_file.read().strip())
+        except Exception:
+            return
+
+        try:
+            os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except Exception as exc:
+            self._record_telemetry(exc, action="zerod_pipeline_signal_child")
+
+    def _finish_0d_pipeline(self, *, success: bool, message: str, canceled: bool = False) -> None:
+        export_path = self._zerod_pipeline_export_path
+        auto_open = success and self._zerod_pipeline_auto_open
+        close_requested = self._zerod_pipeline_close_requested
+
+        self._append_0d_log_line(f"[0D] {message}")
+        self._cleanup_0d_pipeline()
+
+        if canceled:
+            self.update_status("0D Build & Simulate canceled")
+            return
+
+        if success:
+            self.update_status(message)
+            opened_path = None
+            if auto_open and export_path:
+                opened_path = self._auto_open_0d_results(export_path)
+                if opened_path:
+                    self._append_0d_log_line(f"[0D] opened results in Solution Inspector: {opened_path}")
+                else:
+                    self._append_0d_log_line("[0D] results were generated but the .pvd file could not be opened")
+                    if not close_requested:
+                        QMessageBox.warning(
+                            self,
+                            "0D Results Generated",
+                            "The 0D pipeline completed, but the generated timeseries.pvd file "
+                            "could not be opened automatically in the Solution Inspector."
+                        )
+            return
+
+        self.update_status("0D Build & Simulate failed")
+        if close_requested:
+            return
+        QMessageBox.critical(
+            self,
+            "0D Build & Simulate Failed",
+            f"The 0D pipeline did not complete successfully.\n\n{message}"
+        )
+
+    def _cleanup_0d_pipeline(self) -> None:
+        self._set_0d_actions_enabled(True)
+
+        if self._zerod_progress_dialog is not None:
+            try:
+                self._zerod_progress_dialog.canceled.disconnect(self._cancel_0d_pipeline)
+            except Exception:
+                pass
+            self._zerod_progress_dialog.close()
+            self._zerod_progress_dialog = None
+
+        if self._zerod_pipeline_log_handle is not None:
+            try:
+                self._zerod_pipeline_log_handle.close()
+            except Exception:
+                pass
+            self._zerod_pipeline_log_handle = None
+
+        self._zerod_process = None
+        self._zerod_pipeline_steps = []
+        self._zerod_pipeline_step_index = -1
+        self._zerod_pipeline_export_path = None
+        self._zerod_pipeline_log_path = None
+        self._zerod_pipeline_auto_open = False
+        self._zerod_pipeline_cancel_requested = False
+        self._zerod_pipeline_close_requested = False
+        self._zerod_stdout_buffer = ""
+        self._zerod_stderr_buffer = ""
+
+    def _auto_open_0d_results(self, export_path: str) -> Optional[str]:
+        pvd_path = os.path.join(export_path, "timeseries", "timeseries.pvd")
+        if not os.path.isfile(pvd_path):
+            return None
+        inspector = getattr(self, "solution_inspector", None)
+        if inspector is None:
+            return None
+        self._show_solution_inspector()
+        try:
+            opened = inspector.open_solution(pvd_path)
+        except Exception as exc:
+            self._record_telemetry(exc, action="zerod_pipeline_auto_open")
+            return None
+        return pvd_path if opened else None
+
+    def _shutdown_0d_pipeline_for_close(self) -> None:
+        if not self._zerod_pipeline_is_active():
+            return
+
+        self._zerod_pipeline_close_requested = True
+        self._zerod_pipeline_cancel_requested = True
+        process = self._zerod_process
+        if process is not None and process.state() != QProcess.NotRunning:
+            try:
+                process.terminate()
+                process.waitForFinished(1500)
+            except Exception:
+                pass
+            if process.state() != QProcess.NotRunning:
+                self._signal_0d_child_from_pidfile(force=True)
+                try:
+                    process.kill()
+                    process.waitForFinished(1500)
+                except Exception:
+                    pass
+        self._cleanup_0d_pipeline()
 
     def export_3d_simulation_dialog(self):
         """Build meshes and export 3D simulation setup for the current Tree/Forest."""
@@ -2257,6 +2747,8 @@ class VascularizeGUI(QMainWindow):
                 self._load_cancel_event.set()
             except Exception:
                 pass
+
+        self._shutdown_0d_pipeline_for_close()
 
         # Shut down background executors
         try:

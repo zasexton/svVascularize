@@ -1,6 +1,7 @@
 make_results = """import pyvista as pv
 import numpy as np
 import os
+import sys
 from tqdm import tqdm
 import csv
 from collections import defaultdict
@@ -46,6 +47,7 @@ cylinder_capping = os.environ.get("SVV_0D_CYLINDER_CAPPING", "0") == "1"
 max_units = int(os.environ.get("SVV_0D_MAX_VESSELS", "0"))
 max_timesteps = int(os.environ.get("SVV_0D_MAX_TIMESTEPS", "0"))
 timestep_stride = max(1, int(os.environ.get("SVV_0D_TIMESTEP_STRIDE", "1")))
+disable_tqdm = os.environ.get("SVV_0D_DISABLE_TQDM", "0") == "1" or not sys.stdout.isatty()
 
 for folder in ("timeseries", "timeseries_for_pressure_gif", "timeseries_for_flow_gif", "timeseries_for_wss_gif"):
     os.makedirs(folder, exist_ok=True)
@@ -134,7 +136,7 @@ for idx in timesteps:
         max_wss = max(max_wss, wss)
 
 total = None
-for out_idx, idx in enumerate(tqdm(timesteps, desc="Building/Saving Timeseries", position=0)):
+for out_idx, idx in enumerate(tqdm(timesteps, desc="Building/Saving Timeseries", position=0, disable=disable_tqdm)):
     time_value = float(data['time'][first_vessel][first_segment][idx])
     meshes = []
     for unit in all_units:

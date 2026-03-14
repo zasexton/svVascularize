@@ -6855,19 +6855,25 @@ class SolutionInspectorWidget(QWidget):
         if not path:
             return
 
-        self.file_edit.setText(path)
-        self._load_solution(path)
+        self.open_solution(path)
 
-    def _load_solution(self, path: str) -> None:
+    def open_solution(self, path: str) -> bool:
+        """Load a solution file into the inspector and update the file path field."""
+        if not path:
+            return False
+        self.file_edit.setText(path)
+        return self._load_solution(path)
+
+    def _load_solution(self, path: str) -> bool:
         if self._pv is None:
-            return
+            return False
         if not os.path.isfile(path):
-            return
+            return False
 
         try:
             reader = self._pv.get_reader(path)
         except Exception:
-            return
+            return False
 
         self._reader = reader
         self._time_values = list(getattr(reader, "time_values", []) or [])
@@ -6889,6 +6895,7 @@ class SolutionInspectorWidget(QWidget):
         self._populate_scalar_fields()
         self._populate_vector_fields()
         self._update_statistics()
+        return True
 
     # ------------------------------------------------------------------
     # Time handling

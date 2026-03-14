@@ -1,0 +1,110 @@
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QProcess
+from PySide6.QtWidgets import QApplication
+
+import svv.visualize.gui.main_window as main_window_mod
+from svv.visualize.gui.main_window import VascularizeGUI, _ZeroDPipelineStep
+
+
+def _make_gui(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("SVV_GUI_DISABLE_VTK", "1")
+    monkeypatch.setenv("SVV_TELEMETRY_DISABLED", "1")
+    app = QApplication.instance() or QApplication([])
+    gui = VascularizeGUI()
+    return app, gui
+
+
+def _close_gui(app, gui):
+    gui.close()
+    app.processEvents()
+
+
+def test_build_0d_pipeline_steps_disable_gui_unfriendly_outputs(monkeypatch, tmp_path):
+    app, gui = _make_gui(monkeypatch)
+
+    steps = gui._build_0d_pipeline_steps(str(tmp_path))
+
+    assert [step.log_prefix for step in steps] == ["solver", "plot", "collate"]
+    assert steps[0].args[-1].endswith("run.py")
+    assert steps[1].env["SVV_0D_RENDER_SCREENSHOTS"] == "0"
+    assert steps[1].env["SVV_0D_DISABLE_TQDM"] == "1"
+
+    _close_gui(app, gui)
+
+
+def test_cancel_0d_pipeline_terminates_active_process(monkeypatch, tmp_path):
+    app, gui = _make_gui(monkeypatch)
+
+    class _FakeProcess:
+        def __init__(self):
+            self.terminate_calls = 0
+            self.kill_calls = 0
+            self._state = QProcess.Running
+
+        def terminate(self):
+            self.terminate_calls += 1
+
+        def kill(self):
+            self.kill_calls += 1
+
+        def state(self):
+            return self._state
+
+    fake_process = _FakeProcess()
+    gui._zerod_process = fake_process
+    gui._zerod_pipeline_steps = [
+        _ZeroDPipelineStep("Run 0D solver", "solver", "python", ["run.py"])
+    ]
+    gui._zerod_pipeline_step_index = 0
+    gui._zerod_pipeline_export_path = str(tmp_path)
+    monkeypatch.setattr(main_window_mod.QTimer, "singleShot", lambda _ms, _fn: None)
+
+    gui._cancel_0d_pipeline()
+
+    assert gui._zerod_pipeline_cancel_requested is True
+    assert fake_process.terminate_calls == 1
+    assert fake_process.kill_calls == 0
+
+    gui._cleanup_0d_pipeline()
+    _close_gui(app, gui)
+
+
+def test_auto_open_0d_results_loads_generated_pvd(monkeypatch, tmp_path):
+    app, gui = _make_gui(monkeypatch)
+    pvd_path = tmp_path / "timeseries" / "timeseries.pvd"
+    pvd_path.parent.mkdir(parents=True)
+    pvd_path.write_text(
+        "<?xml version='1.0' encoding='UTF-8'?><VTKFile type='Collection'></VTKFile>",
+        encoding="utf-8",
+    )
+
+    shown = []
+    opened = []
+    monkeypatch.setattr(gui, "_show_solution_inspector", lambda: shown.append(True))
+    monkeypatch.setattr(gui.solution_inspector, "open_solution", lambda path: opened.append(path) or True)
+
+    opened_path = gui._auto_open_0d_results(str(tmp_path))
+
+    assert opened_path == str(pvd_path)
+    assert shown == [True]
+    assert opened == [str(pvd_path)]
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_open_solution_sets_path_and_calls_loader(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+    loaded = []
+
+    monkeypatch.setattr(inspector, "_load_solution", lambda path: loaded.append(path) or True)
+
+    assert inspector.open_solution("/tmp/example.pvd") is True
+    assert inspector.file_edit.text() == "/tmp/example.pvd"
+    assert loaded == ["/tmp/example.pvd"]
+
+    _close_gui(app, gui)
