@@ -1,3 +1,6 @@
+DEFAULT_OUTPUT_FILENAME = "output.csv"
+
+
 run_0d_script = """import atexit
 import os
 import signal
@@ -6,6 +9,7 @@ import sys
 
 PINNED_SOLVER = {solver_exe!r}
 INPUT_FILENAME = {input_filename!r}
+OUTPUT_FILENAME = {output_filename!r}
 CHILD_PID_FILE = ".svv_0d_solver.pid"
 _CHILD_PROCESS = None
 
@@ -98,6 +102,7 @@ def _handle_signal(signum, _frame):
 def main():
     run_dir = os.path.dirname(os.path.abspath(__file__))
     input_file = os.path.join(run_dir, INPUT_FILENAME)
+    output_file = os.path.join(run_dir, OUTPUT_FILENAME)
     if not os.path.isfile(input_file):
         print("Input file not found: " + input_file, file=sys.stderr, flush=True)
         sys.exit(2)
@@ -114,8 +119,9 @@ def main():
     atexit.register(_stop_child, run_dir, False)
 
     print("Running svZeroDSolver: " + solver, flush=True)
+    print("Writing solver output: " + output_file, flush=True)
     global _CHILD_PROCESS
-    _CHILD_PROCESS = subprocess.Popen([solver, input_file], cwd=run_dir)
+    _CHILD_PROCESS = subprocess.Popen([solver, input_file, output_file], cwd=run_dir)
     _write_child_pid(run_dir, _CHILD_PROCESS.pid)
     try:
         return_code = _CHILD_PROCESS.wait()
