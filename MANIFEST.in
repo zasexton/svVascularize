@@ -27,5 +27,7 @@ recursive-include svv/bin *
 # Include GUI assets (theme tokens, icons, etc.)
 recursive-include svv/visualize/gui *.json *.qss *.png *.svg
 
-# Exclude any compiled extension artifacts from source distribution
-global-exclude *.so *.pyd *.dylib *.dll
+# Exclude Python compiled extension artifacts from source distribution.
+# Do not exclude .dll globally: Windows solver builds may need runtime DLLs
+# beside svzerodsolver.exe.
+global-exclude *.so *.pyd *.dylib

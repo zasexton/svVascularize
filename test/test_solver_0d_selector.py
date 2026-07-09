@@ -10,7 +10,13 @@ def _exe_name() -> str:
 
 def test_solver_0d_candidates_include_platform_arch_layout():
     sel = get_solver_0d_candidates(os_dir="Linux", arch="x86_64")
-    expected_suffix = Path("svv") / "utils" / "solvers" / "0D" / "Linux" / "x86_64" / _exe_name()
+    expected_suffix = Path("svv") / "utils" / "solvers" / "0D" / "Linux" / "x86_64" / "svzerodsolver"
+    assert any(str(p).endswith(str(expected_suffix)) for p in sel.candidates)
+
+
+def test_solver_0d_candidates_use_windows_exe_suffix():
+    sel = get_solver_0d_candidates(os_dir="Windows", arch="x86_64")
+    expected_suffix = Path("svv") / "utils" / "solvers" / "0D" / "Windows" / "x86_64" / "svzerodsolver.exe"
     assert any(str(p).endswith(str(expected_suffix)) for p in sel.candidates)
 
 
@@ -31,6 +37,19 @@ def test_get_solver_0d_exe_from_env_dir(monkeypatch, tmp_path):
 
     monkeypatch.delenv("SVV_SOLVER_0D_PATH", raising=False)
     monkeypatch.setenv("SVV_SOLVER_0D_DIR", str(tmp_path))
+
+    resolved = get_solver_0d_exe()
+    assert resolved == exe
+
+
+def test_get_solver_0d_exe_from_path(monkeypatch, tmp_path):
+    exe = tmp_path / _exe_name()
+    exe.write_bytes(b"#!/bin/sh\n")
+    exe.chmod(0o755)
+
+    monkeypatch.delenv("SVV_SOLVER_0D_PATH", raising=False)
+    monkeypatch.delenv("SVV_SOLVER_0D_DIR", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
 
     resolved = get_solver_0d_exe()
     assert resolved == exe
