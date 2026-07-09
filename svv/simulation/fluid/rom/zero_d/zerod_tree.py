@@ -9,7 +9,7 @@ from svv.simulation.fluid.rom.zero_d.post import (
     post_data,
     view_plots,
 )
-from svv.simulation.fluid.rom.zero_d.process import run_0d_script
+from svv.simulation.fluid.rom.zero_d.process import DEFAULT_OUTPUT_FILENAME, run_0d_script
 from svv.utils.solvers.solver_0d import get_solver_0d_exe
 
 def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number_cardiac_cycles=1,flow=None,
@@ -252,8 +252,26 @@ def export_0d_simulation(tree ,steady=True ,outdir=None ,folder="0d_tmp" ,number
         if resolved_solver_0d is not None:
             cmd_file = outdir + os.sep + ("cmd_run.bat" if platform.system() == "Windows" else "cmd_run.bash")
             with open(cmd_file, "w") as cmd:
-                cmd.write(f"\"{resolved_solver_0d}\" \"{filename}\"")
-        file.write(run_0d_script.format(solver_exe=resolved_solver_0d, input_filename=filename))
+                if platform.system() == "Windows":
+                    cmd.write(
+                        "@echo off\n"
+                        "cd /d \"%~dp0\"\n"
+                        f"\"{resolved_solver_0d}\" \"{filename}\" \"{DEFAULT_OUTPUT_FILENAME}\"\n"
+                    )
+                else:
+                    cmd.write(
+                        "#!/usr/bin/env bash\n"
+                        "set -e\n"
+                        "cd \"$(dirname \"$0\")\"\n"
+                        f"\"{resolved_solver_0d}\" \"{filename}\" \"{DEFAULT_OUTPUT_FILENAME}\"\n"
+                    )
+        file.write(
+            run_0d_script.format(
+                solver_exe=resolved_solver_0d,
+                input_filename=filename,
+                output_filename=DEFAULT_OUTPUT_FILENAME,
+            )
+        )
     file.close()
 
     geom = np.zeros((tree.data.shape[0], 8))
