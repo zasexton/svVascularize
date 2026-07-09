@@ -1,4 +1,4 @@
-__version__ = "0.0.47"
+__version__ = "0.0.48"
 
 
 # If the optional companion package with compiled accelerators is installed
