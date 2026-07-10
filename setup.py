@@ -366,7 +366,6 @@ def build_mmg(num_cores=None):
     remove_directory_tree(source_extract_root)
 
 
-
 def _tetgen_os_dir() -> str:
     sysname = platform.system()
     if sysname == "Linux":
@@ -574,6 +573,27 @@ def build_tetgen_cli(num_cores=None):
     remove_directory_tree(source_extract_root)
 
 
+def _copy_windows_runtime_dlls(executable_path, destination_dir):
+    """
+    Copy DLLs that live next to a Windows executable into the package staging dir.
+
+    svZeroDSolver Windows builds can place runtime DLLs beside the executable.
+    Shipping only the .exe leaves an installed solver that exists on disk but
+    cannot be started by CreateProcess.
+    """
+    if platform.system() != "Windows":
+        return []
+
+    src_dir = Path(executable_path).resolve().parent
+    dst_dir = Path(destination_dir)
+    copied = []
+    for dll in sorted(src_dir.glob("*.dll")):
+        dst = dst_dir / dll.name
+        shutil.copy2(dll, dst)
+        copied.append(str(dst))
+    return copied
+
+
 def build_0d(num_cores=None):
     if num_cores is None:
         num_cores = os.cpu_count() or 1
@@ -695,6 +715,7 @@ def build_0d(num_cores=None):
     src = candidates_sorted[0]
     dst = os.path.join(install_prefix, expected_name)
     shutil.copy2(src, dst)
+    copied_dlls = _copy_windows_runtime_dlls(src, install_prefix)
     if os.name != "nt":
         try:
             mode = os.stat(dst).st_mode
@@ -702,6 +723,8 @@ def build_0d(num_cores=None):
         except Exception:
             pass
     print(f"Staged svZeroDSolver executable: {dst}")
+    for dll in copied_dlls:
+        print(f"Staged svZeroDSolver runtime DLL: {dll}")
 
     remove_directory_tree(install_tmp_prefix)
     if os.path.isfile(tarball_path_0d):
@@ -1157,7 +1180,7 @@ setup_info = dict(
         else {}
     ),
     exclude_package_data=(
-        {"svv": ["*.so", "*.pyd", "*.dylib", "*.dll"]} if not ACCEL_COMPANION else {}
+        {"svv": ["*.so", "*.pyd", "*.dylib"]} if not ACCEL_COMPANION else {}
     ),
     include_package_data=False,
     zip_safe=False,

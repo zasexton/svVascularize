@@ -50,7 +50,29 @@ def test_tree_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, tm
     plot_text = (outdir / "plot_0d_results_to_3d.py").read_text(encoding="utf-8")
     assert "CHILD_PID_FILE" in run_text
     assert "signal.signal" in run_text
+    assert "OUTPUT_FILENAME" in run_text
     assert "SVV_0D_DISABLE_TQDM" in plot_text
+
+
+def test_tree_0d_export_command_file_runs_from_export_dir(monkeypatch, tmp_path):
+    tree = SimpleNamespace(
+        data=_base_tree_data(),
+        parameters=SimpleNamespace(terminal_pressure=100.0, kinematic_viscosity=0.04),
+    )
+    solver = tmp_path / "svzerodsolver.exe"
+    solver.write_text("", encoding="utf-8")
+    monkeypatch.setattr(zerod_tree.platform, "system", lambda: "Windows")
+
+    zerod_tree.export_0d_simulation(
+        tree,
+        outdir=str(tmp_path),
+        folder="case",
+        path_to_0d_solver=str(solver),
+    )
+
+    cmd_text = (tmp_path / "case" / "cmd_run.bat").read_text(encoding="utf-8")
+    assert 'cd /d "%~dp0"' in cmd_text
+    assert '"solver_0d.in" "output.csv"' in cmd_text
 
 
 def test_forest_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, tmp_path):
@@ -82,6 +104,7 @@ def test_forest_0d_export_does_not_probe_solver_when_not_requested(monkeypatch, 
     assert not (outdir / "cmd_run.bash").exists()
     run_text = (outdir / "run.py").read_text(encoding="utf-8")
     assert "CHILD_PID_FILE" in run_text
+    assert "OUTPUT_FILENAME" in run_text
 
 
 def test_tree_0d_export_uses_waveform_for_unsteady_custom_flow(monkeypatch, tmp_path):

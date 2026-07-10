@@ -3,7 +3,7 @@ import numpy as np
 import json
 import platform
 from svv.simulation.fluid.rom.zero_d.post import make_results, view_plots, post_data, collate_timeseries_to_pvd
-from svv.simulation.fluid.rom.zero_d.process import run_0d_script
+from svv.simulation.fluid.rom.zero_d.process import DEFAULT_OUTPUT_FILENAME, run_0d_script
 from svv.simulation.fluid.inflow.waveform import generate_physiologic_wave
 from svv.utils.solvers.solver_0d import get_solver_0d_exe
 
@@ -309,8 +309,26 @@ def export_0d_simulation(forest, network_id, inlets, steady=True, outdir=None, f
         if resolved_solver_0d is not None:
             cmd_file = outdir + os.sep + ("cmd_run.bat" if platform.system() == "Windows" else "cmd_run.bash")
             with open(cmd_file, "w") as cmd:
-                cmd.write(f"\"{resolved_solver_0d}\" \"solver_0d.in\"")
-        file.write(run_0d_script.format(solver_exe=resolved_solver_0d, input_filename="solver_0d.in"))
+                if platform.system() == "Windows":
+                    cmd.write(
+                        "@echo off\n"
+                        "cd /d \"%~dp0\"\n"
+                        f"\"{resolved_solver_0d}\" \"solver_0d.in\" \"{DEFAULT_OUTPUT_FILENAME}\"\n"
+                    )
+                else:
+                    cmd.write(
+                        "#!/usr/bin/env bash\n"
+                        "set -e\n"
+                        "cd \"$(dirname \"$0\")\"\n"
+                        f"\"{resolved_solver_0d}\" \"solver_0d.in\" \"{DEFAULT_OUTPUT_FILENAME}\"\n"
+                    )
+        file.write(
+            run_0d_script.format(
+                solver_exe=resolved_solver_0d,
+                input_filename="solver_0d.in",
+                output_filename=DEFAULT_OUTPUT_FILENAME,
+            )
+        )
     file.close()
     # DETERMINE NUMBER OF ROWS FOR GEOM
     geoms = np.zeros((vessels['proximal_points'].shape[0], 8))

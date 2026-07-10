@@ -43,8 +43,9 @@ def _norm_arch(machine: Optional[str] = None) -> str:
     return m or "unknown"
 
 
-def _solver_0d_exe_filename() -> str:
-    if os.name == "nt":
+def _solver_0d_exe_filename(os_dir: Optional[str] = None) -> str:
+    os_dir = os_dir or _norm_os_dir()
+    if os_dir == "Windows":
         return SOLVER_0D_EXE_BASENAME + ".exe"
     return SOLVER_0D_EXE_BASENAME
 
@@ -147,10 +148,11 @@ def get_solver_0d_candidates(
     Search order:
     1) SVV_SOLVER_0D_PATH (explicit executable)
     2) SVV_SOLVER_0D_DIR/<exe>
-    3) svv/bin/<exe> (locally built override)
-    4) bundled: svv/utils/solvers/0D/<OS>/<arch>/<exe>
-    5) bundled fallbacks (mac): universal2 -> arch aliases
-    6) legacy fallback: svv/solvers/<exe>
+    3) PATH lookup for <exe>
+    4) svv/bin/<exe> (locally built override)
+    5) bundled: svv/utils/solvers/0D/<OS>/<arch>/<exe>
+    6) bundled fallbacks (mac): universal2 -> arch aliases
+    7) legacy fallback: svv/solvers/<exe>
     """
     os_dir = os_dir or _norm_os_dir()
     arch_override = os.environ.get("SVV_SOLVER_0D_ARCH")
@@ -166,7 +168,7 @@ def get_solver_0d_candidates(
         elif a in {"universal2"}:
             arch = "universal2"
 
-    exe_name = _solver_0d_exe_filename()
+    exe_name = _solver_0d_exe_filename(os_dir)
     solvers_dir = Path(__file__).resolve().parent / "0D"
 
     candidates: List[Path] = []
@@ -178,6 +180,10 @@ def get_solver_0d_candidates(
     solver_dir = os.environ.get("SVV_SOLVER_0D_DIR")
     if solver_dir:
         candidates.append(Path(solver_dir).expanduser() / exe_name)
+
+    path_solver = shutil.which(exe_name)
+    if path_solver:
+        candidates.append(Path(path_solver))
 
     try:
         import svv
