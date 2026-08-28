@@ -1,4 +1,5 @@
 import pytest
+import sys
 
 pytest.importorskip("PySide6")
 
@@ -191,4 +192,168 @@ def test_solution_inspector_plotter_ready_replays_pending_camera_reset(monkeypat
     assert render_calls == [True]
     assert inspector._pending_camera_reset is False
 
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_time_change_uses_pvd_time_point_api(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+
+    class _FakeMesh:
+        def __init__(self, idx):
+            self.idx = idx
+
+    class _FakeReader:
+        def __init__(self):
+            self.active_idx = 0
+            self.time_values = [0.0, 0.1, 0.2]
+            self.calls = []
+
+        def set_active_time_point(self, idx):
+            self.calls.append(idx)
+            self.active_idx = idx
+
+        def read(self):
+            return _FakeMesh(self.active_idx)
+
+    class _FakePV:
+        class MultiBlock:
+            pass
+
+    renders = []
+    monkeypatch.setattr(inspector, "_update_scalar_range", lambda: None)
+    monkeypatch.setattr(inspector, "_render_current_mesh", lambda *, reset_camera=False: renders.append((inspector._current_mesh.idx, reset_camera)))
+    monkeypatch.setattr(inspector, "_update_calculator_mesh", lambda: None)
+
+    inspector._pv = _FakePV()
+    inspector._reader = _FakeReader()
+    inspector._time_values = [0.0, 0.1, 0.2]
+
+    inspector._on_time_index_changed(2)
+
+    assert inspector._reader.calls == [2]
+    assert inspector._current_time_index == 2
+    assert inspector._current_mesh.idx == 2
+    assert renders == [(2, False)]
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_load_solution_enables_global_range_for_time_series(monkeypatch, tmp_path):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+
+    class _FakeReader:
+        def __init__(self):
+            self.time_values = [0.0, 0.1, 0.2]
+
+        def set_active_time_point(self, _idx):
+            pass
+
+        def read(self):
+            return object()
+
+    class _FakePV:
+        class MultiBlock:
+            pass
+
+        @staticmethod
+        def get_reader(_path):
+            return _FakeReader()
+
+    solution_path = tmp_path / "timeseries.pvd"
+    solution_path.write_text("<VTKFile/>", encoding="utf-8")
+
+    monkeypatch.setattr(inspector, "_update_mesh_from_reader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inspector, "_populate_scalar_fields", lambda: None)
+    monkeypatch.setattr(inspector, "_populate_vector_fields", lambda: None)
+    monkeypatch.setattr(inspector, "_update_statistics", lambda: None)
+
+    inspector._pv = _FakePV()
+    inspector.auto_range_cb.setChecked(True)
+    inspector.global_range_cb.setChecked(False)
+
+    assert inspector._load_solution(str(solution_path)) is True
+    assert inspector.global_range_cb.isChecked() is True
+
+    _close_gui(app, gui)
+
+
+def test_solution_inspector_manual_scalar_range_persists_across_time_changes(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    inspector = gui.solution_inspector
+
+    class _FakeReader:
+        def __init__(self):
+            self.active_idx = 0
+
+        def set_active_time_point(self, idx):
+            self.active_idx = idx
+
+        def read(self):
+            return object()
+
+    class _FakePV:
+        class MultiBlock:
+            pass
+
+    monkeypatch.setattr(inspector, "_compute_local_range", lambda _name: (0.0, 100.0))
+    monkeypatch.setattr(inspector, "_render_current_mesh", lambda *, reset_camera=False: None)
+    monkeypatch.setattr(inspector, "_update_calculator_mesh", lambda: None)
+
+    inspector._pv = _FakePV()
+    inspector._reader = _FakeReader()
+    inspector._time_values = [0.0, 0.1, 0.2]
+    inspector._current_scalar_name = "Pressure [mmHg]"
+    inspector._current_mesh = object()
+    inspector.global_range_cb.setChecked(False)
+    inspector.auto_range_cb.setChecked(False)
+    inspector.scalar_min_spin.setValue(1.2)
+    inspector.scalar_max_spin.setValue(9.8)
+
+    inspector._on_time_index_changed(2)
+
+    assert inspector._current_time_index == 2
+    assert inspector.scalar_min_spin.value() == 1.2
+    assert inspector.scalar_max_spin.value() == 9.8
+
+    _close_gui(app, gui)
+
+
+def test_time_series_dialog_derivative_accepts_colored_plot_tuples(monkeypatch):
+    app, gui = _make_gui(monkeypatch)
+    module = sys.modules[type(gui.solution_inspector).__module__]
+    dialog = module.TimeSeriesPlotDialog(gui)
+
+    class _FakeLine:
+        pass
+
+    class _FakeAxes:
+        def plot(self, *_args, **_kwargs):
+            return [_FakeLine()]
+
+        def legend(self, *_args, **_kwargs):
+            return None
+
+    class _FakeFigure:
+        def tight_layout(self):
+            return None
+
+    class _FakeCanvas:
+        def draw(self):
+            return None
+
+    monkeypatch.setattr(dialog, "_clear_derivative", lambda: None)
+    dialog._mpl_available = True
+    dialog._ax = _FakeAxes()
+    dialog._fig = _FakeFigure()
+    dialog._canvas = _FakeCanvas()
+    dialog.deriv_separate_cb.setChecked(False)
+    dialog._plot_data = [([0.0, 1.0, 2.0], [1.0, 3.0, 5.0], "Series A", "blue")]
+
+    dialog._compute_derivative()
+
+    assert dialog._derivative_line is not None
+
+    dialog.close()
     _close_gui(app, gui)

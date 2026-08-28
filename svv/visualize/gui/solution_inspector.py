@@ -2133,7 +2133,7 @@ class TimeSeriesPlotDialog(QDialog):
         layout.addLayout(tools_layout)
 
         # Store plot data for refreshing
-        self._plot_data = []  # List of (times, values, label) tuples
+        self._plot_data = []  # List of (times, values, label[, color]) tuples
         self._lines = []  # matplotlib line objects
         self._xlabel = "Time"
         self._ylabel = "Value"
@@ -2707,8 +2707,11 @@ class TimeSeriesPlotDialog(QDialog):
         # Clear previous derivative
         self._clear_derivative()
 
-        # Use first data series
-        times, values, label = self._plot_data[0]
+        # Use first data series; support legacy 3-tuples and current 4-tuples.
+        data_tuple = self._plot_data[0]
+        times = data_tuple[0]
+        values = data_tuple[1]
+        label = data_tuple[2]
         times = np.asarray(times)
         values = np.asarray(values)
 
@@ -5514,8 +5517,7 @@ class SolutionInspectorWidget(QWidget):
 
                 for time_idx, time_val in enumerate(self._time_values):
                     # Load mesh at this time step
-                    if hasattr(self._reader, "set_active_time_index"):
-                        self._reader.set_active_time_index(time_idx)
+                    self._set_reader_time_index(time_idx)
 
                     try:
                         mesh = self._reader.read()
@@ -5556,8 +5558,7 @@ class SolutionInspectorWidget(QWidget):
                 QApplication.processEvents()
 
             # Restore original time step
-            if hasattr(self._reader, "set_active_time_index"):
-                self._reader.set_active_time_index(original_time_idx)
+            self._set_reader_time_index(original_time_idx)
             self._update_mesh_from_reader(original_time_idx)
 
         except Exception as e:
@@ -6534,8 +6535,7 @@ class SolutionInspectorWidget(QWidget):
 
         # Load mesh for this time index
         try:
-            if hasattr(self._reader, "set_active_time_index"):
-                self._reader.set_active_time_index(int(time_index))
+            self._set_reader_time_index(int(time_index))
             mesh = self._reader.read()
         except Exception:
             return
@@ -6925,6 +6925,12 @@ class SolutionInspectorWidget(QWidget):
         self._current_scalar_name = None
         self._scalar_label_auto_text = ""
         self.scalar_label_edit.clear()
+        has_time_series = len(self._time_values) > 1
+
+        if getattr(self, "auto_range_cb", None) and self.auto_range_cb.isChecked():
+            self.global_range_cb.blockSignals(True)
+            self.global_range_cb.setChecked(has_time_series)
+            self.global_range_cb.blockSignals(False)
 
         if self._time_values:
             self.time_slider.setEnabled(True)
@@ -6958,6 +6964,37 @@ class SolutionInspectorWidget(QWidget):
         except Exception:
             self.time_label.setText(f"Time: {t}")
 
+    def _set_reader_time_index(self, index: int) -> bool:
+        """Select a reader time step across differing PyVista reader APIs."""
+        if self._reader is None:
+            return False
+
+        idx = int(index)
+
+        if hasattr(self._reader, "set_active_time_index"):
+            try:
+                self._reader.set_active_time_index(idx)
+                return True
+            except Exception:
+                pass
+
+        if hasattr(self._reader, "set_active_time_point"):
+            try:
+                self._reader.set_active_time_point(idx)
+                return True
+            except Exception:
+                pass
+
+        if hasattr(self._reader, "set_active_time_value") and self._time_values:
+            try:
+                if 0 <= idx < len(self._time_values):
+                    self._reader.set_active_time_value(self._time_values[idx])
+                    return True
+            except Exception:
+                pass
+
+        return False
+
     def _on_time_index_changed(self, index: int) -> None:
         if self._reader is None:
             return
@@ -6970,8 +7007,8 @@ class SolutionInspectorWidget(QWidget):
             return
 
         try:
-            if time_index is not None and hasattr(self._reader, "set_active_time_index"):
-                self._reader.set_active_time_index(int(time_index))
+            if time_index is not None:
+                self._set_reader_time_index(int(time_index))
             mesh = self._reader.read()
         except Exception:
             return
@@ -7145,8 +7182,7 @@ class SolutionInspectorWidget(QWidget):
 
         for idx in range(len(self._time_values)):
             try:
-                if hasattr(self._reader, "set_active_time_index"):
-                    self._reader.set_active_time_index(idx)
+                self._set_reader_time_index(idx)
                 mesh = self._reader.read()
             except Exception:
                 continue
@@ -7185,8 +7221,7 @@ class SolutionInspectorWidget(QWidget):
 
         # Restore original time index
         try:
-            if hasattr(self._reader, "set_active_time_index"):
-                self._reader.set_active_time_index(original_index)
+            self._set_reader_time_index(original_index)
         except Exception:
             pass
 
@@ -7209,7 +7244,7 @@ class SolutionInspectorWidget(QWidget):
         if rng is None:
             return
         vmin, vmax = rng
-        if not self.auto_range_cb.isChecked():
+        if self.auto_range_cb.isChecked():
             self.scalar_min_spin.blockSignals(True)
             self.scalar_max_spin.blockSignals(True)
             self.scalar_min_spin.setValue(vmin)
