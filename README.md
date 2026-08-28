@@ -32,5 +32,22 @@ The package is published on PyPI as `svv`:
 pip install svv
 ```
 
-On clusters / HPC systems (for example Stanford Sherlock), use a recent Python (3.9–3.12) and `pip`, and install into a 
-clean virtual environment or user site-packages. 
+If you are installing into an existing environment and hit NumPy ABI errors such as
+`_ARRAY_API not found` or `numpy.core.multiarray failed to import`, recreate the
+environment with a NumPy version supported by your Python version. For Python
+3.9–3.12, use NumPy 1.x:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --force-reinstall "numpy<2" svv
+```
+
+Python 3.13 requires NumPy 2.1 or newer:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --force-reinstall "numpy>=2.1" svv
+```
+
+On clusters / HPC systems (for example Stanford Sherlock), use a recent Python (3.9–3.13) and `pip`, and install into a
+clean virtual environment or user site-packages.
