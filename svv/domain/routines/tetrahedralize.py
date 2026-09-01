@@ -449,6 +449,7 @@ def _tetgen_worker_tetrahedralize(surface: pv.PolyData,
                 or diagnostics.native_abort
                 or "failed to tetrahedralize" in lower_output
                 or "internal tetgen error" in lower_output
+                or "self-intersection" in lower_output
                 or "unknown exception" in lower_output
             )
             if recoverable:

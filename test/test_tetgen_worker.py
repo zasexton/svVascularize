@@ -160,6 +160,30 @@ def test_worker_treats_internal_tetgen_error_as_geometry_rejection(tmp_path):
     assert "Internal TetGen error" in error.attempt.diagnostics.stderr
 
 
+def test_worker_treats_tetgen_self_intersection_error_as_geometry_rejection(
+    tmp_path,
+):
+    worker = tmp_path / "self_intersection_failure_worker.py"
+    worker.write_text(
+        "raise RuntimeError('The input surface mesh contain self-intersections.')\n"
+    )
+
+    with pytest.raises(TetGenWorkerError) as error_info:
+        tetrahedralize_mod._tetgen_worker_tetrahedralize(
+            pv.Tetrahedron().extract_surface(),
+            (),
+            {"order": 1, "nobisect": True, "verbose": 0},
+            str(worker),
+            sys.executable,
+            strategy="original",
+        )
+
+    error = error_info.value
+    assert error.recoverable is True
+    assert error.attempt.status == "failed"
+    assert "self-intersections" in error.attempt.diagnostics.stderr
+
+
 def test_worker_classifies_missing_dependency_as_nonrecoverable(tmp_path):
     worker = tmp_path / "dependency_failure_worker.py"
     worker.write_text("import missing_issue_102_dependency\n")
