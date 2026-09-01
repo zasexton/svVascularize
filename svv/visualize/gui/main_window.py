@@ -30,6 +30,12 @@ from svv.visualize.gui.vtk_widget import VTKWidget
 from svv.visualize.gui.point_selector import PointSelectorWidget
 from svv.visualize.gui.parameter_panel import ParameterPanel
 from svv.visualize.gui.theme import CADTheme, CADIcons
+from svv.visualize.gui.domain_build_feedback import (
+    apply_feedback_to_message_box,
+    build_domain_feedback,
+    extract_build_report,
+    report_for_telemetry,
+)
 import svv.tree.tree as _svv_tree_mod
 import svv.forest.forest as _svv_forest_mod
 from svv.telemetry import capture_exception, capture_message
@@ -2673,7 +2679,8 @@ class VascularizeGUI(QMainWindow):
         )
 
     def _record_telemetry(self, exc=None, message: Optional[str] = None, level: str = "error",
-                          traceback_str: Optional[str] = None, **tags):
+                          traceback_str: Optional[str] = None,
+                          telemetry_context: Optional[dict] = None, **tags):
         """
         Send errors or warnings to telemetry without interrupting the GUI.
 
@@ -2687,6 +2694,8 @@ class VascularizeGUI(QMainWindow):
             Sentry level ("error", "warning", "info").
         traceback_str : str, optional
             Full traceback string to include as extra context.
+        telemetry_context : dict, optional
+            Sanitized structured context to attach to the event.
         **tags
             Additional tags to attach to the event.
         """
@@ -2700,6 +2709,8 @@ class VascularizeGUI(QMainWindow):
                             scope.set_tag(key, value)
                         if traceback_str:
                             scope.set_extra("full_traceback", traceback_str)
+                        if telemetry_context:
+                            scope.set_context("domain_build", telemetry_context)
                         sentry_sdk.capture_exception(exc)
                         # Flush to ensure the event is sent before the popup blocks
                         sentry_sdk.flush(timeout=2.0)
@@ -2707,6 +2718,19 @@ class VascularizeGUI(QMainWindow):
                     capture_exception(exc)
                 return
             if message:
+                if telemetry_context:
+                    try:
+                        import sentry_sdk  # type: ignore[import]
+
+                        with sentry_sdk.push_scope() as scope:
+                            for key, value in tags.items():
+                                scope.set_tag(key, value)
+                            scope.set_context("domain_build", telemetry_context)
+                            sentry_sdk.capture_message(message, level=level)
+                        sentry_sdk.flush(timeout=2.0)
+                        return
+                    except Exception:
+                        pass
                 capture_message(message, level=level, **tags)
         except Exception:
             # Telemetry should never break the UI
@@ -3059,6 +3083,8 @@ class VascularizeGUI(QMainWindow):
 
                 build_failed = False
                 build_error_msg = None
+                build_exception = None
+                build_report = extract_build_report(domain=domain)
 
                 if mesh_already_loaded:
                     # Mesh was included in .dmn file - skip rebuild
@@ -3072,24 +3098,49 @@ class VascularizeGUI(QMainWindow):
                             domain.build(resolution=build_resolution, progress_callback=build_progress)
                         else:
                             domain.build(progress_callback=build_progress)
-                        report_progress(90, "Domain built successfully")
+                        build_report = extract_build_report(domain=domain)
+                        feedback = build_domain_feedback(
+                            report=build_report,
+                            success=True,
+                        )
+                        report_progress(90, feedback.status)
+                        if feedback.recovered:
+                            self._record_telemetry(
+                                message=feedback.status,
+                                level="info",
+                                action="load_domain_build_recovered",
+                                telemetry_context={
+                                    "tetrahedralization": report_for_telemetry(build_report)
+                                },
+                            )
                     except Exception as exc:
                         # If build fails (e.g., TetGen errors) continue with loaded
                         # fast-eval structures only so tree/forest generation still
                         # works, but record the failure in telemetry for diagnosis.
                         build_failed = True
-                        build_error_msg = str(exc)
-                        try:
-                            import traceback
-                            tb = traceback.format_exc()
-                            self._record_telemetry(exc, action="load_domain_build", traceback_str=tb)
-                        except Exception:
-                            pass
+                        build_exception = exc
+                        build_report = extract_build_report(exception=exc, domain=domain)
+                        feedback = build_domain_feedback(
+                            exception=exc,
+                            report=build_report,
+                            success=False,
+                        )
+                        build_error_msg = feedback.informative_text
+                        self._record_telemetry(
+                            message=feedback.informative_text,
+                            level="warning",
+                            action="load_domain_build",
+                            telemetry_context={
+                                "tetrahedralization": report_for_telemetry(build_report)
+                            },
+                        )
                         report_progress(90, "Domain build failed (continuing without mesh)")
 
                 # Store build status on domain for later reference
                 domain._build_failed = build_failed
                 domain._build_error = build_error_msg
+                domain._build_exception = build_exception
+                domain._build_report = build_report
                 if cancel_event.is_set():
                     return None
             elif suffix in {".vtp", ".vtu", ".stl"}:
@@ -3120,27 +3171,54 @@ class VascularizeGUI(QMainWindow):
                 report_progress(65, "Building domain (tetrahedralization + boundary extraction)...")
                 build_failed = False
                 build_error_msg = None
+                build_exception = None
+                build_report = None
                 try:
                     build_progress = make_stage_reporter(65, 90)
                     if build_resolution is not None:
                         domain.build(resolution=build_resolution, progress_callback=build_progress)
                     else:
                         domain.build(progress_callback=build_progress)
-                    report_progress(90, "Domain built successfully")
+                    build_report = extract_build_report(domain=domain)
+                    feedback = build_domain_feedback(
+                        report=build_report,
+                        success=True,
+                    )
+                    report_progress(90, feedback.status)
+                    if feedback.recovered:
+                        self._record_telemetry(
+                            message=feedback.status,
+                            level="info",
+                            action="load_mesh_build_recovered",
+                            telemetry_context={
+                                "tetrahedralization": report_for_telemetry(build_report)
+                            },
+                        )
                 except Exception as exc:
                     build_failed = True
-                    build_error_msg = str(exc)
-                    try:
-                        import traceback
-                        tb = traceback.format_exc()
-                        self._record_telemetry(exc, action="load_mesh_build", traceback_str=tb)
-                    except Exception:
-                        pass
+                    build_exception = exc
+                    build_report = extract_build_report(exception=exc, domain=domain)
+                    feedback = build_domain_feedback(
+                        exception=exc,
+                        report=build_report,
+                        success=False,
+                    )
+                    build_error_msg = feedback.informative_text
+                    self._record_telemetry(
+                        message=feedback.informative_text,
+                        level="warning",
+                        action="load_mesh_build",
+                        telemetry_context={
+                            "tetrahedralization": report_for_telemetry(build_report)
+                        },
+                    )
                     report_progress(90, "Domain build failed (continuing without mesh)")
 
                 # Store build status on domain for later reference
                 domain._build_failed = build_failed
                 domain._build_error = build_error_msg
+                domain._build_exception = build_exception
+                domain._build_report = build_report
             else:
                 raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -3322,19 +3400,24 @@ class VascularizeGUI(QMainWindow):
 
         # Warn user if domain build failed (mesh not available)
         if getattr(result, '_build_failed', False):
-            error_msg = getattr(result, '_build_error', 'Unknown error')
-            self._record_telemetry(
-                message=f"Domain build failed: {error_msg}",
-                level="warning",
-                action="domain_build_failed_warning",
+            build_exception = getattr(result, '_build_exception', None)
+            build_report = getattr(result, '_build_report', None)
+            feedback = build_domain_feedback(
+                exception=build_exception,
+                report=build_report,
+                success=False,
             )
-            QMessageBox.warning(
-                self,
-                "Domain Build Warning",
-                f"The domain was loaded but mesh building failed:\n\n{error_msg}\n\n"
-                f"Some features (like auto-selecting boundary start points) may not work.\n"
-                f"You can still use the domain by manually selecting start points."
+            self.update_status(feedback.status)
+            message_box = QMessageBox(self)
+            apply_feedback_to_message_box(message_box, feedback)
+            message_box.exec()
+        else:
+            build_report = getattr(result, '_build_report', None)
+            feedback = build_domain_feedback(
+                report=build_report,
+                success=True,
             )
+            self.update_status(feedback.status)
 
 
 # Backwards compatibility alias
