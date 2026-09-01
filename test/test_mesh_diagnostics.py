@@ -115,3 +115,11 @@ def test_tetgen_output_is_bounded_without_losing_python_failure_classification()
     assert summary.signal_name is None
     assert len(summary.stdout) < 33000
     assert "[truncated" in summary.stdout
+
+
+def test_tetgen_output_identifies_windows_native_crash_status():
+    summary = summarize_tetgen_output("", "", 0xC0000005)
+
+    assert summary.native_abort is True
+    assert summary.return_code == 0xC0000005
+    assert summary.signal_name == "NTSTATUS_0xC0000005"

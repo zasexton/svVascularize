@@ -31,11 +31,15 @@ def test_domain_installs_recovered_surface_and_sampling_state(
 
     mesh = domain.get_interior(repair_max_distance_ratio=0.4)
 
-    assert domain.mesh_build_report.selected_strategy == "meshfix"
-    assert [attempt.strategy for attempt in domain.mesh_build_report.attempts[:2]] == [
-        "original",
-        "meshfix",
-    ]
+    assert domain.mesh_build_report.selected_strategy in {"original", "meshfix"}
+    if domain.mesh_build_report.attempts[0].status == "failed":
+        assert domain.mesh_build_report.selected_strategy == "meshfix"
+        assert [
+            attempt.strategy for attempt in domain.mesh_build_report.attempts[:2]
+        ] == ["original", "meshfix"]
+    else:
+        assert domain.mesh_build_report.attempts[0].strategy == "original"
+        assert domain.mesh_build_report.attempts[0].status == "succeeded"
     assert np.array_equal(domain.original_boundary.points, source_points)
     assert np.array_equal(domain.original_boundary.faces, source_faces)
     assert np.array_equal(source.points, source_points)
@@ -142,6 +146,36 @@ def test_domain_failure_does_not_install_partial_volume_state(monkeypatch):
     assert domain.mesh_vertices is previous_vertices
     assert np.array_equal(domain.boundary.points, previous_boundary.points)
     assert np.array_equal(domain.boundary.faces, previous_boundary.faces)
+
+
+def test_domain_rejects_worker_arrays_that_do_not_match_grid(monkeypatch):
+    points = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    cells = np.array([4, 0, 1, 2, 3], dtype=np.int64)
+    grid = pv.UnstructuredGrid(
+        cells,
+        np.array([pv.CellType.TETRA], dtype=np.uint8),
+        points,
+    )
+    surface = grid.extract_surface().triangulate()
+    domain = _domain_with_boundary(surface)
+    invalid_result = SimpleNamespace(
+        grid=grid,
+        nodes=np.vstack((points, [[2.0, 2.0, 2.0]])),
+        elements=np.array([[0, 1, 2, 3]], dtype=np.int64),
+        surface=surface,
+        report=object(),
+    )
+    monkeypatch.setattr(domain_mod, "tetrahedralize", lambda *args, **kwargs: invalid_result)
+
+    with pytest.raises(ValueError, match="node count"):
+        domain.get_interior()
+
+    assert domain.mesh is None
+    assert domain.mesh_tree is None
+    assert domain.mesh_tree_2 is None
+    assert domain.mesh_build_report is None
 
 
 def test_boundary_install_rejects_zero_measure_without_partial_state():

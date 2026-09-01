@@ -925,12 +925,35 @@ class Domain(object):
                 raise ValueError("Tetrahedral connectivity must have integer shape (M, 4) or (M, 10)")
             if vertices.min() < 0 or vertices.max() >= nodes.shape[0]:
                 raise ValueError("Tetrahedral connectivity contains out-of-range indices")
-            valid_cell_types = {
-                int(pv.CellType.TETRA),
-                int(pv.CellType.QUADRATIC_TETRA),
-            }
-            if not set(np.unique(_mesh.celltypes)).issubset(valid_cell_types):
-                raise ValueError("Volume mesh contains non-tetrahedral cells")
+            if _mesh.n_points != nodes.shape[0]:
+                raise ValueError(
+                    "Volume-grid node count does not match TetGen worker nodes"
+                )
+            if _mesh.n_cells != vertices.shape[0]:
+                raise ValueError(
+                    "Volume-grid cell count does not match TetGen worker elements"
+                )
+            if not np.allclose(
+                np.asarray(_mesh.points),
+                nodes,
+                rtol=0.0,
+                atol=0.0,
+            ):
+                raise ValueError("Volume-grid points do not match TetGen worker nodes")
+            expected_cell_type = (
+                int(pv.CellType.TETRA)
+                if vertices.shape[1] == 4
+                else int(pv.CellType.QUADRATIC_TETRA)
+            )
+            if not np.all(np.asarray(_mesh.celltypes) == expected_cell_type):
+                raise ValueError("Volume-grid cell types do not match TetGen elements")
+            grid_connectivity = np.asarray(_mesh.cell_connectivity).reshape(
+                vertices.shape
+            )
+            if not np.array_equal(grid_connectivity, vertices):
+                raise ValueError(
+                    "Volume-grid connectivity does not match TetGen worker elements"
+                )
 
             _mesh = _mesh.compute_cell_sizes(
                 length=False,

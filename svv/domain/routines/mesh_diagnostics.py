@@ -293,7 +293,10 @@ def summarize_tetgen_output(
     facet_facet = lower.count("two facets exactly intersect")
 
     signal_name = None
-    if return_code < 0:
+    windows_native_status = 0x80000000 <= return_code <= 0xFFFFFFFF
+    if windows_native_status:
+        signal_name = "NTSTATUS_0x{:08X}".format(return_code)
+    elif return_code < 0:
         try:
             signal_name = signal.Signals(-return_code).name
         except (ValueError, OSError):
@@ -306,7 +309,11 @@ def summarize_tetgen_output(
         "access violation",
         "malloc():",
     )
-    native_abort = return_code < 0 or any(marker in lower for marker in native_markers)
+    native_abort = (
+        return_code < 0
+        or windows_native_status
+        or any(marker in lower for marker in native_markers)
+    )
     python_exception = "traceback (most recent call last)" in lower or "runtimeerror:" in lower
 
     examples = []

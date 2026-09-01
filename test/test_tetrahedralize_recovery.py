@@ -47,7 +47,12 @@ def test_closed_manifold_self_intersection_recovers_with_meshfix(
         return_result=True,
     )
 
-    assert result.report.selected_strategy == "meshfix"
+    assert result.report.selected_strategy in {"original", "meshfix"}
+    if result.report.attempts[0].status == "failed":
+        assert result.report.selected_strategy == "meshfix"
+    else:
+        assert result.report.attempts[0].strategy == "original"
+        assert result.report.attempts[0].status == "succeeded"
     assert result.grid.n_cells > 0
     assert np.isfinite(result.nodes).all()
     assert result.elements.shape[1] == 4

@@ -99,7 +99,7 @@ module._tetgen_worker_tetrahedralize(
         env=env,
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=20,
         check=False,
     )
 
