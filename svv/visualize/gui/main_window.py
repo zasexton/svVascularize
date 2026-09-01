@@ -38,7 +38,7 @@ from svv.visualize.gui.domain_build_feedback import (
 )
 import svv.tree.tree as _svv_tree_mod
 import svv.forest.forest as _svv_forest_mod
-from svv.telemetry import capture_exception, capture_message
+from svv.telemetry import capture_exception, capture_message, telemetry_enabled
 from svv.visualize.spline_export import export_spline_files
 
 
@@ -2700,6 +2700,8 @@ class VascularizeGUI(QMainWindow):
             Additional tags to attach to the event.
         """
         try:
+            if not telemetry_enabled():
+                return
             if exc is not None:
                 try:
                     import sentry_sdk  # type: ignore[import]

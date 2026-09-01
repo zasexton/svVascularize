@@ -7,8 +7,24 @@ from typing import Any, Dict, Optional
 from svv.domain.routines.mesh_diagnostics import TetrahedralizationReport
 
 
-_UNIX_PATH = re.compile(r"(?<![\w.])/(?:[^/\s:\"']+/)+[^/\s:\"']+")
-_WINDOWS_PATH = re.compile(r"(?i)(?<![\w])(?:[a-z]:\\)(?:[^\\\s:\"']+\\)+[^\\\s\"']+")
+_QUOTED_WINDOWS_PATH = re.compile(
+    r'''(?i)(?P<quote>["'])(?:[a-z]:[\\/]|\\\\)[^"']+(?P=quote)'''
+)
+_QUOTED_UNIX_PATH = re.compile(
+    r'''(?P<quote>["'])/(?!/)[^"']+(?P=quote)'''
+)
+_WINDOWS_EXTENDED_PATH = re.compile(
+    r'''(?i)(?<!\\)\\\\\?\\(?:UNC\\[^\\\s:"']+\\[^\\\s:"']+|[a-z]:\\[^\\\s:"']+)(?:\\[^\\\s:"']+)*'''
+)
+_WINDOWS_UNC_PATH = re.compile(
+    r'''(?i)(?<!\\)\\\\[^\\\s:"']+\\[^\\\s:"']+(?:\\[^\\\s:"']+)*'''
+)
+_WINDOWS_DRIVE_PATH = re.compile(
+    r'''(?i)(?<![\w])(?:[a-z]:[\\/])(?:[^\\/\s:"']+[\\/])*[^\\/\s:"']+'''
+)
+_UNIX_PATH = re.compile(
+    r'''(?<![\w.])/(?!/)(?:[^/\s:"']+/)*[^/\s:"']+'''
+)
 
 
 @dataclass(frozen=True)
@@ -25,7 +41,15 @@ class DomainBuildFeedback:
 def sanitize_local_paths(value: str) -> str:
     """Replace absolute local filesystem paths in diagnostic text."""
 
-    sanitized = _WINDOWS_PATH.sub("<local-path>", str(value))
+    def replace_quoted(match):
+        quote = match.group("quote")
+        return "{}<local-path>{}".format(quote, quote)
+
+    sanitized = _QUOTED_WINDOWS_PATH.sub(replace_quoted, str(value))
+    sanitized = _QUOTED_UNIX_PATH.sub(replace_quoted, sanitized)
+    sanitized = _WINDOWS_EXTENDED_PATH.sub("<local-path>", sanitized)
+    sanitized = _WINDOWS_UNC_PATH.sub("<local-path>", sanitized)
+    sanitized = _WINDOWS_DRIVE_PATH.sub("<local-path>", sanitized)
     return _UNIX_PATH.sub("<local-path>", sanitized)
 
 

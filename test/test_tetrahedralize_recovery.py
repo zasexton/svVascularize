@@ -1,5 +1,7 @@
 import importlib
+import os
 import sys
+from dataclasses import replace
 
 import numpy as np
 import pyvista as pv
@@ -131,8 +133,71 @@ def test_recovery_validation_rejects_internal_displacement_with_unchanged_bounds
         )
 
 
+def test_recovery_validation_rejects_nonfinite_surface_distance(monkeypatch):
+    source = pv.Cube().triangulate()
+    candidate = source.copy(deep=True)
+    monkeypatch.setattr(
+        tetrahedralize_mod,
+        "_symmetric_surface_distance",
+        lambda *args: np.nan,
+    )
+
+    with pytest.raises(ValueError, match="distance.*finite"):
+        tetrahedralize_mod.validate_recovery_surface(
+            source,
+            candidate,
+            max_distance_ratio=0.01,
+        )
+
+
+@pytest.mark.parametrize("distances", [np.array([]), np.array([np.nan]), np.array([np.inf])])
+def test_symmetric_surface_distance_rejects_invalid_arrays(distances):
+    class FakeSurface:
+        def compute_implicit_distance(self, other):
+            return {"implicit_distance": distances}
+
+    with pytest.raises(ValueError, match="distance arrays.*finite.*non-empty"):
+        tetrahedralize_mod._symmetric_surface_distance(
+            FakeSurface(),
+            FakeSurface(),
+        )
+
+
+def test_recovery_validation_rejects_nonfinite_bounds(monkeypatch):
+    source = pv.Cube().triangulate()
+    candidate = source.copy(deep=True)
+    real_summary = tetrahedralize_mod.summarize_surface
+
+    def summary(surface):
+        result = real_summary(surface)
+        if surface is candidate:
+            return replace(result, bounds=(np.nan,) + result.bounds[1:])
+        return result
+
+    monkeypatch.setattr(tetrahedralize_mod, "summarize_surface", summary)
+
+    with pytest.raises(ValueError, match="bounds.*finite"):
+        tetrahedralize_mod.validate_recovery_surface(
+            source,
+            candidate,
+            max_distance_ratio=0.01,
+        )
+
+
+def test_recovery_validation_rejects_nonfinite_allowed_distance():
+    source = pv.Cube().triangulate()
+
+    with pytest.raises(ValueError, match="allowed recovery distance.*finite"):
+        tetrahedralize_mod.validate_recovery_surface(
+            source,
+            source.copy(deep=True),
+            max_distance_ratio=np.finfo(float).max,
+        )
+
+
 def test_invalid_repair_candidate_is_rejected_before_tetgen(monkeypatch):
     source = pv.Cube().triangulate()
+    invalid_candidate = pv.Plane().triangulate()
     calls = []
 
     def worker(surface, tet_args, tet_kwargs, worker_script, python_exe, *, strategy):
@@ -159,7 +224,7 @@ def test_invalid_repair_candidate_is_rejected_before_tetgen(monkeypatch):
     monkeypatch.setattr(
         tetrahedralize_mod,
         "repair_surface_with_meshfix",
-        lambda *args, **kwargs: pv.Plane().triangulate(),
+        lambda *args, **kwargs: invalid_candidate.copy(deep=True),
     )
 
     with pytest.raises(TetrahedralizationError) as error_info:
@@ -174,6 +239,66 @@ def test_invalid_repair_candidate_is_rejected_before_tetgen(monkeypatch):
         "failed",
         "rejected",
     ]
+    rejected = error_info.value.report.attempts[1]
+    assert rejected.surface.n_points == invalid_candidate.n_points
+    assert rejected.surface.n_cells == invalid_candidate.n_cells
+
+
+def test_meshfix_rejection_report_describes_the_repaired_candidate(monkeypatch):
+    source = pv.Cube().triangulate()
+
+    class DistortingMeshFix:
+        def __init__(self, points, faces):
+            self.v = np.asarray(points).copy()
+            self.f = np.asarray(faces).copy()
+
+        def repair(self, **kwargs):
+            self.v[:, 0] += 10.0
+
+    def worker(surface, tet_args, tet_kwargs, worker_script, python_exe, *, strategy):
+        raise _geometry_worker_error(surface, strategy, tet_kwargs)
+
+    monkeypatch.setattr(tetrahedralize_mod.pymeshfix, "MeshFix", DistortingMeshFix)
+    monkeypatch.setattr(tetrahedralize_mod, "_tetgen_worker_tetrahedralize", worker)
+
+    with pytest.raises(TetrahedralizationError) as error_info:
+        tetrahedralize_mod.tetrahedralize(source, remesh_on_failure=False)
+
+    rejected = error_info.value.report.attempts[1]
+    assert rejected.status == "rejected"
+    assert rejected.surface.bounds[0] > 9.0
+
+
+def test_unexpected_meshfix_error_is_not_relabelled_as_geometry_rejection(monkeypatch):
+    source = pv.Cube().triangulate()
+
+    def worker(surface, tet_args, tet_kwargs, worker_script, python_exe, *, strategy):
+        raise _geometry_worker_error(surface, strategy, tet_kwargs)
+
+    def broken_repair(*args, **kwargs):
+        raise ValueError("meshfix implementation failed")
+
+    monkeypatch.setattr(tetrahedralize_mod, "_tetgen_worker_tetrahedralize", worker)
+    monkeypatch.setattr(tetrahedralize_mod, "repair_surface_with_meshfix", broken_repair)
+
+    with pytest.raises(ValueError, match="meshfix implementation failed"):
+        tetrahedralize_mod.tetrahedralize(source, remesh_on_failure=False)
+
+
+def test_unexpected_pyacvd_error_is_not_relabelled_as_geometry_rejection(monkeypatch):
+    source = pv.Cube().triangulate()
+
+    def worker(surface, tet_args, tet_kwargs, worker_script, python_exe, *, strategy):
+        raise _geometry_worker_error(surface, strategy, tet_kwargs)
+
+    def broken_remesh(*args, **kwargs):
+        raise RuntimeError("remesher implementation failed")
+
+    monkeypatch.setattr(tetrahedralize_mod, "_tetgen_worker_tetrahedralize", worker)
+    monkeypatch.setattr(tetrahedralize_mod, "uniform_remesh_surface", broken_remesh)
+
+    with pytest.raises(RuntimeError, match="remesher implementation failed"):
+        tetrahedralize_mod.tetrahedralize(source, repair_on_failure=False)
 
 
 def test_open_pyacvd_candidate_is_repaired_before_tetgen(monkeypatch):
@@ -229,7 +354,12 @@ def test_open_pyacvd_candidate_is_repaired_before_tetgen(monkeypatch):
     assert repair_calls == [0, open_surface.n_open_edges]
 
 
-def test_quiet_unknown_failure_runs_isolated_geometry_diagnostic(tmp_path, monkeypatch):
+@pytest.mark.parametrize("switches", [None, "pqQ"])
+def test_quiet_unknown_failure_runs_isolated_geometry_diagnostic(
+    tmp_path,
+    monkeypatch,
+    switches,
+):
     worker = tmp_path / "diagnostic_worker.py"
     worker.write_text(
         """\
@@ -239,7 +369,12 @@ import sys
 
 with open(sys.argv[3], 'r') as stream:
     options = json.load(stream)['kwargs']
-if options.get('diagnose'):
+switches = options.get('switches')
+if switches:
+    diagnostic_enabled = 'd' in switches and 'V' in switches and 'Q' not in switches
+else:
+    diagnostic_enabled = options.get('diagnose') and options.get('quiet') is False
+if diagnostic_enabled:
     pathlib.Path('_skipped.node').write_text('diagnostic')
     print('Warning: A segment and a facet intersect.')
     print('  segment: [4,5] tag(-1).')
@@ -251,6 +386,7 @@ raise SystemExit(1)
     )
     monkeypatch.chdir(tmp_path)
 
+    tetgen_options = {"switches": switches} if switches is not None else {}
     with pytest.raises(TetrahedralizationError) as error_info:
         tetrahedralize_mod.tetrahedralize(
             pv.Cube().triangulate(),
@@ -259,6 +395,7 @@ raise SystemExit(1)
             repair_on_failure=False,
             remesh_on_failure=False,
             return_result=True,
+            **tetgen_options,
         )
 
     report = error_info.value.report
@@ -266,6 +403,51 @@ raise SystemExit(1)
     assert report.attempts[0].diagnostics.segment_facet_intersections == 1
     assert "intersecting surface facets" in str(error_info.value)
     assert not list(tmp_path.glob("_skipped.*"))
+
+
+def test_relative_worker_path_is_resolved_before_temporary_chdir(tmp_path, monkeypatch):
+    worker = tmp_path / "relative_worker.py"
+    worker.write_text(
+        """\
+import numpy as np
+import sys
+
+nodes = np.array(
+    [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+)
+elems = np.array([[0, 1, 2, 3]], dtype=np.int64)
+np.savez(sys.argv[2], nodes=nodes, elems=elems)
+"""
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = tetrahedralize_mod.tetrahedralize(
+        pv.Cube().triangulate(),
+        worker_script="relative_worker.py",
+        python_exe=sys.executable,
+        repair_on_failure=False,
+        remesh_on_failure=False,
+        return_result=True,
+    )
+
+    assert result.grid.n_cells == 1
+
+
+def test_worker_launch_path_resolution_preserves_path_lookup(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    worker, interpreter = tetrahedralize_mod._resolve_worker_launch_paths(
+        "worker.py",
+        os.path.join("env", "python"),
+    )
+    _, path_interpreter = tetrahedralize_mod._resolve_worker_launch_paths(
+        "worker.py",
+        "python",
+    )
+
+    assert worker == str(tmp_path / "worker.py")
+    assert interpreter == str(tmp_path / "env" / "python")
+    assert path_interpreter == "python"
 
 
 def test_opaque_native_abort_runs_isolated_geometry_diagnostic(tmp_path):
@@ -384,9 +566,55 @@ def test_all_geometry_attempts_fail_with_ordered_aggregate_report(monkeypatch):
     assert "intersecting surface facets" in report.user_summary()
 
 
+def test_meshfix_repair_preserves_components_by_policy(monkeypatch):
+    source = pv.Cube().triangulate()
+    captured = {}
+
+    class FakeMeshFix:
+        def __init__(self, points, faces):
+            self.v = np.asarray(points).copy()
+            self.f = np.asarray(faces).copy()
+
+        def repair(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(tetrahedralize_mod.pymeshfix, "MeshFix", FakeMeshFix)
+
+    repaired = tetrahedralize_mod.repair_surface_with_meshfix(source)
+
+    assert repaired.n_points == source.n_points
+    assert captured["joincomp"] is False
+    assert captured["remove_smallest_components"] is False
+
+
+def test_recovery_validation_rejects_component_loss():
+    first = pv.Cube(center=(0.0, 0.0, 0.0)).triangulate()
+    second = pv.Cube(center=(3.0, 0.0, 0.0)).triangulate()
+    source = first.merge(second, merge_points=False)
+
+    with pytest.raises(ValueError, match="connected-component count from 2 to 1"):
+        tetrahedralize_mod.validate_recovery_surface(
+            source,
+            first,
+            max_distance_ratio=1.0,
+        )
+
+
 @pytest.mark.parametrize("value", [0.0, -0.1, np.nan, np.inf])
 def test_repair_distance_ratio_must_be_finite_and_positive(value):
     with pytest.raises(ValueError, match="finite and positive"):
+        tetrahedralize_mod.tetrahedralize(
+            pv.Cube().triangulate(),
+            repair_max_distance_ratio=value,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, np.bool_(True), np.array(0.1), np.array([0.1]), "0.1", None],
+)
+def test_repair_distance_ratio_must_be_a_real_scalar(value):
+    with pytest.raises(ValueError, match="finite and positive scalar"):
         tetrahedralize_mod.tetrahedralize(
             pv.Cube().triangulate(),
             repair_max_distance_ratio=value,
@@ -399,4 +627,49 @@ def test_remesh_clean_tolerance_must_be_finite_and_nonnegative(value):
         tetrahedralize_mod.tetrahedralize(
             pv.Cube().triangulate(),
             remesh_clean_tolerance=value,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, np.bool_(True), np.array(0.1), np.array([0.1]), "0.1"],
+)
+def test_remesh_clean_tolerance_must_be_a_real_scalar(value):
+    with pytest.raises(ValueError, match="finite and non-negative scalar"):
+        tetrahedralize_mod.tetrahedralize(
+            pv.Cube().triangulate(),
+            remesh_clean_tolerance=value,
+        )
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("remesh_subdivisions", np.nan, "non-negative integer"),
+        ("remesh_subdivisions", 1.5, "non-negative integer"),
+        ("remesh_subdivisions", True, "non-negative integer"),
+        ("remesh_clusters", np.nan, "positive integer"),
+        ("remesh_clusters", 2.5, "positive integer"),
+        ("remesh_clusters", True, "positive integer"),
+    ],
+)
+def test_remesh_integer_controls_are_validated_before_tetgen(
+    monkeypatch,
+    option,
+    value,
+    message,
+):
+    def unexpected_worker(*args, **kwargs):
+        raise AssertionError("Invalid recovery controls must fail before TetGen")
+
+    monkeypatch.setattr(
+        tetrahedralize_mod,
+        "_tetgen_worker_tetrahedralize",
+        unexpected_worker,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        tetrahedralize_mod.tetrahedralize(
+            pv.Cube().triangulate(),
+            **{option: value},
         )

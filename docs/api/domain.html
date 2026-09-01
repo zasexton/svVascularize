@@ -377,6 +377,7 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                                 <ul>
                                     <li><code>verbose</code> (bool): Print mesh generation progress</li>
                                     <li><code>**kwargs</code>: Parameters passed to TetGen/Triangle</li>
+                                    <li>Raw TetGen <code>switches</code> strings are rejected in 3D because Domain enforces linear <code>order=1</code> elements and <code>nobisect=True</code>. Use named options instead.</li>
                                     <li><code>repair_on_failure</code> (bool, default=True): Retry a geometry rejection after component-preserving MeshFix repair.</li>
                                     <li><code>repair_max_distance_ratio</code> (float, default=0.01): Maximum symmetric repair displacement and bounds change, measured against the source bounding-box diagonal.</li>
                                     <li><code>remesh_on_failure</code> (bool, default=True): Enable validated PyACVD as the final fallback after the original and MeshFix candidates.</li>
@@ -396,11 +397,43 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                                     before TetGen when necessary; unsafe candidates are recorded and rejected.
                                 </p>
                                 <p>
+                                    Closed, watertight, and manifold are topological properties; they do not prove
+                                    that a surface has no self-intersecting facets. TetGen may therefore reject a
+                                    surface that passes those checks. The structured report records intersection
+                                    diagnostics from a separate verbose pass when the initial failure is opaque.
+                                </p>
+                                <p>
                                     When recovery succeeds, <code>boundary</code>, boundary sampling arrays, and the
                                     extracted volume-mesh surface all describe the selected recovery geometry.
                                     <code>original_boundary</code> remains unchanged. Inspect
                                     <code>mesh_build_report.selected_strategy</code> and
                                     <code>mesh_build_report.attempts</code> for provenance and diagnostics.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="api-method">
+                            <div class="api-method-signature">
+                                <code>tetrahedralize(surface, *tet_args, return_result=False, **tet_kwargs)</code>
+                            </div>
+                            <p>
+                                Lower-level public surface meshing helper. Unlike <code>Domain.get_interior()</code>,
+                                this compatibility API forwards named TetGen options or a raw
+                                <code>switches</code> string and can return linear or quadratic tetrahedra.
+                            </p>
+                            <div class="api-method-params">
+                                <h4>Returns</h4>
+                                <ul>
+                                    <li>Default: the historical <code>(grid, nodes, elements)</code> tuple.</li>
+                                    <li><code>return_result=True</code>: <code>TetrahedralizationResult</code> with <code>grid</code>, <code>nodes</code>, <code>elements</code>, the exact selected <code>surface</code>, and a structured <code>report</code>.</li>
+                                </ul>
+                                <h4>Recovery controls</h4>
+                                <p>
+                                    The helper tries the original surface, bounded MeshFix repair, and validated
+                                    PyACVD recovery in order. Set <code>repair_on_failure=False</code> or
+                                    <code>remesh_on_failure=False</code> to disable a stage. Raw switches are unchanged
+                                    for real meshing attempts; an isolated diagnostic-only rerun removes quiet mode
+                                    and adds TetGen diagnostic verbosity when needed.
                                 </p>
                             </div>
                         </div>

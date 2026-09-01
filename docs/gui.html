@@ -196,6 +196,11 @@ python -m svv.visualize.gui --domain path/to/domain.dmn</code></pre>
       manifold, preserves connected components, and stays within the configured geometric-fidelity bound.
     </p>
     <p>
+      A surface can be closed, watertight, and manifold while still containing self-intersecting facets. Those
+      topology checks alone therefore do not guarantee that TetGen can construct a volume mesh. When this occurs,
+      the expanded diagnostics identify representative intersecting facets or segments when TetGen reports them.
+    </p>
+    <p>
       A successful recovery is reported in the status bar as a build completed after surface repair; it does not open
       a blocking success dialog. The working domain boundary is updated to the exact surface that generated the volume
       mesh, while the imported surface remains available as <code>original_boundary</code>.

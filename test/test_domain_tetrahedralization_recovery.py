@@ -178,6 +178,177 @@ def test_domain_rejects_worker_arrays_that_do_not_match_grid(monkeypatch):
     assert domain.mesh_build_report is None
 
 
+def test_domain_rejects_quadratic_tetrahedra_from_first_order_worker(monkeypatch):
+    corner_points = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    edge_points = np.array(
+        [
+            [0.5, 0.0, 0.0],
+            [0.5, 0.5, 0.0],
+            [0.0, 0.5, 0.0],
+            [0.0, 0.0, 0.5],
+            [0.5, 0.0, 0.5],
+            [0.0, 0.5, 0.5],
+        ]
+    )
+    points = np.vstack((corner_points, edge_points))
+    elements = np.arange(10, dtype=np.int64).reshape(1, 10)
+    grid = pv.UnstructuredGrid(
+        np.concatenate(([10], elements[0])),
+        np.array([pv.CellType.QUADRATIC_TETRA], dtype=np.uint8),
+        points,
+    )
+    surface = grid.extract_surface().triangulate()
+    domain = _domain_with_boundary(surface)
+    result = SimpleNamespace(
+        grid=grid,
+        nodes=points,
+        elements=elements,
+        surface=surface,
+        report=object(),
+    )
+    monkeypatch.setattr(domain_mod, "tetrahedralize", lambda *args, **kwargs: result)
+
+    with pytest.raises(ValueError, match="first-order.*M, 4"):
+        domain.get_interior()
+
+    assert domain.mesh is None
+    assert domain.mesh_build_report is None
+
+
+def test_domain_rejects_raw_tetgen_switches_before_worker(monkeypatch):
+    domain = _domain_with_boundary(pv.Cube().triangulate())
+
+    def unexpected_worker(*args, **kwargs):
+        raise AssertionError("Raw switches must not reach the Domain TetGen worker")
+
+    monkeypatch.setattr(domain_mod, "tetrahedralize", unexpected_worker)
+
+    with pytest.raises(ValueError, match="switches.*order=1.*nobisect"):
+        domain.get_interior(switches="pq1.2")
+
+
+def test_boundary_rebuild_failure_cannot_leave_stale_volume_state(monkeypatch):
+    domain = _domain_with_boundary(pv.Cube().triangulate())
+    stale = object()
+    domain.mesh = stale
+    domain.mesh_nodes = stale
+    domain.mesh_vertices = stale
+    domain.mesh_tree = stale
+    domain.mesh_tree_2 = stale
+    domain.all_mesh_cells = stale
+    domain.cumulative_probability = stale
+    domain.characteristic_length = 2.0
+    domain.area = 3.0
+    domain.volume = 4.0
+    domain.convexity = 0.5
+    domain.mesh_build_report = stale
+    domain.random_points = stale
+
+    replacement = pv.Sphere(theta_resolution=8, phi_resolution=8).triangulate()
+    domain.original_boundary = replacement
+    replacement_grid = object()
+    monkeypatch.setattr(
+        domain_mod,
+        "contour",
+        lambda *args, **kwargs: (replacement.copy(deep=True), replacement_grid),
+    )
+
+    boundary, grid = domain.get_boundary(25)
+
+    assert grid is replacement_grid
+    assert boundary.n_points == replacement.n_points
+    assert domain.mesh is None
+    assert domain.mesh_nodes is None
+    assert domain.mesh_vertices is None
+    assert domain.mesh_tree is None
+    assert domain.mesh_tree_2 is None
+    assert domain.all_mesh_cells is None
+    assert domain.cumulative_probability is None
+    assert domain.characteristic_length is None
+    assert domain.area is None
+    assert domain.volume is None
+    assert domain.convexity is None
+    assert domain.mesh_build_report is None
+    assert domain.random_points is None
+
+    monkeypatch.setattr(
+        domain_mod,
+        "tetrahedralize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("worker failed")),
+    )
+    with pytest.raises(RuntimeError, match="worker failed"):
+        domain.get_interior()
+
+    assert domain.mesh is None
+    assert domain.mesh_build_report is None
+    assert domain.boundary.n_points == replacement.n_points
+
+
+def test_cached_build_rechecks_mesh_after_boundary_replacement(monkeypatch):
+    domain = _domain_with_boundary(pv.Cube().triangulate())
+    domain.patches = []
+    domain.PTS = np.zeros((1, 1, 1, 1, 1, 3))
+    domain.function_tree = object()
+    domain.random_generator = object()
+    domain.boundary = None
+    domain.mesh = object()
+    domain.mesh_tree = object()
+    domain.mesh_tree_2 = object()
+    calls = []
+    replacement = pv.Sphere(theta_resolution=8, phi_resolution=8).triangulate()
+
+    def rebuild_boundary(resolution):
+        domain._set_boundary_mesh(replacement)
+        domain.grid = object()
+        return domain.boundary, domain.grid
+
+    def rebuild_interior(**kwargs):
+        calls.append("interior")
+        domain.mesh = object()
+        domain.mesh_tree = object()
+        domain.mesh_tree_2 = object()
+        return domain.mesh
+
+    monkeypatch.setattr(domain, "get_boundary", rebuild_boundary)
+    monkeypatch.setattr(domain, "get_interior", rebuild_interior)
+
+    domain.build(resolution=25)
+
+    assert calls == ["interior"]
+    assert domain.mesh is not None
+    assert domain.mesh_tree is not None
+
+
+def test_domain_rejects_zero_volume_selected_surface(monkeypatch):
+    points = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    elements = np.array([[0, 1, 2, 3]], dtype=np.int64)
+    grid = pv.UnstructuredGrid(
+        np.array([4, 0, 1, 2, 3], dtype=np.int64),
+        np.array([pv.CellType.TETRA], dtype=np.uint8),
+        points,
+    )
+    domain = _domain_with_boundary(pv.Cube().triangulate())
+    result = SimpleNamespace(
+        grid=grid,
+        nodes=points,
+        elements=elements,
+        surface=pv.Plane().triangulate(),
+        report=object(),
+    )
+    monkeypatch.setattr(domain_mod, "tetrahedralize", lambda *args, **kwargs: result)
+    monkeypatch.setattr(domain_mod, "validate_recovery_surface", lambda *args, **kwargs: None)
+
+    with pytest.raises(ValueError, match="selected surface volume.*positive.*finite"):
+        domain.get_interior()
+
+    assert domain.mesh is None
+    assert domain.mesh_build_report is None
+
+
 def test_boundary_install_rejects_zero_measure_without_partial_state():
     domain = Domain(np.zeros((1, 3)))
     previous = pv.Cube().triangulate()

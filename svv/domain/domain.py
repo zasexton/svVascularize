@@ -418,14 +418,14 @@ class Domain(object):
                 # Check if boundary/mesh were already loaded from .dmn file
                 # If so, skip expensive regeneration
                 has_boundary = getattr(self, 'boundary', None) is not None
-                has_mesh = (
-                    getattr(self, 'mesh', None) is not None and
-                    getattr(self, 'mesh_tree', None) is not None
-                )
                 if not has_boundary:
                     report(0.5, "Extracting domain boundary...")
                     self.get_boundary(resolution)
                     report(0.7, "Domain boundary extracted")
+                has_mesh = (
+                    getattr(self, 'mesh', None) is not None and
+                    getattr(self, 'mesh_tree', None) is not None
+                )
                 if not has_mesh:
                     if self.points.shape[1] == 3:
                         report(None, "Tetrahedralizing domain interior...", True)
@@ -821,10 +821,28 @@ class Domain(object):
             raise ValueError("Only 2D and 3D domains are supported.")
         return prepared, nodes.copy(), vertices.astype(np.int64, copy=True)
 
+    def _invalidate_interior_mesh_state(self):
+        """Clear volume-mesh state that depends on the current boundary."""
+
+        self.mesh = None
+        self.mesh_nodes = None
+        self.mesh_vertices = None
+        self.mesh_tree = None
+        self.mesh_tree_2 = None
+        self.all_mesh_cells = None
+        self.cumulative_probability = None
+        self.characteristic_length = None
+        self.area = None
+        self.volume = None
+        self.convexity = None
+        self.mesh_build_report = None
+        self.random_points = None
+
     def _set_boundary_mesh(self, boundary):
         """Install a validated boundary and its sampling arrays atomically."""
 
         prepared, nodes, vertices = self._prepare_boundary_mesh(boundary)
+        self._invalidate_interior_mesh_state()
         self.boundary = prepared
         self.boundary_nodes = nodes
         self.boundary_vertices = vertices
@@ -869,6 +887,8 @@ class Domain(object):
             this also accepts tetrahedralize() recovery controls such as
             repair_on_failure, repair_max_distance_ratio, remesh_on_failure,
             remesh_subdivisions, remesh_clusters, and remesh_clean_tolerance.
+            Raw TetGen ``switches`` strings are rejected because Domain enforces
+            ``order=1`` and ``nobisect=True``.
 
         Returns
         -------
@@ -899,6 +919,11 @@ class Domain(object):
             volume = 0.0
             mesh_build_report = None
         elif self.points.shape[1] == 3:
+            if kwargs.get("switches") is not None:
+                raise ValueError(
+                    "Raw TetGen switches cannot be used by Domain because "
+                    "order=1 and nobisect=True are enforced"
+                )
             tetgen_options = dict(kwargs)
             tetgen_options.update(
                 order=1,
@@ -919,10 +944,13 @@ class Domain(object):
             if (
                 vertices.ndim != 2
                 or vertices.shape[0] == 0
-                or vertices.shape[1] not in (4, 10)
+                or vertices.shape[1] != 4
                 or not np.issubdtype(vertices.dtype, np.integer)
             ):
-                raise ValueError("Tetrahedral connectivity must have integer shape (M, 4) or (M, 10)")
+                raise ValueError(
+                    "Domain requires first-order tetrahedral connectivity with "
+                    "integer shape (M, 4)"
+                )
             if vertices.min() < 0 or vertices.max() >= nodes.shape[0]:
                 raise ValueError("Tetrahedral connectivity contains out-of-range indices")
             if _mesh.n_points != nodes.shape[0]:
@@ -940,13 +968,10 @@ class Domain(object):
                 atol=0.0,
             ):
                 raise ValueError("Volume-grid points do not match TetGen worker nodes")
-            expected_cell_type = (
-                int(pv.CellType.TETRA)
-                if vertices.shape[1] == 4
-                else int(pv.CellType.QUADRATIC_TETRA)
-            )
-            if not np.all(np.asarray(_mesh.celltypes) == expected_cell_type):
-                raise ValueError("Volume-grid cell types do not match TetGen elements")
+            if not np.all(np.asarray(_mesh.celltypes) == int(pv.CellType.TETRA)):
+                raise ValueError(
+                    "Domain volume-grid cells must all be first-order tetrahedra"
+                )
             grid_connectivity = np.asarray(_mesh.cell_connectivity).reshape(
                 vertices.shape
             )
@@ -978,13 +1003,16 @@ class Domain(object):
                 max_distance_ratio=0.01,
             )
             selected_volume = abs(float(selected_surface.volume))
-            if selected_volume > 0:
-                volume_delta = abs(volume - selected_volume) / selected_volume
-                if not np.isfinite(volume_delta) or volume_delta > 0.005:
-                    raise ValueError(
-                        "Tetrahedral mesh volume differs from its selected surface "
-                        "by {:.3%}".format(volume_delta)
-                    )
+            if not np.isfinite(selected_volume) or selected_volume <= 0:
+                raise ValueError(
+                    "The selected surface volume must be positive and finite"
+                )
+            volume_delta = abs(volume - selected_volume) / selected_volume
+            if not np.isfinite(volume_delta) or volume_delta > 0.005:
+                raise ValueError(
+                    "Tetrahedral mesh volume differs from its selected surface "
+                    "by {:.3%}".format(volume_delta)
+                )
             mesh_build_report = result.report
         else:
             raise ValueError("Only 2D and 3D domains are supported.")

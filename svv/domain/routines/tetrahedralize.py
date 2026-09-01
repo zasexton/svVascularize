@@ -1,6 +1,7 @@
 import tetgen
 import pymeshfix
 from dataclasses import dataclass, replace
+from numbers import Integral, Real
 import subprocess
 import tempfile
 import os
@@ -117,6 +118,18 @@ def prepare_surface(surface: pv.DataSet) -> pv.PolyData:
     return prepared
 
 
+def _validated_real_scalar(value, name, *, allow_zero):
+    requirement = (
+        "finite and non-negative scalar" if allow_zero else "finite and positive scalar"
+    )
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+        raise ValueError("{} must be a {}".format(name, requirement))
+    numeric = float(value)
+    if not np.isfinite(numeric) or (numeric < 0 if allow_zero else numeric <= 0):
+        raise ValueError("{} must be a {}".format(name, requirement))
+    return numeric
+
+
 def _symmetric_surface_distance(first: pv.PolyData, second: pv.PolyData) -> float:
     first_distances = np.abs(
         np.asarray(first.compute_implicit_distance(second)["implicit_distance"])
@@ -124,6 +137,13 @@ def _symmetric_surface_distance(first: pv.PolyData, second: pv.PolyData) -> floa
     second_distances = np.abs(
         np.asarray(second.compute_implicit_distance(first)["implicit_distance"])
     )
+    if (
+        first_distances.size == 0
+        or second_distances.size == 0
+        or not np.isfinite(first_distances).all()
+        or not np.isfinite(second_distances).all()
+    ):
+        raise ValueError("Surface distance arrays must be finite and non-empty")
     return float(max(first_distances.max(), second_distances.max()))
 
 
@@ -135,8 +155,11 @@ def validate_recovery_surface(
 ):
     """Validate topology and geometric displacement of a recovery candidate."""
 
-    if not np.isfinite(max_distance_ratio) or max_distance_ratio <= 0:
-        raise ValueError("max_distance_ratio must be finite and positive")
+    max_distance_ratio = _validated_real_scalar(
+        max_distance_ratio,
+        "max_distance_ratio",
+        allow_zero=False,
+    )
     source_summary = summarize_surface(source)
     candidate_summary = summarize_surface(candidate)
     if not candidate_summary.points_finite:
@@ -157,15 +180,28 @@ def validate_recovery_surface(
             )
         )
 
+    source_bounds = np.asarray(source_summary.bounds, dtype=float)
+    candidate_bounds = np.asarray(candidate_summary.bounds, dtype=float)
+    if not np.isfinite(source_bounds).all() or not np.isfinite(candidate_bounds).all():
+        raise ValueError("Source and recovery surface bounds must be finite")
+    if (
+        not np.isfinite(source_summary.diagonal)
+        or source_summary.diagonal <= 0
+        or not np.isfinite(candidate_summary.diagonal)
+        or candidate_summary.diagonal <= 0
+    ):
+        raise ValueError("Source and recovery surface diagonals must be finite and positive")
+
     allowed_distance = source_summary.diagonal * max_distance_ratio
+    if not np.isfinite(allowed_distance):
+        raise ValueError("The allowed recovery distance must be finite")
     bounds_delta = float(
         np.max(
-            np.abs(
-                np.asarray(candidate_summary.bounds, dtype=float)
-                - np.asarray(source_summary.bounds, dtype=float)
-            )
+            np.abs(candidate_bounds - source_bounds)
         )
     )
+    if not np.isfinite(bounds_delta):
+        raise ValueError("Recovery surface bounds delta must be finite")
     if bounds_delta > allowed_distance:
         raise ValueError(
             "Recovery surface bounds changed by {:.6g}, exceeding {:.6g}".format(
@@ -174,6 +210,8 @@ def validate_recovery_surface(
             )
         )
     distance = _symmetric_surface_distance(source, candidate)
+    if not np.isfinite(distance):
+        raise ValueError("Recovery surface distance must be finite")
     if distance > allowed_distance:
         raise ValueError(
             "Recovery surface displacement {:.6g} exceeds {:.6g} "
@@ -184,6 +222,14 @@ def validate_recovery_surface(
             )
         )
     return candidate_summary
+
+
+class RecoverySurfaceRejected(ValueError):
+    """A fidelity or topology rejection that retains the candidate surface."""
+
+    def __init__(self, message, surface):
+        self.surface = surface.copy(deep=True)
+        super().__init__(message)
 
 
 def repair_surface_with_meshfix(
@@ -208,12 +254,15 @@ def repair_surface_with_meshfix(
         )
     )
     repaired = pv.PolyData(np.asarray(meshfix.v).copy(), repaired_faces)
-    repaired = prepare_surface(repaired)
-    validate_recovery_surface(
-        prepared,
-        repaired,
-        max_distance_ratio=max_distance_ratio,
-    )
+    try:
+        repaired = prepare_surface(repaired)
+        validate_recovery_surface(
+            prepared,
+            repaired,
+            max_distance_ratio=max_distance_ratio,
+        )
+    except ValueError as exc:
+        raise RecoverySurfaceRejected(str(exc), repaired) from exc
     return repaired
 
 def uniform_remesh_surface(surface: pv.PolyData,
@@ -272,6 +321,10 @@ def _tetgen_worker_tetrahedralize(surface: pv.PolyData,
                                   strategy: str = "original"):
     attempt_start = time.perf_counter()
     surface_summary = summarize_surface(surface)
+    worker_script, python_exe = _resolve_worker_launch_paths(
+        worker_script,
+        python_exe,
+    )
 
     def infrastructure_error(message, exc):
         details = "{}: {}".format(type(exc).__name__, exc)
@@ -442,6 +495,18 @@ def _tetgen_worker_tetrahedralize(surface: pv.PolyData,
     return nodes, elems
 
 
+def _resolve_worker_launch_paths(worker_script, python_exe):
+    """Resolve paths that would otherwise be interpreted from the worker cwd."""
+
+    worker_script = os.fspath(worker_script)
+    python_exe = os.fspath(python_exe)
+    if not os.path.isabs(worker_script):
+        worker_script = os.path.abspath(worker_script)
+    if not os.path.isabs(python_exe) and os.path.dirname(python_exe):
+        python_exe = os.path.abspath(python_exe)
+    return worker_script, python_exe
+
+
 def _validate_tetgen_arrays(nodes, elems):
     """Validate node coordinates and tetrahedral connectivity from a worker."""
 
@@ -595,9 +660,12 @@ def tetrahedralize(surface: pv.PolyData,
     *tet_args
         Positional arguments forwarded unchanged to TetGen.
     worker_script : str
-        Worker entry point used to isolate native TetGen calls.
+        Worker entry point used to isolate native TetGen calls. Relative paths
+        are resolved before entering the worker's temporary directory.
     python_exe : str
-        Python interpreter used for the worker process.
+        Python interpreter used for the worker process. Relative paths with a
+        directory component are resolved before entering the temporary directory;
+        bare command names continue to use the process ``PATH``.
     repair_on_failure : bool
         If True, retry a geometry-related TetGen failure after a
         component-preserving PyMeshFix repair.
@@ -639,21 +707,31 @@ def tetrahedralize(surface: pv.PolyData,
         raise ValueError("remesh_on_failure must be a boolean")
     if not isinstance(return_result, bool):
         raise ValueError("return_result must be a boolean")
-    if not np.isfinite(repair_max_distance_ratio) or repair_max_distance_ratio <= 0:
-        raise ValueError("repair_max_distance_ratio must be finite and positive")
-    if remesh_subdivisions < 0:
-        raise ValueError("remesh_subdivisions must be non-negative")
-    if remesh_clusters <= 0:
-        raise ValueError("remesh_clusters must be positive")
+    repair_max_distance_ratio = _validated_real_scalar(
+        repair_max_distance_ratio,
+        "repair_max_distance_ratio",
+        allow_zero=False,
+    )
+    if (
+        isinstance(remesh_subdivisions, (bool, np.bool_))
+        or not isinstance(remesh_subdivisions, Integral)
+        or remesh_subdivisions < 0
+    ):
+        raise ValueError("remesh_subdivisions must be a non-negative integer")
+    if (
+        isinstance(remesh_clusters, (bool, np.bool_))
+        or not isinstance(remesh_clusters, Integral)
+        or remesh_clusters <= 0
+    ):
+        raise ValueError("remesh_clusters must be a positive integer")
+    remesh_subdivisions = int(remesh_subdivisions)
+    remesh_clusters = int(remesh_clusters)
     if remesh_clean_tolerance is not None:
-        try:
-            valid_clean_tolerance = bool(
-                np.isfinite(remesh_clean_tolerance) and remesh_clean_tolerance >= 0
-            )
-        except TypeError:
-            valid_clean_tolerance = False
-        if not valid_clean_tolerance:
-            raise ValueError("remesh_clean_tolerance must be finite and non-negative")
+        remesh_clean_tolerance = _validated_real_scalar(
+            remesh_clean_tolerance,
+            "remesh_clean_tolerance",
+            allow_zero=True,
+        )
 
     tet_kwargs.setdefault("verbose", 0)
     source = prepare_surface(surface)
@@ -680,7 +758,16 @@ def tetrahedralize(surface: pv.PolyData,
 
         diagnostic_kwargs = dict(tet_kwargs)
         diagnostic_kwargs["diagnose"] = 1
+        diagnostic_kwargs["quiet"] = False
         diagnostic_kwargs["verbose"] = 1
+        diagnostic_switches = diagnostic_kwargs.get("switches")
+        if diagnostic_switches:
+            diagnostic_switches = diagnostic_switches.replace("Q", "")
+            if "d" not in diagnostic_switches:
+                diagnostic_switches += "d"
+            if "V" not in diagnostic_switches:
+                diagnostic_switches += "V"
+            diagnostic_kwargs["switches"] = diagnostic_switches
         try:
             _tetgen_worker_tetrahedralize(
                 candidate,
@@ -751,21 +838,25 @@ def tetrahedralize(surface: pv.PolyData,
 
     if repair_on_failure:
         started = time.perf_counter()
+        repaired = None
         try:
             repaired = repair_surface_with_meshfix(
                 source,
                 max_distance_ratio=repair_max_distance_ratio,
             )
-            repaired = prepare_surface(repaired)
-            validate_recovery_surface(
-                source,
-                repaired,
-                max_distance_ratio=repair_max_distance_ratio,
-            )
-        except Exception as exc:
+            try:
+                repaired = prepare_surface(repaired)
+                validate_recovery_surface(
+                    source,
+                    repaired,
+                    max_distance_ratio=repair_max_distance_ratio,
+                )
+            except ValueError as exc:
+                raise RecoverySurfaceRejected(str(exc), repaired) from exc
+        except RecoverySurfaceRejected as exc:
             _rejected_attempt(
                 "meshfix",
-                source,
+                exc.surface,
                 report,
                 tet_args,
                 tet_kwargs,
@@ -779,43 +870,57 @@ def tetrahedralize(surface: pv.PolyData,
 
     if remesh_on_failure:
         started = time.perf_counter()
+        remeshed = None
+        raw_remeshed = uniform_remesh_surface(
+            source,
+            subdivisions=remesh_subdivisions,
+            clusters=remesh_clusters,
+            clean_tolerance=remesh_clean_tolerance,
+        )
         try:
-            remeshed = prepare_surface(
-                uniform_remesh_surface(
-                    source,
-                    subdivisions=remesh_subdivisions,
-                    clusters=remesh_clusters,
-                    clean_tolerance=remesh_clean_tolerance,
-                )
-            )
+            remeshed = prepare_surface(raw_remeshed)
             validate_recovery_surface(
                 source,
                 remeshed,
                 max_distance_ratio=repair_max_distance_ratio,
             )
-            remesh_strategy = "pyacvd"
-        except Exception as remesh_error:
-            if repair_on_failure and "remeshed" in locals():
+        except ValueError as remesh_error:
+            pyacvd_candidate = remeshed if remeshed is not None else raw_remeshed
+            remesh_rejection = RecoverySurfaceRejected(
+                str(remesh_error),
+                pyacvd_candidate,
+            )
+            if repair_on_failure:
+                repaired_remesh = None
                 try:
-                    remeshed = repair_surface_with_meshfix(
-                        remeshed,
+                    repaired_remesh = repair_surface_with_meshfix(
+                        pyacvd_candidate,
                         max_distance_ratio=repair_max_distance_ratio,
                     )
-                    validate_recovery_surface(
-                        source,
-                        remeshed,
-                        max_distance_ratio=repair_max_distance_ratio,
-                    )
+                    try:
+                        remeshed = prepare_surface(repaired_remesh)
+                        validate_recovery_surface(
+                            source,
+                            remeshed,
+                            max_distance_ratio=repair_max_distance_ratio,
+                        )
+                    except ValueError as exc:
+                        raise RecoverySurfaceRejected(
+                            str(exc),
+                            remeshed
+                            if remeshed is not None
+                            else repaired_remesh,
+                        ) from exc
                     remesh_strategy = "pyacvd_meshfix"
-                except Exception as repair_error:
+                except RecoverySurfaceRejected as repair_error:
                     _rejected_attempt(
                         "pyacvd_meshfix",
-                        source,
+                        repair_error.surface,
                         report,
                         tet_args,
                         tet_kwargs,
                         "PyACVD recovery was rejected: {}; repair failed: {}".format(
-                            remesh_error,
+                            remesh_rejection,
                             repair_error,
                         ),
                         time.perf_counter() - started,
@@ -824,14 +929,16 @@ def tetrahedralize(surface: pv.PolyData,
             else:
                 _rejected_attempt(
                     "pyacvd",
-                    source,
+                    remesh_rejection.surface,
                     report,
                     tet_args,
                     tet_kwargs,
-                    "PyACVD recovery was rejected: {}".format(remesh_error),
+                    "PyACVD recovery was rejected: {}".format(remesh_rejection),
                     time.perf_counter() - started,
                 )
                 remeshed = None
+        else:
+            remesh_strategy = "pyacvd"
 
         if remeshed is not None:
             result = attempt(remeshed, remesh_strategy)
