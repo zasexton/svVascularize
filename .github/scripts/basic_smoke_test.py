@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import tempfile
@@ -157,6 +158,7 @@ def main() -> None:
     import pyvista as pv
 
     from svv import Domain, Forest, Simulation, Tree
+    from svv.domain.routines.tetrahedralize import tetrahedralize
     from svv.utils.remeshing.mmg import get_mmg_candidates, get_mmg_exe
     from svv.utils.solvers.solver_0d import get_solver_0d_candidates, get_solver_0d_exe
     from svv.utils.remeshing.remesh import remesh_surface
@@ -184,6 +186,41 @@ def main() -> None:
     cube.create()
     cube.solve()
     cube.build()
+
+    # Real geometry-recovery path using a compact, deterministic folded surface.
+    # Future TetGen releases may accept the original directly, so assert portable
+    # mesh invariants rather than a version-specific strategy.
+    _log("SMOKE: tetrahedralize: folded closed surface")
+    folded = pv.Sphere(theta_resolution=20, phi_resolution=20)
+    folded.points[folded.points[:, 2] > 0.2, 2] -= 0.8
+    recovery = tetrahedralize(
+        folded,
+        order=1,
+        nobisect=True,
+        repair_max_distance_ratio=0.4,
+        return_result=True,
+    )
+    assert recovery.report.selected_strategy in {
+        "original",
+        "meshfix",
+        "pyacvd",
+        "pyacvd_meshfix",
+    }
+    assert recovery.elements.shape[0] > 0
+    assert recovery.surface.is_manifold
+    assert recovery.surface.n_open_edges == 0
+    recovery_volumes = recovery.grid.compute_cell_sizes(
+        length=False,
+        area=False,
+        volume=True,
+    ).cell_data["Volume"]
+    assert recovery_volumes.size > 0
+    assert all(
+        math.isfinite(float(value)) and float(value) >= 0
+        for value in recovery_volumes
+    )
+    assert math.isfinite(float(recovery_volumes.sum()))
+    assert float(recovery_volumes.sum()) > 0
 
     # MMG remeshing (validate that packaged/built executables run)
     _log("SMOKE: mmg: remesh_surface(pv.Cube())")
