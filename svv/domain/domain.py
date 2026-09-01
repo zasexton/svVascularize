@@ -5,7 +5,11 @@ from svv.domain.patch import Patch
 from svv.domain.routines.allocate import allocate
 from svv.domain.routines.discretize import contour
 from svv.domain.io.read import read
-from svv.domain.routines.tetrahedralize import tetrahedralize, triangulate
+from svv.domain.routines.tetrahedralize import (
+    tetrahedralize,
+    triangulate,
+    validate_recovery_surface,
+)
 from svv.domain.routines.c_sample import pick_from_tetrahedron, pick_from_triangle, pick_from_line
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from svv.domain.routines.boolean import boolean
@@ -60,10 +64,14 @@ class Domain(object):
         self.random_generator = None
         self.characteristic_length = None
         self.mesh_tree = None
+        self.mesh_tree_2 = None
+        self.mesh_build_report = None
         self.boundary_nodes = None
         self.boundary_vertices = None
         self.mesh_nodes = None
         self.mesh_vertices = None
+        self.all_mesh_cells = None
+        self.cumulative_probability = None
         self.convexity = None
         self.random_points = None
         if len(args) > 0:
@@ -162,7 +170,7 @@ class Domain(object):
                 if isinstance(boundary, pv.UnstructuredGrid):
                     boundary = boundary.extract_surface()
                 points, normals, n, d = read(boundary, **kwargs)
-                self.original_boundary = boundary
+                self.original_boundary = boundary.copy(deep=True)
                 self.points = points
                 self.normals = normals
                 self.n = n
@@ -750,33 +758,92 @@ class Domain(object):
         values = self.__call__(points, **kwargs)
         return values <= level
 
+    @staticmethod
+    def _normalize_cell_measure(mesh, measure_name, normalized_name):
+        values = np.asarray(mesh.cell_data[measure_name], dtype=np.float64)
+        total = float(np.sum(values))
+        if (
+            values.size == 0
+            or not np.isfinite(values).all()
+            or np.any(values < 0)
+            or not np.isfinite(total)
+            or total <= 0
+        ):
+            raise ValueError(
+                "{} requires a positive finite total with finite nonnegative "
+                "cell values".format(normalized_name)
+            )
+        normalized = values / total
+        mesh.cell_data[normalized_name] = normalized
+        return normalized
+
+    def _prepare_boundary_mesh(self, boundary):
+        if not isinstance(boundary, pv.PolyData):
+            boundary = boundary.extract_surface()
+        prepared = boundary.copy(deep=True)
+        dimension = self.points.shape[1]
+        if dimension == 3 and not prepared.is_all_triangles:
+            prepared = prepared.triangulate()
+        prepared = prepared.compute_cell_sizes()
+        if prepared.n_points == 0 or prepared.n_cells == 0:
+            raise ValueError("Boundary mesh must be non-empty")
+        if not np.isfinite(np.asarray(prepared.points)).all():
+            raise ValueError("Boundary mesh points must be finite")
+
+        if dimension == 2:
+            self._normalize_cell_measure(
+                prepared,
+                "Length",
+                "Normalized_Length",
+            )
+            nodes = np.asarray(prepared.points, dtype=np.float64)
+            try:
+                vertices = np.asarray(prepared.lines).reshape(-1, 3)[:, 1:]
+            except ValueError as exc:
+                raise ValueError("2D boundary must contain two-node line cells") from exc
+        elif dimension == 3:
+            if not prepared.is_all_triangles:
+                raise ValueError("3D boundary must contain only triangles")
+            self._normalize_cell_measure(
+                prepared,
+                "Area",
+                "Normalized_Area",
+            )
+            nodes = np.asarray(prepared.points, dtype=np.float64)
+            try:
+                vertices = np.asarray(prepared.faces).reshape(-1, 4)[:, 1:]
+            except ValueError as exc:
+                raise ValueError("3D boundary must contain three-node triangles") from exc
+        else:
+            raise ValueError("Only 2D and 3D domains are supported.")
+        return prepared, nodes.copy(), vertices.astype(np.int64, copy=True)
+
+    def _set_boundary_mesh(self, boundary):
+        """Install a validated boundary and its sampling arrays atomically."""
+
+        prepared, nodes, vertices = self._prepare_boundary_mesh(boundary)
+        self.boundary = prepared
+        self.boundary_nodes = nodes
+        self.boundary_vertices = vertices
+        return prepared
+
     def get_boundary(self, resolution, **kwargs):
         """
         Descretize the domain into a set of points.
         """
         get_largest = kwargs.get('get_largest', True)
         if isinstance(self.original_boundary, type(None)):
-            self.boundary, self.grid = contour(self.__call__, self.points, resolution)
+            boundary, grid = contour(self.__call__, self.points, resolution)
         else:
             if not self.original_boundary.is_all_triangles:
-                self.boundary = self.original_boundary.triangulate()
+                boundary = self.original_boundary.triangulate()
             else:
-                self.boundary = self.original_boundary
-            _, self.grid = contour(self.__call__, self.points, resolution)
-        self.boundary = self.boundary.connectivity(extraction_mode='largest')
-        self.boundary = self.boundary.compute_cell_sizes()
-        if self.points.shape[1] == 2:
-            self.boundary.cell_data['Normalized_Length'] = (self.boundary.cell_data['Length'] /
-                                                            sum(self.boundary.cell_data['Length']))
-            self.boundary_nodes = self.boundary.points.astype(np.float64)
-            self.boundary_vertices = self.boundary.lines.reshape(-1, 3)[:, 1:].astype(np.int64)
-        elif self.points.shape[1] == 3:
-            self.boundary.cell_data['Normalized_Area'] = (self.boundary.cell_data['Area'] /
-                                                          sum(self.boundary.cell_data['Area']))
-            self.boundary_nodes = self.boundary.points.astype(np.float64)
-            self.boundary_vertices = self.boundary.faces.reshape(-1, 4)[:, 1:].astype(np.int64)
-        else:
-            raise ValueError("Only 2D and 3D domains are supported.")
+                boundary = self.original_boundary.copy(deep=True)
+            _, grid = contour(self.__call__, self.points, resolution)
+        if get_largest:
+            boundary = boundary.connectivity(extraction_mode='largest')
+        self._set_boundary_mesh(boundary)
+        self.grid = grid
         return self.boundary, self.grid
 
     def get_interior(self, verbose=False, **kwargs):
@@ -789,9 +856,9 @@ class Domain(object):
             A flag to indicate if mesh fixing should be verbose.
         kwargs : dict
             A dictionary of keyword arguments to be passed to TetGen. In 3D,
-            this also accepts tetrahedralize() retry controls such as
-            remesh_on_failure, remesh_subdivisions, remesh_clusters, and
-            remesh_clean_tolerance.
+            this also accepts tetrahedralize() recovery controls such as
+            repair_on_failure, repair_max_distance_ratio, remesh_on_failure,
+            remesh_subdivisions, remesh_clusters, and remesh_clean_tolerance.
 
         Returns
         -------
@@ -803,28 +870,96 @@ class Domain(object):
         if self.points.shape[1] == 2:
             _mesh, nodes, vertices = triangulate(self.boundary, verbose=verbose, **kwargs)
             _mesh = _mesh.compute_cell_sizes()
-            _mesh.cell_data['Normalized_Area'] = (_mesh.cell_data['Area'] / sum(_mesh.cell_data['Area']))
-            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
-            self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Area'])
-            self.characteristic_length = _mesh.area**(1/self.points.shape[1])
-            self.area = _mesh.area
-            self.volume = 0.0
+            normalized_measure = self._normalize_cell_measure(
+                _mesh,
+                "Area",
+                "Normalized_Area",
+            )
+            characteristic_length = _mesh.area**(1/self.points.shape[1])
+            area = _mesh.area
+            volume = 0.0
+            mesh_build_report = None
         elif self.points.shape[1] == 3:
-            _mesh, nodes, vertices = tetrahedralize(self.boundary, order=1, nobisect=True, verbose=verbose, **kwargs)
-            _mesh = _mesh.compute_cell_sizes()
-            _mesh.cell_data['Normalized_Volume'] = (_mesh.cell_data['Volume'] / sum(_mesh.cell_data['Volume']))
-            self.all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
-            self.cumulative_probability = np.cumsum(_mesh.cell_data['Normalized_Volume'])
-            self.characteristic_length = _mesh.volume**(1/self.points.shape[1])
-            self.area = _mesh.area
-            self.volume = _mesh.volume
+            tetgen_options = dict(kwargs)
+            tetgen_options.update(
+                order=1,
+                nobisect=True,
+                verbose=verbose,
+                return_result=True,
+            )
+            result = tetrahedralize(self.boundary, **tetgen_options)
+            _mesh = result.grid.copy(deep=True)
+            nodes = np.asarray(result.nodes)
+            vertices = np.asarray(result.elements)
+            if _mesh.n_points == 0 or _mesh.n_cells == 0:
+                raise ValueError("Tetrahedral mesh must be non-empty")
+            if nodes.ndim != 2 or nodes.shape[1] != 3 or nodes.shape[0] == 0:
+                raise ValueError("Tetrahedral mesh nodes must have non-empty shape (N, 3)")
+            if not np.isfinite(nodes).all():
+                raise ValueError("Tetrahedral mesh nodes must be finite")
+            if (
+                vertices.ndim != 2
+                or vertices.shape[0] == 0
+                or vertices.shape[1] not in (4, 10)
+                or not np.issubdtype(vertices.dtype, np.integer)
+            ):
+                raise ValueError("Tetrahedral connectivity must have integer shape (M, 4) or (M, 10)")
+            if vertices.min() < 0 or vertices.max() >= nodes.shape[0]:
+                raise ValueError("Tetrahedral connectivity contains out-of-range indices")
+            valid_cell_types = {
+                int(pv.CellType.TETRA),
+                int(pv.CellType.QUADRATIC_TETRA),
+            }
+            if not set(np.unique(_mesh.celltypes)).issubset(valid_cell_types):
+                raise ValueError("Volume mesh contains non-tetrahedral cells")
+
+            _mesh = _mesh.compute_cell_sizes(
+                length=False,
+                area=False,
+                volume=True,
+            )
+            normalized_measure = self._normalize_cell_measure(
+                _mesh,
+                "Volume",
+                "Normalized_Volume",
+            )
+            volumes = np.asarray(_mesh.cell_data["Volume"], dtype=np.float64)
+            volume = float(np.sum(volumes))
+            characteristic_length = volume**(1/self.points.shape[1])
+            area = float(_mesh.extract_surface().area)
+
+            selected_surface = result.surface.copy(deep=True)
+            extracted_surface = _mesh.extract_surface().triangulate()
+            validate_recovery_surface(
+                selected_surface,
+                extracted_surface,
+                max_distance_ratio=0.01,
+            )
+            selected_volume = abs(float(selected_surface.volume))
+            if selected_volume > 0:
+                volume_delta = abs(volume - selected_volume) / selected_volume
+                if not np.isfinite(volume_delta) or volume_delta > 0.005:
+                    raise ValueError(
+                        "Tetrahedral mesh volume differs from its selected surface "
+                        "by {:.3%}".format(volume_delta)
+                    )
+            mesh_build_report = result.report
         else:
             raise ValueError("Only 2D and 3D domains are supported.")
-        self.mesh_tree = cKDTree(_mesh.cell_centers().points[:, :self.points.shape[1]], leafsize=4)
-        self.mesh_tree_2 = BallTree(_mesh.cell_centers().points[:, :self.points.shape[1]])
-        self.mesh = _mesh
-        self.mesh_nodes = nodes.astype(np.float64)
-        self.mesh_vertices = vertices.astype(np.int64)
+
+        centers = np.asarray(
+            _mesh.cell_centers().points[:, :self.points.shape[1]],
+            dtype=np.float64,
+        )
+        if centers.shape[0] != _mesh.n_cells or not np.isfinite(centers).all():
+            raise ValueError("Volume-mesh cell centers must be finite")
+        mesh_tree = cKDTree(centers, leafsize=4)
+        mesh_tree_2 = BallTree(centers)
+        all_mesh_cells = np.arange(_mesh.n_cells, dtype=np.int64)
+        cumulative_probability = np.cumsum(normalized_measure)
+        mesh_nodes = nodes.astype(np.float64)
+        mesh_vertices = vertices.astype(np.int64)
+
         if self.points.shape[1] == 2:
             delaunay = pv.PolyData()
             tmp_points = np.zeros((self.points.shape[0], 3))
@@ -832,15 +967,32 @@ class Domain(object):
             delaunay.points = tmp_points
             delaunay = delaunay.delaunay_2d(offset=2*np.linalg.norm(np.max(self.points, axis=0) -
                                                                     np.min(self.points, axis=0)))
-            self.convexity = self.mesh.area / delaunay.area
+            convexity = area / delaunay.area
         elif self.points.shape[1] == 3:
             delaunay = pv.PolyData()
             delaunay.points = np.unique(self.points, axis=0)
             delaunay = delaunay.delaunay_3d(offset=2*np.linalg.norm(np.max(self.points, axis=0) -
                                                                     np.min(self.points, axis=0)))
-            self.convexity = self.mesh.volume / delaunay.volume
+            convexity = volume / delaunay.volume
         else:
             raise ValueError("Only 2D and 3D domains are supported.")
+
+        if not np.isfinite(convexity) or convexity <= 0:
+            raise ValueError("Domain convexity must be positive and finite")
+        if self.points.shape[1] == 3:
+            self._set_boundary_mesh(selected_surface)
+        self.mesh = _mesh
+        self.mesh_nodes = mesh_nodes
+        self.mesh_vertices = mesh_vertices
+        self.mesh_tree = mesh_tree
+        self.mesh_tree_2 = mesh_tree_2
+        self.all_mesh_cells = all_mesh_cells
+        self.cumulative_probability = cumulative_probability
+        self.characteristic_length = characteristic_length
+        self.area = area
+        self.volume = volume
+        self.convexity = convexity
+        self.mesh_build_report = mesh_build_report
         return _mesh
 
     def get_interior_points(self, n, tree=None, volume_threshold=None,
