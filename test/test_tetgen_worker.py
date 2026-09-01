@@ -205,6 +205,27 @@ def test_worker_classifies_missing_dependency_as_nonrecoverable(tmp_path):
     assert "ModuleNotFoundError" in error.attempt.diagnostics.stderr
 
 
+def test_self_intersection_in_worker_path_does_not_hide_dependency_failure(tmp_path):
+    worker = tmp_path / "self-intersection-dependency-worker.py"
+    worker.write_text("import missing_issue_102_dependency\n")
+
+    with pytest.raises(TetGenWorkerError) as error_info:
+        tetrahedralize_mod._tetgen_worker_tetrahedralize(
+            pv.Tetrahedron().extract_surface(),
+            (),
+            {"verbose": 0},
+            str(worker),
+            sys.executable,
+            strategy="original",
+        )
+
+    error = error_info.value
+    assert error.recoverable is False
+    assert "infrastructure" in str(error).lower()
+    assert error.attempt.diagnostics.python_exception is True
+    assert "ModuleNotFoundError" in error.attempt.diagnostics.stderr
+
+
 def test_worker_rejects_nonfinite_result_arrays_as_infrastructure_failure(tmp_path):
     worker = tmp_path / "invalid_result_worker.py"
     worker.write_text(
