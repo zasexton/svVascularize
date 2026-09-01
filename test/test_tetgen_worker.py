@@ -137,6 +137,29 @@ raise SystemExit(3)
     assert error.attempt.diagnostics.segment_facet_intersections == 1
 
 
+def test_worker_treats_internal_tetgen_error_as_geometry_rejection(tmp_path):
+    worker = tmp_path / "internal_tetgen_failure_worker.py"
+    worker.write_text(
+        "raise RuntimeError('Internal TetGen error within `recoversubfaces`.')\n"
+    )
+
+    with pytest.raises(TetGenWorkerError) as error_info:
+        tetrahedralize_mod._tetgen_worker_tetrahedralize(
+            pv.Tetrahedron().extract_surface(),
+            (),
+            {"order": 1, "nobisect": True, "verbose": 0},
+            str(worker),
+            sys.executable,
+            strategy="original",
+        )
+
+    error = error_info.value
+    assert error.recoverable is True
+    assert error.attempt.status == "failed"
+    assert error.attempt.diagnostics.python_exception is True
+    assert "Internal TetGen error" in error.attempt.diagnostics.stderr
+
+
 def test_worker_classifies_missing_dependency_as_nonrecoverable(tmp_path):
     worker = tmp_path / "dependency_failure_worker.py"
     worker.write_text("import missing_issue_102_dependency\n")

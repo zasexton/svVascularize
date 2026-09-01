@@ -4,6 +4,7 @@ import json
 import pyvista as pv
 import pytest
 
+import svv.domain.routines.mesh_diagnostics as mesh_diagnostics
 from svv.domain.routines.mesh_diagnostics import (
     TetGenAttemptReport,
     TetrahedralizationError,
@@ -56,6 +57,19 @@ Warning:  Two facets exactly intersect.
     assert summary.return_code == -6
     assert summary.signal_name == "SIGABRT"
     assert any("segment: [38341,38340]" in line for line in summary.examples)
+
+
+def test_sigabrt_name_is_stable_when_host_signal_enum_uses_other_numbers(
+    monkeypatch,
+):
+    def unsupported_signal_number(number):
+        raise ValueError(number)
+
+    monkeypatch.setattr(mesh_diagnostics.signal, "Signals", unsupported_signal_number)
+
+    summary = summarize_tetgen_output("", "", -6)
+
+    assert summary.signal_name == "SIGABRT"
 
 
 def test_failure_report_provides_actionable_summary_details_and_json():

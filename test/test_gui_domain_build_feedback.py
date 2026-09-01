@@ -181,6 +181,42 @@ def test_message_box_receives_short_informative_and_detailed_fields(qt_app):
     assert box.standardButtons() == QMessageBox.Ok
 
 
+def test_message_box_title_survives_native_icon_initialization():
+    class NativeResettingMessageBox:
+        Warning = "warning"
+        Ok = "ok"
+
+        def __init__(self):
+            self.title = ""
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def setIcon(self, icon):
+            assert icon == self.Warning
+            self.title = ""
+
+        def setText(self, text):
+            self.text = text
+
+        def setInformativeText(self, text):
+            self.informative_text = text
+
+        def setDetailedText(self, text):
+            self.detailed_text = text
+
+        def setStandardButtons(self, buttons):
+            self.standard_buttons = buttons
+
+    report = _report([_attempt()])
+    feedback = build_domain_feedback(report=report, success=False)
+    box = NativeResettingMessageBox()
+
+    apply_feedback_to_message_box(box, feedback)
+
+    assert box.title == "Domain Build Warning"
+
+
 def test_telemetry_report_is_json_safe_and_removes_local_paths():
     diagnostics = summarize_tetgen_output(
         "",

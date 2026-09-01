@@ -297,10 +297,16 @@ def summarize_tetgen_output(
     if windows_native_status:
         signal_name = "NTSTATUS_0x{:08X}".format(return_code)
     elif return_code < 0:
-        try:
-            signal_name = signal.Signals(-return_code).name
-        except (ValueError, OSError):
-            signal_name = "SIGNAL_{}".format(-return_code)
+        signal_number = -return_code
+        # A negative subprocess code uses POSIX numbering even when a saved
+        # diagnostic is later rendered on a host with a different signal enum.
+        if signal_number == 6:
+            signal_name = "SIGABRT"
+        else:
+            try:
+                signal_name = signal.Signals(signal_number).name
+            except (ValueError, OSError):
+                signal_name = "SIGNAL_{}".format(signal_number)
 
     native_markers = (
         "free():",

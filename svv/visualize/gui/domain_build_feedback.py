@@ -167,12 +167,14 @@ def apply_feedback_to_message_box(message_box, feedback: DomainBuildFeedback) ->
     """Populate a QMessageBox-compatible object with structured feedback."""
 
     box_type = type(message_box)
-    message_box.setWindowTitle("Domain Build Warning")
     message_box.setIcon(box_type.Warning)
     message_box.setText(feedback.text)
     message_box.setInformativeText(feedback.informative_text)
     message_box.setDetailedText(feedback.detailed_text)
     message_box.setStandardButtons(box_type.Ok)
+    # Some native dialog backends initialize the platform window while setting
+    # the icon and clear an earlier title in the process.
+    message_box.setWindowTitle("Domain Build Warning")
 
 
 def _sanitize_payload(value: Any) -> Any:
