@@ -1026,6 +1026,14 @@ class Domain(object):
         #    print("method not specified")
         #if self.mesh is None:
         #    print("mesh not defined")
+        if self.mesh is not None and method == 'voronoi':
+            return self._get_voronoi_cell_centers(
+                n,
+                tree=tree,
+                threshold=threshold,
+                volume_threshold=volume_threshold,
+                implicit_range=implicit_range,
+            )
         if self.mesh is None or method == 'implicit_only':
             min_dims = np.min(self.points, axis=0)
             max_dims = np.max(self.points, axis=0)
@@ -1201,6 +1209,85 @@ class Domain(object):
             #if domain_calc > 0.01:
             #    print(f'Domain Calculation took {domain_calc} seconds')
         return points, cells
+
+    def _get_voronoi_cell_centers(
+        self,
+        n,
+        *,
+        tree=None,
+        threshold=None,
+        volume_threshold=None,
+        implicit_range=(-1.0, 0.0),
+    ):
+        """Select deterministic farthest cell centers from existing seed points."""
+
+        if not isinstance(n, (int, np.integer)) or n < 0:
+            raise ValueError("n must be a non-negative integer")
+        centers = np.asarray(
+            self.mesh.cell_centers().points[:, :self.points.shape[1]],
+            dtype=np.float64,
+        )
+        if centers.shape[0] == 0 or not np.isfinite(centers).all():
+            raise ValueError("Voronoi sampling requires finite mesh cell centers")
+
+        seed_source = tree
+        active_tree = getattr(tree, "active_tree", None)
+        if active_tree is not None:
+            seed_source = getattr(active_tree, "data", active_tree)
+        elif hasattr(tree, "data"):
+            seed_source = tree.data
+        if seed_source is None:
+            seeds = np.empty((0, centers.shape[1]), dtype=np.float64)
+        else:
+            seeds = np.asarray(seed_source, dtype=np.float64)
+            if seeds.ndim == 1:
+                seeds = seeds.reshape(1, -1)
+            if seeds.ndim != 2 or seeds.shape[1] < centers.shape[1]:
+                raise ValueError("Voronoi seed points have an invalid shape")
+            seeds = seeds[:, :centers.shape[1]]
+            if not np.isfinite(seeds).all():
+                raise ValueError("Voronoi seed points must be finite")
+
+        if seeds.shape[0] == 0:
+            nearest_distance = np.full(centers.shape[0], np.inf)
+        else:
+            seed_tree = BallTree(seeds)
+            nearest_distance = seed_tree.query(centers, k=1)[0].reshape(-1)
+
+        values = np.asarray(self.__call__(centers)).reshape(-1)
+        eligible = np.isfinite(values)
+        eligible &= values >= float(implicit_range[0])
+        eligible &= values <= float(implicit_range[1])
+        if volume_threshold is not None:
+            if not np.isfinite(volume_threshold) or volume_threshold < 0:
+                raise ValueError("volume_threshold must be finite and non-negative")
+            eligible &= nearest_distance <= float(volume_threshold)
+        if threshold is not None and (
+            not np.isfinite(threshold) or threshold < 0
+        ):
+            raise ValueError("threshold must be finite and non-negative")
+
+        selected = []
+        available = eligible.copy()
+        for _ in range(min(int(n), int(np.count_nonzero(eligible)))):
+            candidates = np.flatnonzero(available)
+            if threshold is not None:
+                candidates = candidates[
+                    nearest_distance[candidates] > float(threshold)
+                ]
+            if candidates.size == 0:
+                break
+            selected_id = int(candidates[np.argmax(nearest_distance[candidates])])
+            selected.append(selected_id)
+            available[selected_id] = False
+            distance_to_selected = np.linalg.norm(
+                centers - centers[selected_id],
+                axis=1,
+            )
+            nearest_distance = np.minimum(nearest_distance, distance_to_selected)
+
+        cell_ids = np.asarray(selected, dtype=np.int64)
+        return centers[cell_ids].copy(), cell_ids
 
     def get_boundary_points(self, n, method=None, **kwargs):
         """
