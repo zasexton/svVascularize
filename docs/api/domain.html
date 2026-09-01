@@ -177,12 +177,22 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                             <tr>
                                 <td><code>boundary</code></td>
                                 <td>pv.PolyData</td>
-                                <td>Boundary mesh of the domain</td>
+                                <td>The exact boundary surface used to create the current interior mesh</td>
+                            </tr>
+                            <tr>
+                                <td><code>original_boundary</code></td>
+                                <td>pv.PolyData</td>
+                                <td>Unmodified imported surface retained as source provenance</td>
                             </tr>
                             <tr>
                                 <td><code>mesh</code></td>
                                 <td>pv.UnstructuredGrid</td>
                                 <td>Interior tetrahedral/triangular mesh</td>
+                            </tr>
+                            <tr>
+                                <td><code>mesh_build_report</code></td>
+                                <td>TetrahedralizationReport or None</td>
+                                <td>Ordered strategies, surface checks, versions, and bounded TetGen diagnostics from the latest 3D mesh build</td>
                             </tr>
                             <tr>
                                 <td><code>patches</code></td>
@@ -282,7 +292,7 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
 
                         <div class="api-method">
                             <div class="api-method-signature">
-                                <code>build(resolution=25, skip_boundary=False)</code>
+                                <code>build(resolution=25, skip_boundary=False, **interior_kwargs)</code>
                             </div>
                             <p>Build the implicit function describing the domain and optionally extract boundary/mesh artifacts.</p>
                             <div class="api-method-params">
@@ -290,6 +300,7 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                                 <ul>
                                     <li><code>resolution</code> (int, default=25): Grid resolution for boundary extraction.</li>
                                     <li><code>skip_boundary</code> (bool, default=False): If true, only assemble fast-evaluation structures and skip boundary and interior mesh generation.</li>
+                                    <li><code>**interior_kwargs</code>: Options forwarded to <code>get_interior()</code>, including the bounded surface-recovery controls below.</li>
                                 </ul>
                             </div>
                         </div>
@@ -346,7 +357,7 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                                 <h4>Parameters</h4>
                                 <ul>
                                     <li><code>resolution</code> (int): Grid resolution for marching cubes/squares</li>
-                                    <li><code>get_largest</code> (bool, default=True): Reserved (current implementation always returns the largest connected component)</li>
+                                    <li><code>get_largest</code> (bool, default=True): Keep only the largest connected component during initial boundary extraction. Set to false to retain all components.</li>
                                 </ul>
                                 <h4>Returns</h4>
                                 <ul>
@@ -360,17 +371,37 @@ boundary_points = domain.get_boundary_points(n=500)</code></pre>
                             <div class="api-method-signature">
                                 <code>get_interior(verbose=False, **kwargs)</code>
                             </div>
-                            <p>Generate tetrahedral (3D) or triangular (2D) mesh of the interior.</p>
+                            <p>Generate a tetrahedral (3D) or triangular (2D) interior mesh. In 3D, geometry-related TetGen failures use a validated, component-preserving recovery pipeline.</p>
                             <div class="api-method-params">
                                 <h4>Parameters</h4>
                                 <ul>
                                     <li><code>verbose</code> (bool): Print mesh generation progress</li>
                                     <li><code>**kwargs</code>: Parameters passed to TetGen/Triangle</li>
+                                    <li><code>repair_on_failure</code> (bool, default=True): Retry a geometry rejection after component-preserving MeshFix repair.</li>
+                                    <li><code>repair_max_distance_ratio</code> (float, default=0.01): Maximum symmetric repair displacement and bounds change, measured against the source bounding-box diagonal.</li>
+                                    <li><code>remesh_on_failure</code> (bool, default=True): Enable validated PyACVD as the final fallback after the original and MeshFix candidates.</li>
+                                    <li><code>remesh_subdivisions</code>, <code>remesh_clusters</code>, <code>remesh_clean_tolerance</code>: Configure the optional PyACVD stage.</li>
                                 </ul>
                                 <h4>Returns</h4>
                                 <ul>
                                     <li><code>mesh</code> (pv.UnstructuredGrid): Interior mesh</li>
                                 </ul>
+                                <h4>Recovery and provenance</h4>
+                                <p>
+                                    The original surface is tried first with the caller's TetGen options. A valid
+                                    first attempt returns immediately. After a geometry rejection, MeshFix runs with
+                                    component joining and component removal disabled. Candidates must remain closed,
+                                    manifold, finite, triangular, component-preserving, and within the configured
+                                    displacement bound. PyACVD output is checked by the same policy and is repaired
+                                    before TetGen when necessary; unsafe candidates are recorded and rejected.
+                                </p>
+                                <p>
+                                    When recovery succeeds, <code>boundary</code>, boundary sampling arrays, and the
+                                    extracted volume-mesh surface all describe the selected recovery geometry.
+                                    <code>original_boundary</code> remains unchanged. Inspect
+                                    <code>mesh_build_report.selected_strategy</code> and
+                                    <code>mesh_build_report.attempts</code> for provenance and diagnostics.
+                                </p>
                             </div>
                         </div>
                     </div>

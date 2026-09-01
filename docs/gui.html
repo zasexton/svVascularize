@@ -43,6 +43,7 @@
       <li><a href="#capabilities">What the GUI can do</a></li>
       <li><a href="#navigation">How to navigate the interface</a></li>
       <li><a href="#workflow">A typical workflow</a></li>
+      <li><a href="#domain-meshing">Domain meshing and recovery</a></li>
     </ul>
 
     <h2 id="capabilities">What The GUI Can Do</h2>
@@ -185,6 +186,34 @@
       <pre data-copy><code>python -m svv.visualize.gui
 python -m svv.visualize.gui --domain path/to/domain.dmn</code></pre>
       <p style="margin:0">If point-picking does not work, ensure the domain was created/solved/built before loading.</p>
+    </div>
+
+    <h2 id="domain-meshing">Domain Meshing And Recovery</h2>
+    <p>
+      Loading a 3D mesh runs the domain create, solve, and build stages. The imported surface is sent to TetGen first.
+      If TetGen detects a geometry problem, the GUI automatically tries a component-preserving MeshFix repair and then
+      a validated PyACVD fallback. A recovered surface is accepted only when it is finite, triangular, closed,
+      manifold, preserves connected components, and stays within the configured geometric-fidelity bound.
+    </p>
+    <p>
+      A successful recovery is reported in the status bar as a build completed after surface repair; it does not open
+      a blocking success dialog. The working domain boundary is updated to the exact surface that generated the volume
+      mesh, while the imported surface remains available as <code>original_boundary</code>.
+    </p>
+    <div class="callout warning">
+      <strong>If interior meshing still fails:</strong>
+      <ul>
+        <li>Read the short cause and suggested action in the warning dialog.</li>
+        <li>Expand <em>Show Details</em> to see each attempted strategy, topology counts, TetGen version/options, return code or signal, and representative facet or segment identifiers.</li>
+        <li>For intersecting facets, repair self-intersections in the source model and retry.</li>
+        <li>For an open or non-manifold candidate, close holes and correct non-manifold edges without deleting required components.</li>
+        <li>For a worker or dependency failure, verify the TetGen, PyMeshFix, PyACVD, PyVista, and Python environment.</li>
+      </ul>
+      <p style="margin-bottom:0">
+        Python callers can disable individual recovery stages or tighten the default 1% displacement limit with
+        <code>repair_on_failure</code>, <code>remesh_on_failure</code>, and
+        <code>repair_max_distance_ratio</code>. The GUI retains the structured build report for troubleshooting.
+      </p>
     </div>
 
     <div class="callout warning">

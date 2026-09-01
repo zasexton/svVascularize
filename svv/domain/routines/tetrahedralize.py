@@ -579,16 +579,25 @@ def tetrahedralize(surface: pv.PolyData,
                    return_result: bool = False,
                    **tet_kwargs):
     """
-    Tetrahedralize a surface mesh using TetGen.
+    Tetrahedralize a surface mesh using isolated TetGen worker processes.
+
+    The unchanged, prepared surface is tried first. Geometry rejections then
+    use a component-preserving MeshFix repair, followed by a validated PyACVD
+    candidate as the final optional fallback. Recovery candidates must be
+    closed, manifold, triangular, component-preserving, and within the
+    configured displacement and bounds envelope. The caller's TetGen options
+    are unchanged across attempts, and the input surface is never mutated.
 
     Parameters
     ----------
-    surface_mesh : PyMesh mesh object
-        The surface mesh to tetrahedralize.
-    verbose : bool
-        A flag to indicate if mesh fixing should be verbose.
-    kwargs : dict
-        A dictionary of keyword arguments to be passed to TetGen.
+    surface : pyvista.DataSet
+        Surface mesh to tetrahedralize. A deep triangular copy is prepared.
+    *tet_args
+        Positional arguments forwarded unchanged to TetGen.
+    worker_script : str
+        Worker entry point used to isolate native TetGen calls.
+    python_exe : str
+        Python interpreter used for the worker process.
     repair_on_failure : bool
         If True, retry a geometry-related TetGen failure after a
         component-preserving PyMeshFix repair.
@@ -603,12 +612,26 @@ def tetrahedralize(surface: pv.PolyData,
         Number of PyACVD clusters used by the retry path.
     remesh_clean_tolerance : float
         PyVista clean tolerance applied before and after PyACVD remeshing.
+    return_result : bool
+        Return a ``TetrahedralizationResult`` containing the selected surface
+        and structured report instead of the historical three-value tuple.
+    **tet_kwargs
+        Keyword arguments forwarded unchanged to every TetGen meshing attempt.
 
     Returns
     -------
     tuple or TetrahedralizationResult
         The historical ``(grid, nodes, elements)`` tuple, or a rich result
         when ``return_result=True``.
+
+    Raises
+    ------
+    TetGenWorkerError
+        If worker launch, dependencies, serialization, or result validation
+        fails. Infrastructure failures do not start geometry recovery.
+    TetrahedralizationError
+        If every enabled safe geometry strategy fails. The exception carries
+        the ordered ``report`` used by the GUI and troubleshooting tools.
     """
     if not isinstance(repair_on_failure, bool):
         raise ValueError("repair_on_failure must be a boolean")

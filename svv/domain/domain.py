@@ -357,7 +357,10 @@ class Domain(object):
             only assemble fast‑evaluation structures. Default False.
         interior_kwargs : dict, optional
             Additional keyword arguments forwarded to get_interior(), including
-            TetGen options and remeshing fallback controls.
+            TetGen options and the bounded ``repair_on_failure``,
+            ``repair_max_distance_ratio``, and remeshing controls. In 3D,
+            ``original_boundary`` remains the imported source while ``boundary``
+            is aligned with the surface that produced the volume mesh.
         """
         # If this Domain was loaded from a .dmn file, it already has
         # A/B/C/D/PTS and possibly a function_tree. In that case, skip
@@ -848,7 +851,14 @@ class Domain(object):
 
     def get_interior(self, verbose=False, **kwargs):
         """
-        Tetrahedralize the implicit function describing the domain
+        Tetrahedralize the implicit function describing the domain.
+
+        In 3D, the original boundary is tried first with ``order=1`` and
+        ``nobisect=True``. Geometry-related failures use bounded,
+        component-preserving MeshFix recovery and an optional validated PyACVD
+        fallback. Successful state is installed atomically from the exact
+        selected surface; ``original_boundary`` is retained unchanged and the
+        ordered attempt record is stored in ``mesh_build_report``.
 
         Parameters
         ----------
@@ -864,6 +874,15 @@ class Domain(object):
         -------
         mesh : PyMesh mesh object
             The tetrahedralized mesh.
+
+        Raises
+        ------
+        TetGenWorkerError
+            If the isolated worker or its dependencies fail.
+        TetrahedralizationError
+            If all enabled safe surface strategies fail.
+        ValueError
+            If the returned volume mesh or selected surface fails validation.
         """
         if self.boundary is None:
             raise ValueError("Boundary not defined. Call get_boundary() method first.")
